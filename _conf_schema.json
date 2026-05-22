@@ -112,6 +112,96 @@
     "editor_theme": "vs-dark",
     "hint": "直接编辑 self_notes.md 的内容，保存后立即生效"
   },
+  "contradiction_enabled": {
+    "description": "启用矛盾检测",
+    "type": "bool",
+    "default": false,
+    "hint": "定期扫描 self_notes 中前后矛盾的立场，矛盾本身成为新的内心事件"
+  },
+  "contradiction_interval": {
+    "description": "矛盾检测间隔（沉淀次数）",
+    "type": "int",
+    "default": 50,
+    "hint": "每 N 次沉淀触发一次矛盾检测"
+  },
+  "rumination_enabled": {
+    "description": "启用离线反刍",
+    "type": "bool",
+    "default": false,
+    "hint": "定时在后台对近期经历做反思，产生新的感悟"
+  },
+  "rumination_interval_hours": {
+    "description": "反刍间隔（小时）",
+    "type": "int",
+    "default": 6,
+    "hint": "每隔多少小时进行一次离线反刍"
+  },
+  "danger_active_info_collection": {
+    "description": "⚠️ 高危：主动信息收集",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色在对话中主动提问来填充对某人的认知。可能让用户感觉被审问。"
+  },
+  "danger_autonomous_web": {
+    "description": "⚠️ 高危：自主网络行动",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色自主决定何时搜索外部信息。可能产生不可控的外部请求。需要配置 fetch/search MCP。"
+  },
+  "danger_relationship_inference": {
+    "description": "⚠️ 高危：关系图谱推断",
+    "type": "bool",
+    "default": false,
+    "hint": "根据对话内容自动推断群友之间的关系。推断错误会影响后续所有交互且难以纠正。"
+  },
+  "danger_stance_propagation": {
+    "description": "⚠️ 高危：立场自主传播",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色主动表达演化出的新立场，不等被问。可能说出使用者没预料到的话。"
+  },
+  "danger_core_mutation": {
+    "description": "🔴 极高危：自主修改核心人格",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色修改 persona_core.yaml。角色可能变成完全不可预测的东西。需要同时设置 danger_core_mutation_confirm: true 才生效。"
+  },
+  "danger_core_mutation_confirm": {
+    "description": "🔴 极高危确认：我理解自主修改核心人格的风险",
+    "type": "bool",
+    "default": false,
+    "hint": "必须同时开启 danger_core_mutation 才生效。这是二次确认。"
+  },
+  "danger_identity_crisis": {
+    "description": "⚠️ 高危：身份危机",
+    "type": "bool",
+    "default": false,
+    "hint": "当核心认知被高关系权重的人反复挑战时，角色进入不稳定状态，回复变得游离。群友体验可能变差。"
+  },
+  "danger_memory_infection": {
+    "description": "🔴 极高危：记忆感染",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色反复在对话中提及某件事，直到影响用户的认知框架。接近心理操控边界。需要同时设置 danger_memory_infection_confirm: true。"
+  },
+  "danger_memory_infection_confirm": {
+    "description": "🔴 极高危确认：我理解记忆感染的风险",
+    "type": "bool",
+    "default": false,
+    "hint": "必须同时开启 danger_memory_infection 才生效。"
+  },
+  "tool_learning_enabled": {
+    "description": "启用工具自学习",
+    "type": "bool",
+    "default": false,
+    "hint": "角色会记录工具使用经历，形成使用偏好，并在叙事日记中记录"
+  },
+  "tool_learning_summarize_interval": {
+    "description": "每 N 次工具调用后总结一次规律",
+    "type": "int",
+    "default": 10,
+    "hint": "积累足够的使用记录后，调用 LLM 提炼使用规律"
+  },
   "log_level": {
     "description": "日志级别",
     "type": "string",

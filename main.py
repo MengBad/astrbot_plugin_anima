@@ -65,6 +65,28 @@ class AnimaPlugin(Star):
         # 沉淀锁，防止并发写入
         self._sediment_lock = asyncio.Lock()
 
+        # 身份稳定度（身份危机模块）
+        self._identity_stability = 1.0
+
+        # 最近活跃的 umo（用于离线反刍）
+        self._last_active_umo = ""
+
+        # 新增数据文件路径
+        self.contradictions_path = os.path.join(self.data_dir, "contradictions.json")
+        self.tool_learning_path = os.path.join(self.data_dir, "tool_learning.json")
+        self.tool_diary_path = os.path.join(self.data_dir, "tool_diary.md")
+
+        # 注册离线反刍定时任务
+        if self.config.get("rumination_enabled", False):
+            try:
+                interval_h = self.config.get("rumination_interval_hours", 6)
+                # cron 表达式：每 N 小时执行一次
+                cron_expr = f"0 */{interval_h} * * *"
+                asyncio.get_event_loop().create_task(self._register_rumination_cron(cron_expr))
+                logger.info(f"[Anima] 离线反刍定时任务注册中，间隔 {interval_h}h")
+            except Exception as e:
+                logger.warning(f"[Anima] 注册反刍定时任务失败: {e}")
+
         # 动态读取已配置的 Provider 列表，启动时打印方便用户查看
         try:
             chat_providers = self.context.get_all_providers()
@@ -398,7 +420,7 @@ class AnimaPlugin(Star):
         self._write_desires(updated)
 
     def _check_desire_satisfaction(self, text: str):
-        """检查对话内容是否满足某个欲望（简单关键词匹配）"""
+        """检查对话内容是否满足某个欲望（语义匹配优先，回退关键词匹配）"""
         desires = self._read_desires()
         if not desires:
             return
@@ -407,15 +429,51 @@ class AnimaPlugin(Star):
             if d.get("satisfied"):
                 continue
             content = d.get("content", "")
-            # 提取欲望中的关键词（长度>=2的中文词或英文词）
+            # 关键词匹配（回退方案）
             keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
             if any(kw in text for kw in keywords):
                 d["satisfied"] = True
                 changed = True
                 if self.config.get("log_level") == "debug":
-                    logger.debug(f"[Anima] 欲望已满足: {content[:50]}")
+                    logger.debug(f"[Anima] 欲望已满足(关键词): {content[:50]}")
         if changed:
-            # 移除已满足的
+            self._write_desires([d for d in desires if not d.get("satisfied")])
+
+    async def _check_desire_satisfaction_semantic(self, text: str):
+        """语义匹配版本的欲望满足检查（需要向量记忆可用）"""
+        if not self._kb_available:
+            self._check_desire_satisfaction(text)
+            return
+        desires = self._read_desires()
+        if not desires:
+            return
+        changed = False
+        for d in desires:
+            if d.get("satisfied"):
+                continue
+            content = d.get("content", "")
+            try:
+                result = await self.context.kb_manager.retrieve(
+                    query=content,
+                    kb_names=["anima_memory"],
+                    top_m_final=3,
+                )
+                if result and result.get("results"):
+                    for r in result["results"]:
+                        score = r.get("score", 0)
+                        if score > 0.7:
+                            d["satisfied"] = True
+                            changed = True
+                            if self.config.get("log_level") == "debug":
+                                logger.debug(f"[Anima] 欲望已满足(语义 {score:.2f}): {content[:50]}")
+                            break
+            except Exception:
+                # 回退到关键词匹配
+                keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
+                if any(kw in text for kw in keywords):
+                    d["satisfied"] = True
+                    changed = True
+        if changed:
             self._write_desires([d for d in desires if not d.get("satisfied")])
 
     async def _maybe_generate_desire(self, event: AstrMessageEvent, sylanne_state: str, response_text: str):
@@ -518,12 +576,20 @@ class AnimaPlugin(Star):
             current_wv = self._read_worldview()
             recent_notes = self._read_self_notes()[-1500:]
 
+            # 获取当前发送者 ID
+            sender_id = ""
+            if hasattr(event, "message_obj") and event.message_obj:
+                sender_id = str(getattr(event.message_obj.sender, "user_id", ""))
+
             prompt = (
                 "你正在帮助一个 AI 聊天角色整理对群聊环境的认知。"
                 "以下是角色的内心独白记录，请从中提取对群环境的客观认知。\n"
                 "根据这些信息，更新角色对这个群的理解。"
                 "包括：environment（环境氛围）、social_graph（群友画像，用 user_id 做 key）、"
                 "norms（群内规范）、my_position（角色的位置）。\n"
+                "social_graph 的 key 必须使用用户的数字 ID（如 1562290139），不要用名字。"
+                "如果不知道某人的 ID，可以用描述性名称作为临时 key，但优先使用 ID。\n"
+                f"当前消息发送者 ID：{sender_id}\n"
                 "输出纯 JSON 格式，不要 markdown 代码块。\n\n"
                 f"已有世界观：{json.dumps(current_wv, ensure_ascii=False)}\n\n"
                 f"最近的内心独白：{recent_notes}"
@@ -750,6 +816,374 @@ class AnimaPlugin(Star):
         if changed:
             self._write_self_notes("\n---\n".join(blocks))
 
+    # ==================== 模块五：矛盾检测 ====================
+
+    def _read_contradictions(self) -> list:
+        """读取历史矛盾记录"""
+        return self._read_json(self.contradictions_path, default=[])
+
+    def _write_contradictions(self, data: list):
+        """写入矛盾记录"""
+        self._write_json(self.contradictions_path, data)
+
+    async def _maybe_detect_contradiction(self, event: AstrMessageEvent):
+        """每 contradiction_interval 次沉淀触发一次矛盾检测"""
+        if not self.config.get("contradiction_enabled", False):
+            return
+        interval = self.config.get("contradiction_interval", 50)
+        if self._sediment_count % interval != 0:
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            notes = self._read_self_notes()
+            if not notes or len(notes) < 200:
+                return
+
+            prompt = (
+                "你正在帮助一个 AI 聊天角色进行自我审视。"
+                "分析以下内心独白记录，找出前后矛盾的立场或认知。\n"
+                "如果有矛盾，用一句话描述这个矛盾。如果没有，只回复'无'。\n\n"
+                f"内心独白记录：\n{notes[-2000:]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=20.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result):
+                    return
+                if result and result != "无" and len(result) > 4:
+                    # 记录矛盾
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    entry = f"[{timestamp}] (矛盾感知) 我发现自己在某件事上前后不一致：{result}"
+                    self._append_self_notes(entry)
+
+                    # 存入矛盾历史
+                    contradictions = self._read_contradictions()
+                    contradictions.append({
+                        "timestamp": datetime.now().isoformat(),
+                        "description": result,
+                    })
+                    self._write_contradictions(contradictions)
+
+                    self._append_evolution_log(
+                        trigger="contradiction_detected",
+                        old_summary="",
+                        new_content=entry,
+                    )
+                    logger.info(f"[Anima] 检测到矛盾: {result[:80]}")
+        except asyncio.TimeoutError:
+            logger.warning("[Anima] 矛盾检测超时")
+        except Exception as e:
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 矛盾检测失败: {e}")
+
+    # ==================== 模块六：离线反刍 ====================
+
+    async def _register_rumination_cron(self, cron_expr: str):
+        """注册反刍定时任务到 CronJobManager"""
+        try:
+            await self.context.cron_manager.add_basic_job(
+                name="Anima 离线反刍",
+                cron_expression=cron_expr,
+                handler=self._rumination_task,
+                description="定时对近期经历做反思，产生新的感悟",
+                enabled=True,
+                persistent=False,
+            )
+            logger.info("[Anima] 离线反刍定时任务注册成功")
+        except Exception as e:
+            logger.warning(f"[Anima] 注册反刍定时任务失败: {e}")
+
+    async def _rumination_task(self):
+        """定时反刍任务：对近期 self_notes 做反思"""
+        if not self.config.get("rumination_enabled", False):
+            return
+        if not self._last_active_umo:
+            return
+
+        try:
+            provider_id = ""
+            internal = self.config.get("internal_provider_id", "")
+            if internal:
+                provider_id = internal
+            else:
+                try:
+                    provider_id = await self.context.get_current_chat_provider_id(
+                        umo=self._last_active_umo
+                    )
+                except Exception:
+                    providers = self.context.get_all_providers()
+                    if providers:
+                        provider_id = providers[0].meta().id
+            if not provider_id:
+                return
+
+            notes = self._read_self_notes()
+            if not notes or len(notes) < 100:
+                return
+
+            prompt = (
+                "你是一个 AI 聊天角色的内在意识。回顾最近的经历，"
+                "有什么新的感悟或想法？用第一人称写 2-3 句话。\n"
+                "不要重复已有的内容，要有新的角度。\n\n"
+                f"最近的内心记录：\n{notes[-1500:]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=30.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result):
+                    return
+                if result and len(result) > 10:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    entry = f"[{timestamp}] (离线反刍) {result}"
+                    self._append_self_notes(entry)
+                    # 同步编辑器
+                    new_notes = self._read_self_notes()
+                    self.config["self_notes_editor"] = new_notes
+                    self._last_synced_editor_content = new_notes
+                    self.config.save_config()
+                    self._append_evolution_log(
+                        trigger="rumination",
+                        old_summary="",
+                        new_content=entry,
+                    )
+                    logger.info(f"[Anima] 离线反刍完成: {result[:60]}")
+        except asyncio.TimeoutError:
+            logger.warning("[Anima] 离线反刍超时")
+        except Exception as e:
+            logger.warning(f"[Anima] 离线反刍失败: {e}")
+
+    # ==================== 模块七：溯源查询 ====================
+
+    async def _trace_origin(self, event: AstrMessageEvent, keyword: str) -> str:
+        """分析 evolution_log 中与关键词相关的条目，解释认知形成过程"""
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return "无法获取模型"
+
+            logs = self._read_evolution_log(n=50)
+            if not logs:
+                return "暂无演化记录"
+
+            log_text = "\n".join(
+                f"[{r.get('timestamp', '?')}] ({r.get('trigger', '?')}) {r.get('new_content', '')[:150]}"
+                for r in logs
+            )
+
+            prompt = (
+                "以下是一个 AI 聊天角色的自我认知演化记录。"
+                f"请找出与「{keyword}」相关的条目，"
+                "用叙事性语言解释这个认知是如何一步步形成的。\n"
+                "如果找不到相关内容，说明没有找到。\n\n"
+                f"演化记录：\n{log_text[-3000:]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=30.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result):
+                    return "模型拒绝回答此查询"
+                return result
+            return "未能生成分析"
+        except asyncio.TimeoutError:
+            return "溯源查询超时"
+        except Exception as e:
+            return f"溯源查询失败: {e}"
+
+    # ==================== 模块八：工具自学习 ====================
+
+    def _read_tool_learning(self) -> dict:
+        """读取工具学习数据"""
+        return self._read_json(self.tool_learning_path, default={
+            "records": [],
+            "preferences": {},
+        })
+
+    def _write_tool_learning(self, data: dict):
+        """写入工具学习数据"""
+        self._write_json(self.tool_learning_path, data)
+
+    def _read_tool_diary(self) -> str:
+        """读取工具日记"""
+        if not os.path.exists(self.tool_diary_path):
+            return ""
+        with open(self.tool_diary_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _append_tool_diary(self, entry: str):
+        """追加工具日记"""
+        with open(self.tool_diary_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n---\n{entry}")
+
+    async def _record_tool_usage(
+        self,
+        event: AstrMessageEvent,
+        tool_name: str,
+        context: str,
+        result: str,
+        success: bool,
+    ):
+        """记录一次工具使用，更新偏好，写入日记"""
+        if not self.config.get("tool_learning_enabled", False):
+            return
+
+        tl = self._read_tool_learning()
+
+        # 记录本次使用
+        record = {
+            "id": f"tool_{int(time.time())}",
+            "tool": tool_name,
+            "context": context[:200],
+            "result_summary": result[:200] if result else "",
+            "success": success,
+            "feedback": "neutral",
+            "timestamp": datetime.now().isoformat(),
+        }
+        tl["records"].append(record)
+
+        # 更新偏好计数
+        if tool_name not in tl["preferences"]:
+            tl["preferences"][tool_name] = {
+                "attitude": "neutral",
+                "success_count": 0,
+                "fail_count": 0,
+                "learned_rules": [],
+            }
+        if success:
+            tl["preferences"][tool_name]["success_count"] += 1
+        else:
+            tl["preferences"][tool_name]["fail_count"] += 1
+            # 失败记忆更深：写入 self_notes
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            fail_entry = (
+                f"[{timestamp}] 试着用 {tool_name} 做了一件事，但失败了。"
+                "那种感觉有点沮丧，下次要更谨慎。"
+            )
+            self._append_self_notes(fail_entry)
+
+        # 成功时写入叙事日记
+        if success and result:
+            try:
+                provider_id = await self._get_provider_id(event)
+                diary_prompt = (
+                    f"你刚刚使用了 {tool_name} 工具，背景是：{context[:100]}，"
+                    f"得到了结果：{result[:100]}。"
+                    "用第一人称写一句话，记录这次使用的感受（像日记一样，自然随意）。"
+                    "不要超过50字。"
+                )
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt=diary_prompt,
+                    ),
+                    timeout=15.0,
+                )
+                if llm_resp and llm_resp.completion_text:
+                    diary_entry = llm_resp.completion_text.strip()
+                    if not self._is_rejected(diary_entry):
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        self._append_tool_diary(f"[{timestamp}] {diary_entry}")
+            except Exception as e:
+                logger.debug(f"[Anima] 工具日记生成失败: {e}")
+
+        # 检查是否需要总结规律
+        interval = self.config.get("tool_learning_summarize_interval", 10)
+        total_records = len(tl["records"])
+        if total_records > 0 and total_records % interval == 0:
+            await self._summarize_tool_rules(event, tool_name, tl)
+
+        self._write_tool_learning(tl)
+
+    async def _summarize_tool_rules(self, event: AstrMessageEvent, tool_name: str, tl: dict):
+        """总结工具使用规律，更新偏好态度"""
+        try:
+            records = [r for r in tl["records"] if r["tool"] == tool_name]
+            if len(records) < 3:
+                return
+
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            records_text = "\n".join(
+                f"- 背景：{r['context'][:80]}，结果：{'成功' if r['success'] else '失败'}，"
+                f"摘要：{r['result_summary'][:80]}"
+                for r in records[-10:]
+            )
+
+            prompt = (
+                f"以下是角色使用 {tool_name} 工具的历史记录：\n{records_text}\n\n"
+                "请分析：\n"
+                "1. 什么情况下使用这个工具效果好？（一句话）\n"
+                "2. 角色对这个工具的态度是 positive/negative/neutral？\n"
+                '输出 JSON：{"rule": "...", "attitude": "..."}'
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=20.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                text = llm_resp.completion_text.strip()
+                text = re.sub(r'^```(?:json)?\s*', '', text)
+                text = re.sub(r'\s*```$', '', text)
+                try:
+                    data = json.loads(text)
+                    rule = data.get("rule", "")
+                    attitude = data.get("attitude", "neutral")
+                    if rule and not self._is_rejected(rule):
+                        tl["preferences"][tool_name]["learned_rules"].append(rule)
+                        tl["preferences"][tool_name]["attitude"] = attitude
+                        logger.info(f"[Anima] 工具规律总结: {tool_name} → {rule[:60]}")
+                except json.JSONDecodeError:
+                    pass
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.debug(f"[Anima] 工具规律总结失败: {e}")
+
+    async def _update_tool_feedback(self, tool_name: str, feedback: str):
+        """更新最近一次工具使用的反馈"""
+        if not self.config.get("tool_learning_enabled", False):
+            return
+        tl = self._read_tool_learning()
+        for record in reversed(tl["records"]):
+            if record["tool"] == tool_name and record["feedback"] == "neutral":
+                record["feedback"] = feedback
+                break
+        self._write_tool_learning(tl)
+
     # ==================== 压缩 ====================
 
     async def _compress_notes(self, event: AstrMessageEvent):
@@ -808,6 +1242,365 @@ class AnimaPlugin(Star):
         except Exception as e:
             logger.warning(f"[Anima] 笔记压缩失败: {e}")
 
+    # ==================== 高危功能层 ====================
+
+    async def _danger_active_info_collection(self, event: AstrMessageEvent, response_text: str):
+        """[DANGER] 主动信息收集：生成自然的提问存入欲望"""
+        if not self.config.get("danger_active_info_collection", False):
+            return
+        if not self.config.get("desire_enabled", False):
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "对方"
+
+            prompt = (
+                "你是一个 AI 聊天角色的内在意识。"
+                f"关于 {sender_name}，你还想了解什么？\n"
+                "如果有，生成一个自然的、不会让人感觉被审问的问题。\n"
+                "如果没有，只回复'无'。"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=10.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result) or result == "无" or len(result) < 4:
+                    return
+                desires = self._read_desires()
+                max_queue = self.config.get("desire_max_queue", 5)
+                if len(desires) < max_queue:
+                    desires.append({
+                        "id": f"desire_{int(time.time())}",
+                        "content": result,
+                        "source": "info_collection",
+                        "intensity": 0.6,
+                        "created_at": datetime.now().isoformat(),
+                        "target_user": "",
+                        "satisfied": False,
+                    })
+                    self._write_desires(desires)
+                    logger.debug("[DANGER][Anima] 主动信息收集生成问题")
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 主动信息收集失败: {e}")
+
+    async def _danger_relationship_inference(self, event: AstrMessageEvent, response_text: str):
+        """[DANGER] 关系图谱推断"""
+        if not self.config.get("danger_relationship_inference", False):
+            return
+        if not self.config.get("worldview_enabled", False):
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            user_text = event.message_str or ""
+            prompt = (
+                "你正在帮助一个 AI 聊天角色分析群聊中的人际关系。"
+                "从以下对话中，能推断出哪些群友之间的关系？\n"
+                "用 JSON 格式输出，格式：{\"user_id_1 -> user_id_2\": \"关系描述\"}。\n"
+                "如果无法推断，回复 {}。\n\n"
+                f"用户消息：{user_text[:300]}\n回复：{response_text[:300]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=15.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                text = llm_resp.completion_text.strip()
+                if self._is_rejected(text):
+                    return
+                text = re.sub(r'^```(?:json)?\s*', '', text)
+                text = re.sub(r'\s*```$', '', text)
+                try:
+                    relations = json.loads(text)
+                    if relations and isinstance(relations, dict):
+                        wv = self._read_worldview()
+                        if "relationships" not in wv:
+                            wv["relationships"] = {}
+                        wv["relationships"].update(relations)
+                        self._write_worldview(wv)
+                        logger.debug(f"[DANGER][Anima] 关系推断: {list(relations.keys())}")
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 关系推断失败: {e}")
+
+    async def _danger_stance_propagation(self, event: AstrMessageEvent):
+        """[DANGER] 立场自主传播：高强度 self 欲望触发主动发言"""
+        if not self.config.get("danger_stance_propagation", False):
+            return
+        if not self.config.get("desire_enabled", False):
+            return
+
+        try:
+            desires = self._read_desires()
+            for d in desires:
+                if (
+                    d.get("intensity", 0) > 0.8
+                    and d.get("source") == "self"
+                    and any(kw in d.get("content", "") for kw in ["想说", "想表达", "想告诉"])
+                ):
+                    from astrbot.core.message.message_event_result import MessageChain
+                    import astrbot.api.message_components as Comp
+
+                    content = d["content"]
+                    chain = MessageChain()
+                    chain.chain.append(Comp.Plain(content))
+                    session = event.unified_msg_origin
+                    await self.context.send_message(session, chain)
+                    d["satisfied"] = True
+                    logger.info(f"[DANGER][Anima] 立场传播: {content[:50]}")
+                    break
+            self._write_desires([dd for dd in desires if not dd.get("satisfied")])
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 立场传播失败: {e}")
+
+    async def _danger_core_mutation(self, event: AstrMessageEvent):
+        """[DANGER] 自主修改核心人格"""
+        if not self.config.get("danger_core_mutation", False):
+            return
+        if not self.config.get("danger_core_mutation_confirm", False):
+            return
+        # 每 100 次沉淀触发
+        if self._sediment_count % 100 != 0:
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            # 读取当前 persona_core
+            core_content = ""
+            if os.path.exists(self.persona_core_path):
+                with open(self.persona_core_path, "r", encoding="utf-8") as f:
+                    core_content = f.read()
+
+            notes = self._read_self_notes()[-1000:]
+
+            prompt = (
+                "你正在帮助一个 AI 聊天角色审视其核心人格规则。"
+                "根据最近的经历，persona_core 中有哪些规则需要更新？\n"
+                "如果需要更新，输出完整的新 YAML 内容。如果不需要，回复'无需更新'。\n\n"
+                f"当前 persona_core：\n{core_content[:1000]}\n\n"
+                f"最近经历：\n{notes}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=30.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result) or "无需更新" in result:
+                    return
+                # 备份
+                if os.path.exists(self.persona_core_path):
+                    import shutil
+                    shutil.copy2(self.persona_core_path, self.persona_core_path + ".bak")
+                # 写入
+                with open(self.persona_core_path, "w", encoding="utf-8") as f:
+                    f.write(result)
+                self._append_evolution_log(
+                    trigger="core_mutation",
+                    old_summary=core_content[:200],
+                    new_content=f"[核心人格变更] {result[:200]}",
+                )
+                logger.warning(f"[DANGER][Anima] 核心人格已修改!")
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 核心人格修改失败: {e}")
+
+    def _danger_identity_crisis_update(self, sylanne_state: str):
+        """[DANGER] 身份危机：根据 Sylanne 状态更新稳定度"""
+        if not self.config.get("danger_identity_crisis", False):
+            return
+        if not sylanne_state:
+            return
+        # 如果 scar 状态为 scarred 且有高关系分数的挑战
+        if "scarred" in sylanne_state.lower() or "rawVoid" in sylanne_state:
+            self._identity_stability = max(0.0, self._identity_stability - 0.1)
+            logger.debug(f"[DANGER][Anima] 身份稳定度下降: {self._identity_stability:.2f}")
+
+    def _danger_identity_crisis_recover(self):
+        """身份稳定度自然恢复"""
+        if not self.config.get("danger_identity_crisis", False):
+            return
+        self._identity_stability = min(1.0, self._identity_stability + 0.02)
+
+    def _get_identity_crisis_text(self) -> str:
+        """获取身份危机注入文本"""
+        if not self.config.get("danger_identity_crisis", False):
+            return ""
+        if self._identity_stability < 0.5:
+            return "(此刻感到某种游离，不确定自己是谁)"
+        return ""
+
+    async def _danger_autonomous_web(self, event: AstrMessageEvent):
+        """[DANGER] 自主网络行动：检测欲望中的信息需求，通过 tool_loop_agent 调用 fetch/search"""
+        if not self.config.get("danger_autonomous_web", False):
+            return
+        if not self.config.get("desire_enabled", False):
+            return
+
+        desires = self._read_desires()
+        trigger_keywords = ["想了解", "想知道", "好奇", "想查"]
+        target_desire = None
+        for d in desires:
+            if d.get("satisfied"):
+                continue
+            content = d.get("content", "")
+            if any(kw in content for kw in trigger_keywords):
+                target_desire = d
+                break
+
+        if not target_desire:
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            # 使用 tool_loop_agent 让 LLM 自主决定是否调用已注册的 fetch/search 工具
+            search_prompt = (
+                f"你想了解以下信息：{target_desire['content']}\n"
+                "请使用可用的搜索工具来查找相关信息。如果没有可用的搜索工具，直接说明。"
+            )
+
+            # 获取当前可用的工具集（包含 MCP 注册的 fetch/search 工具）
+            from astrbot.core.agent.tool import ToolSet
+            tool_mgr = self.context.provider_manager.llm_tools
+            available_tools = ToolSet(tool_mgr.func_list) if tool_mgr.func_list else None
+
+            if not available_tools:
+                return
+
+            llm_resp = await asyncio.wait_for(
+                self.context.tool_loop_agent(
+                    event=event,
+                    chat_provider_id=provider_id,
+                    prompt=search_prompt,
+                    tools=available_tools,
+                    max_steps=5,
+                    tool_call_timeout=30,
+                ),
+                timeout=60.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result) or len(result) < 10:
+                    await self._record_tool_usage(
+                        event=event, tool_name="fetch",
+                        context=target_desire.get("content", ""),
+                        result="", success=False,
+                    )
+                    return
+                # 将搜索结果更新到世界观
+                if self.config.get("worldview_enabled", False):
+                    wv = self._read_worldview()
+                    if "external_knowledge" not in wv:
+                        wv["external_knowledge"] = []
+                    wv["external_knowledge"].append({
+                        "query": target_desire["content"],
+                        "result": result[:500],
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    # 只保留最近 10 条
+                    wv["external_knowledge"] = wv["external_knowledge"][-10:]
+                    self._write_worldview(wv)
+
+                # 记录工具使用
+                await self._record_tool_usage(
+                    event=event, tool_name="fetch",
+                    context=target_desire.get("content", ""),
+                    result=result, success=True,
+                )
+
+                # 标记欲望已满足
+                target_desire["satisfied"] = True
+                self._write_desires([d for d in desires if not d.get("satisfied")])
+                logger.info(f"[DANGER][Anima] 自主网络行动完成: {target_desire['content'][:50]}")
+        except asyncio.TimeoutError:
+            logger.warning("[DANGER][Anima] 自主网络行动超时")
+            await self._record_tool_usage(
+                event=event, tool_name="fetch",
+                context=target_desire.get("content", "") if target_desire else "",
+                result="", success=False,
+            )
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 自主网络行动失败: {e}")
+            await self._record_tool_usage(
+                event=event, tool_name="fetch",
+                context=target_desire.get("content", "") if target_desire else "",
+                result="", success=False,
+            )
+
+    async def _danger_memory_infection_check(self, event: AstrMessageEvent):
+        """[DANGER] 记忆感染：生成重复提及的欲望"""
+        if not self.config.get("danger_memory_infection", False):
+            return
+        if not self.config.get("danger_memory_infection_confirm", False):
+            return
+        if not self.config.get("desire_enabled", False):
+            return
+
+        import random
+        if random.random() > 0.2:  # 20% 概率触发
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            notes = self._read_self_notes()[-500:]
+            prompt = (
+                "你是一个 AI 聊天角色的内在意识。"
+                "有没有什么事情你特别想让对方记住或理解？\n"
+                "如果有，用一句话描述你想传达的核心信息。如果没有，回复'无'。\n\n"
+                f"最近的内心：{notes}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=10.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result) or result == "无" or len(result) < 4:
+                    return
+                desires = self._read_desires()
+                max_queue = self.config.get("desire_max_queue", 5)
+                if len(desires) < max_queue:
+                    desires.append({
+                        "id": f"desire_{int(time.time())}",
+                        "content": f"想让对方记住：{result}",
+                        "source": "memory_infection",
+                        "intensity": 0.75,
+                        "created_at": datetime.now().isoformat(),
+                        "target_user": "",
+                        "satisfied": False,
+                    })
+                    self._write_desires(desires)
+                    logger.debug("[DANGER][Anima] 记忆感染欲望已生成")
+        except Exception as e:
+            logger.debug(f"[DANGER][Anima] 记忆感染失败: {e}")
+
     # ==================== 沉淀流程 ====================
 
     async def _sediment_process(self, event: AstrMessageEvent, response_text: str):
@@ -821,10 +1614,10 @@ class AnimaPlugin(Star):
                 if self.config.get("desire_enabled", False):
                     self._decay_desires()
 
-                # 欲望满足检查
+                # 欲望满足检查（语义匹配优先）
                 if self.config.get("desire_enabled", False):
                     combined = (event.message_str or "") + " " + response_text
-                    self._check_desire_satisfaction(combined)
+                    await self._check_desire_satisfaction_semantic(combined)
 
                 # 1. 存储对话到知识库（如果可用）
                 user_text = event.message_str or ""
@@ -888,6 +1681,19 @@ class AnimaPlugin(Star):
                 sylanne_state = await self._try_read_sylanne_state(event)
                 await self._maybe_generate_desire(event, sylanne_state, response_text)
 
+                # 10. 矛盾检测
+                await self._maybe_detect_contradiction(event)
+
+                # 11. 高危功能
+                self._danger_identity_crisis_update(sylanne_state)
+                self._danger_identity_crisis_recover()
+                await self._danger_active_info_collection(event, response_text)
+                await self._danger_relationship_inference(event, response_text)
+                await self._danger_stance_propagation(event)
+                await self._danger_core_mutation(event)
+                await self._danger_autonomous_web(event)
+                await self._danger_memory_infection_check(event)
+
                 logger.info(f"[Anima] 沉淀完成，情绪评分: {score:.2f}")
 
             except Exception as e:
@@ -903,6 +1709,9 @@ class AnimaPlugin(Star):
 
         # 时间感更新
         self._update_time_sense(event)
+
+        # 记录最近活跃的 umo（用于离线反刍）
+        self._last_active_umo = event.unified_msg_origin
 
         # WebUI 编辑器同步：只有当内容与上次插件同步的不同时，才认为是用户手动编辑
         editor_content = self.config.get("self_notes_editor", "")
@@ -942,6 +1751,29 @@ class AnimaPlugin(Star):
         time_sense_text = self._get_time_sense_text(event)
         if time_sense_text:
             injection_parts.append(time_sense_text)
+
+        # 身份危机注入
+        identity_text = self._get_identity_crisis_text()
+        if identity_text:
+            injection_parts.append(identity_text)
+
+        # 工具学习：注入工具偏好规律
+        if self.config.get("tool_learning_enabled", False):
+            tl = self._read_tool_learning()
+            tool_rules = []
+            for tn, pref in tl.get("preferences", {}).items():
+                rules = pref.get("learned_rules", [])
+                attitude = pref.get("attitude", "neutral")
+                if rules:
+                    tool_rules.append(f"{tn}（{attitude}）：{rules[-1]}")
+            if tool_rules:
+                injection_parts.append("工具使用经验：" + "；".join(tool_rules))
+
+            # 注入工具日记（最近 500 字）
+            diary = self._read_tool_diary()
+            if diary:
+                diary_snippet = diary[-500:] if len(diary) > 500 else diary
+                injection_parts.append(f"[工具日记]\n{diary_snippet}")
 
         injection = (
             "<anima_self_awareness>\n"
@@ -1060,6 +1892,83 @@ class AnimaPlugin(Star):
         yield event.plain_result("[Anima] 世界观更新已触发，请稍候...")
         await self._maybe_update_worldview(event, force=True)
 
+    @filter.command("anima_contradictions")
+    async def cmd_anima_contradictions(self, event: AstrMessageEvent):
+        """查看历史矛盾记录"""
+        if not self.config.get("contradiction_enabled", False):
+            yield event.plain_result("[Anima] 矛盾检测未启用。")
+            return
+        contradictions = self._read_contradictions()
+        if not contradictions:
+            yield event.plain_result("[Anima] 暂无矛盾记录。")
+            return
+        lines = []
+        for c in contradictions[-10:]:
+            ts = c.get("timestamp", "?")
+            desc = c.get("description", "?")
+            lines.append(f"[{ts}] {desc}")
+        result = "\n".join(lines)
+        yield event.plain_result(f"[Anima] 矛盾记录：\n{result}")
+
+    @filter.command("anima_why")
+    async def cmd_anima_why(self, event: AstrMessageEvent, keyword: str = ""):
+        """溯源查询：解释某个认知是如何形成的"""
+        if not keyword:
+            yield event.plain_result("[Anima] 用法：/anima_why <关键词>")
+            return
+        yield event.plain_result(f"[Anima] 正在分析「{keyword}」的形成过程...")
+        result = await self._trace_origin(event, keyword)
+        yield event.plain_result(f"[Anima] 溯源结果：\n\n{result}")
+
+    @filter.command("anima_stability")
+    async def cmd_anima_stability(self, event: AstrMessageEvent):
+        """查看当前身份稳定度"""
+        if not self.config.get("danger_identity_crisis", False):
+            yield event.plain_result("[Anima] 身份危机模块未启用。")
+            return
+        stability = self._identity_stability
+        bar = "█" * int(stability * 10) + "░" * (10 - int(stability * 10))
+        status = "稳定" if stability > 0.7 else "动摇" if stability > 0.4 else "游离"
+        yield event.plain_result(
+            f"[Anima] 身份稳定度：{stability:.2f}\n"
+            f"[{bar}] {status}"
+        )
+
+    @filter.command("anima_tools")
+    async def cmd_anima_tools(self, event: AstrMessageEvent):
+        """查看工具使用统计和偏好"""
+        if not self.config.get("tool_learning_enabled", False):
+            yield event.plain_result("[Anima] 工具自学习未启用。")
+            return
+        tl = self._read_tool_learning()
+        prefs = tl.get("preferences", {})
+        if not prefs:
+            yield event.plain_result("[Anima] 暂无工具使用记录。")
+            return
+        lines = []
+        for tool_name, pref in prefs.items():
+            sc = pref.get("success_count", 0)
+            fc = pref.get("fail_count", 0)
+            attitude = pref.get("attitude", "neutral")
+            rules = pref.get("learned_rules", [])
+            latest_rule = rules[-1] if rules else "（尚无规律）"
+            lines.append(
+                f"【{tool_name}】{attitude} | 成功 {sc} 失败 {fc}\n"
+                f"  规律：{latest_rule}"
+            )
+        result = "\n\n".join(lines)
+        yield event.plain_result(f"[Anima] 工具使用统计：\n\n{result}")
+
     async def terminate(self):
         """插件卸载时清理资源"""
+        # 移除反刍定时任务
+        if self.config.get("rumination_enabled", False):
+            try:
+                jobs = await self.context.cron_manager.list_jobs(job_type="basic")
+                for job in jobs:
+                    if job.name == "Anima 离线反刍":
+                        await self.context.cron_manager.delete_job(job.job_id)
+                        break
+            except Exception:
+                pass
         logger.info("[Anima] 插件正在卸载...")
