@@ -294,3 +294,9 @@ data/plugin_data/astrbot_plugin_anima/
 - **模块互不依赖**：可以只开欲望不开世界观，随意组合
 - **self_notes.md 是人类可读的**：可以直接打开看角色在想什么，也可以手动编辑
 - **AstrBot 版本要求**：>= v4.25
+
+---
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
