@@ -535,22 +535,33 @@ class AnimaPlugin(Star):
             if self.config.get("log_level") == "debug":
                 logger.debug(f"[Anima] 世界观更新失败: {e}")
 
-    def _get_worldview_text(self) -> str:
-        """获取世界观注入文本"""
+    def _get_worldview_text(self, event: Optional[AstrMessageEvent] = None) -> str:
+        """获取世界观注入文本，包含当前对话者的画像"""
         if not self.config.get("worldview_enabled", False):
             return ""
         wv = self._read_worldview()
         if not wv:
             return ""
+        parts = []
         env = wv.get("environment", "")
         pos = wv.get("my_position", "")
-        if not env and not pos:
-            return ""
-        parts = []
+        norms = wv.get("norms", "")
         if env:
             parts.append(f"对这个世界的理解：{env}")
         if pos:
             parts.append(f"我在这里是：{pos}")
+        if norms:
+            parts.append(f"这里的规矩：{norms}")
+        # 按需注入当前对话者的 social_graph 条目
+        social_graph = wv.get("social_graph", {})
+        if social_graph and event:
+            sender_id = ""
+            if hasattr(event, "message_obj") and event.message_obj:
+                sender_id = str(getattr(event.message_obj.sender, "user_id", ""))
+            if sender_id and sender_id in social_graph:
+                parts.append(f"关于 {sender_id}：{social_graph[sender_id]}")
+        if not parts:
+            return ""
         return "。".join(parts)
 
     # ==================== 模块三：时间感系统 ====================
@@ -589,10 +600,21 @@ class AnimaPlugin(Star):
             ts["last_interaction"] = {}
         ts["last_interaction"][sender_id] = now_str
 
-        # 更新 interaction_frequency（简单计数，每次 +1）
+        # 更新 interaction_frequency（滑动窗口：存储时间戳列表，只保留 24h 内的）
+        if "interaction_timestamps" not in ts:
+            ts["interaction_timestamps"] = {}
+        if sender_id not in ts["interaction_timestamps"]:
+            ts["interaction_timestamps"][sender_id] = []
+        ts["interaction_timestamps"][sender_id].append(now_str)
+        # 清理超过 24h 的时间戳
+        cutoff = (now - timedelta(hours=24)).isoformat()
+        ts["interaction_timestamps"][sender_id] = [
+            t for t in ts["interaction_timestamps"][sender_id] if t > cutoff
+        ]
+        # 同步 interaction_frequency 为当前窗口内的计数
         if "interaction_frequency" not in ts:
             ts["interaction_frequency"] = {}
-        ts["interaction_frequency"][sender_id] = ts["interaction_frequency"].get(sender_id, 0) + 1
+        ts["interaction_frequency"][sender_id] = len(ts["interaction_timestamps"][sender_id])
 
         # session_start：如果为空或超过 4 小时，重置
         if not ts.get("session_start"):
@@ -660,16 +682,48 @@ class AnimaPlugin(Star):
                     entry_time = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M")
                     age_days = (now - entry_time).days
                     if age_days > halflife_days * 3:
-                        # 超过 3 个半衰期：标注为极度模糊，压缩时可丢弃
                         block = block.rstrip() + " (记忆极度模糊，可能已不准确)"
                     elif age_days > halflife_days:
-                        # 超过 1 个半衰期：标注为模糊
                         block = block.rstrip() + " (记忆模糊)"
                 except (ValueError, TypeError):
                     pass
             processed.append(block)
 
         return "\n---\n".join(processed)
+
+    def _awaken_memories(self, related_memories: list):
+        """唤醒被检索命中的旧记忆：将匹配条目的时间戳更新为当前时间"""
+        if not self.config.get("forgetting_enabled", False):
+            return
+        if not related_memories:
+            return
+
+        notes = self._read_self_notes()
+        if not notes:
+            return
+
+        blocks = notes.split("\n---\n")
+        changed = False
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        for i, block in enumerate(blocks):
+            # 检查这个 block 是否与检索到的记忆匹配（取前 50 字符做子串匹配）
+            for mem in related_memories:
+                # 记忆片段的前 50 字符如果出现在 block 中，认为命中
+                snippet = mem[:50] if len(mem) > 50 else mem
+                if snippet and snippet in block:
+                    # 替换时间戳为当前时间
+                    match = re.search(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]', block)
+                    if match:
+                        old_ts = match.group(1)
+                        blocks[i] = block.replace(f"[{old_ts}]", f"[{now_str}]", 1)
+                        changed = True
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 唤醒记忆: {snippet[:30]}...")
+                    break  # 一个 block 只唤醒一次
+
+        if changed:
+            self._write_self_notes("\n---\n".join(blocks))
 
     # ==================== 压缩 ====================
 
@@ -771,6 +825,9 @@ class AnimaPlugin(Star):
                 query = f"{user_text} {response_text[:100]}"
                 related_memories = await self._query_memory(query, n_results=3)
 
+                # 3.5 唤醒被检索命中的旧记忆（重置时间戳）
+                self._awaken_memories(related_memories)
+
                 # 4. 生成内心独白
                 monologue = await self._generate_monologue(
                     event, response_text, related_memories
@@ -853,7 +910,7 @@ class AnimaPlugin(Star):
             injection_parts.append(desires_text)
 
         # 世界观注入
-        worldview_text = self._get_worldview_text()
+        worldview_text = self._get_worldview_text(event)
         if worldview_text:
             injection_parts.append(worldview_text)
 
