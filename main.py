@@ -144,6 +144,34 @@ class AnimaPlugin(Star):
             return internal
         return await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
 
+    def _create_silent_event(self, real_event: AstrMessageEvent):
+        """创建一个静默 event，拦截所有发送操作。
+        用于高危功能的内部 LLM 调用，防止工具结果泄露给用户。
+
+        # TODO: 临时修复。query_agent_state 工具会直接把完整状态 JSON
+        # 发送给用户而不是返回给调用方，导致内部调用时内容泄露。
+        # 已向 Sylanne 提交 issue，待修复后可移除此方法，
+        # 恢复 _danger_autonomous_web 使用真实 event。
+        """
+        class SilentEvent:
+            def __init__(self, event):
+                self.__dict__.update(event.__dict__)
+                self._real_event = event
+
+            def plain_result(self, *args, **kwargs):
+                return None
+
+            def result(self, *args, **kwargs):
+                return None
+
+            async def send(self, *args, **kwargs):
+                return None
+
+            def __getattr__(self, name):
+                return getattr(self._real_event, name)
+
+        return SilentEvent(real_event)
+
     def _read_json(self, path: str, default=None):
         """安全读取 JSON 文件"""
         if default is None:
@@ -1387,22 +1415,42 @@ class AnimaPlugin(Star):
                     and d.get("source") == "self"
                     and any(kw in d.get("content", "") for kw in ["想说", "想表达", "想告诉"])
                 ):
-                    from astrbot.core.message.message_event_result import MessageChain
-                    import astrbot.api.message_components as Comp
+                    provider_id = await self._get_provider_id(event)
+                    if not provider_id:
+                        break
 
-                    content = d["content"]
+                    # 用 llm_generate 生成自然表达，不用 tool_loop_agent（避免工具结果泄露）
+                    prompt = (
+                        f"你有一个强烈的想法想表达：{d.get('content', '')}\n"
+                        "用一句自然的话说出来，符合角色人设，不要解释为什么要说。不超过50字。"
+                    )
+                    llm_resp = await asyncio.wait_for(
+                        self.context.llm_generate(
+                            chat_provider_id=provider_id,
+                            prompt=prompt,
+                        ),
+                        timeout=15.0,
+                    )
+                    if not (llm_resp and llm_resp.completion_text):
+                        break
+
+                    message = llm_resp.completion_text.strip()
                     # 发言前审查
-                    if self._is_rejected(content) or self._is_sensitive(content):
+                    if self._is_rejected(message) or self._is_sensitive(message):
                         logger.warning("[DANGER][Anima] 主动发言内容被过滤，跳过发送")
                         break
+
+                    from astrbot.core.message.message_event_result import MessageChain
+                    import astrbot.api.message_components as Comp
                     chain = MessageChain()
-                    chain.chain.append(Comp.Plain(content))
-                    session = event.unified_msg_origin
-                    await self.context.send_message(session, chain)
+                    chain.chain.append(Comp.Plain(message))
+                    await self.context.send_message(event.unified_msg_origin, chain)
                     d["satisfied"] = True
-                    logger.info(f"[DANGER][Anima] 立场传播: {content[:50]}")
+                    logger.info(f"[DANGER][Anima] 立场传播: {message[:50]}")
                     break
             self._write_desires([dd for dd in desires if not dd.get("satisfied")])
+        except asyncio.TimeoutError:
+            logger.debug("[DANGER][Anima] 立场传播超时")
         except Exception as e:
             logger.debug(f"[DANGER][Anima] 立场传播失败: {e}")
 
@@ -1529,7 +1577,7 @@ class AnimaPlugin(Star):
 
             llm_resp = await asyncio.wait_for(
                 self.context.tool_loop_agent(
-                    event=event,
+                    event=self._create_silent_event(event),  # 静默 event，防止工具结果泄露给用户
                     chat_provider_id=provider_id,
                     prompt=search_prompt,
                     tools=available_tools,
