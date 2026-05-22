@@ -112,6 +112,27 @@ class AnimaPlugin(Star):
         ])
         return any(phrase.lower() in text.lower() for phrase in reject_phrases)
 
+    def _is_sensitive(self, text: str) -> bool:
+        """检查文本是否包含敏感内容（密钥、token、高熵字符串等）"""
+        sensitive_keywords = [
+            '密钥', '秘钥', 'key', 'token', 'password', 'passwd', 'secret',
+            'api_key', 'apikey', 'access_key', 'private_key', 'authorization',
+            'bearer', 'credential', 'auth', '口令', '凭证',
+        ]
+        text_lower = text.lower()
+        if any(kw in text_lower for kw in sensitive_keywords):
+            return True
+        # 检测高熵字符串（可能是密钥/token）：连续30+字母数字，大小写混合
+        match = re.search(r'[A-Za-z0-9]{30,}', text)
+        if match:
+            segment = match.group()
+            has_upper = any(c.isupper() for c in segment)
+            has_lower = any(c.islower() for c in segment)
+            has_digit = any(c.isdigit() for c in segment)
+            if sum([has_upper, has_lower, has_digit]) >= 2:
+                return True
+        return False
+
     async def _get_provider_id(self, event: AstrMessageEvent, prefer: str = "") -> str:
         """获取要使用的 Provider ID。
         优先级：prefer 参数 > internal_provider_id 配置 > 当前对话主模型
@@ -214,7 +235,10 @@ class AnimaPlugin(Star):
                 top_m_final=n_results,
             )
             if result and result.get("results"):
-                return [r["content"] for r in result["results"]]
+                return [
+                    r["content"] for r in result["results"]
+                    if not self._is_sensitive(r.get("content", ""))
+                ]
             return []
         except Exception as e:
             logger.warning(f"[Anima] 向量检索失败: {e}")
@@ -241,6 +265,11 @@ class AnimaPlugin(Star):
 
     def _append_evolution_log(self, trigger: str, old_summary: str, new_content: str):
         """追加演化日志"""
+        # 敏感内容过滤
+        if self._is_sensitive(old_summary):
+            old_summary = "[已过滤敏感内容]"
+        if self._is_sensitive(new_content):
+            new_content = "[已过滤敏感内容]"
         record = {
             "timestamp": datetime.now().isoformat(),
             "trigger": trigger,
@@ -287,8 +316,8 @@ class AnimaPlugin(Star):
                                     state_str = component.text
                                     if self.config.get("log_level") == "debug":
                                         logger.debug(f"[Anima] Sylanne 状态: {state_str[:100]}")
-                                    return state_str
-                        return str(result)
+                                    return state_str[:200]
+                        return str(result)[:200]
             return ""
         except asyncio.TimeoutError:
             logger.warning("[Anima] Sylanne 状态读取超时")
@@ -1356,6 +1385,10 @@ class AnimaPlugin(Star):
                     import astrbot.api.message_components as Comp
 
                     content = d["content"]
+                    # 发言前审查
+                    if self._is_rejected(content) or self._is_sensitive(content):
+                        logger.warning("[DANGER][Anima] 主动发言内容被过滤，跳过发送")
+                        break
                     chain = MessageChain()
                     chain.chain.append(Comp.Plain(content))
                     session = event.unified_msg_origin
@@ -1509,8 +1542,8 @@ class AnimaPlugin(Star):
                         result="", success=False,
                     )
                     return
-                # 将搜索结果更新到世界观
-                if self.config.get("worldview_enabled", False):
+                # 将搜索结果更新到世界观（过滤敏感内容）
+                if self.config.get("worldview_enabled", False) and not self._is_sensitive(result):
                     wv = self._read_worldview()
                     if "external_knowledge" not in wv:
                         wv["external_knowledge"] = []
@@ -1522,6 +1555,8 @@ class AnimaPlugin(Star):
                     # 只保留最近 10 条
                     wv["external_knowledge"] = wv["external_knowledge"][-10:]
                     self._write_worldview(wv)
+                elif self._is_sensitive(result):
+                    logger.warning("[DANGER][Anima] 搜索结果包含敏感内容，跳过存储")
 
                 # 记录工具使用
                 await self._record_tool_usage(
@@ -1653,6 +1688,10 @@ class AnimaPlugin(Star):
                     return
 
                 # 5. 写入 self_notes，并同步到 WebUI 编辑器配置项
+                # 敏感内容过滤
+                if self._is_sensitive(monologue):
+                    logger.warning("[Anima] 独白包含敏感内容，跳过写入")
+                    return
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
                 entry = f"[{timestamp}] {monologue}"
                 old_notes = self._read_self_notes()
