@@ -1,0 +1,107 @@
+{
+  "enabled": {
+    "description": "启用 Anima 引擎",
+    "type": "bool",
+    "default": true
+  },
+  "emotion_threshold": {
+    "description": "情绪强度阈值（0-1），超过此值触发内心独白沉淀",
+    "type": "float",
+    "default": 0.6,
+    "hint": "值越低越容易触发沉淀，建议 0.5-0.8"
+  },
+  "seed_persona": {
+    "description": "初始自我描述种子",
+    "type": "text",
+    "default": "",
+    "hint": "角色的初始自我认知描述，留空则由角色自行发展"
+  },
+  "sylanne_integration": {
+    "description": "尝试读取 Sylanne 状态",
+    "type": "bool",
+    "default": true,
+    "hint": "启用后会尝试读取 Sylanne 插件的 query_agent_state 返回的关系状态"
+  },
+  "notes_max_length": {
+    "description": "self_notes 最大字符数",
+    "type": "int",
+    "default": 5000,
+    "hint": "超出时会调用 LLM 压缩成摘要"
+  },
+  "embedding_provider_id": {
+    "description": "用于向量记忆的 Embedding Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "在服务提供商页面添加 Embedding 类型的提供商后，将其 ID 填写在此处。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3（免费）"
+  },
+  "memory_store_interval": {
+    "description": "向量记忆存储最小间隔（秒）",
+    "type": "int",
+    "default": 30,
+    "hint": "同一会话内两次存储的最小间隔，防止群聊消息量大时知识库膨胀过快"
+  },
+  "reject_phrases": {
+    "description": "独白过滤词列表",
+    "type": "list",
+    "default": [
+      "I can't discuss",
+      "I cannot",
+      "我无法",
+      "我不能",
+      "I'm not able",
+      "I don't think I should"
+    ],
+    "hint": "包含这些词的独白会被丢弃，不写入自我认知。可自行添加或删除。"
+  },
+  "desire_enabled": {
+    "description": "启用欲望系统",
+    "type": "bool",
+    "default": false,
+    "hint": "让角色产生主动意图，而不只是被动响应"
+  },
+  "desire_max_queue": {
+    "description": "欲望队列最大长度",
+    "type": "int",
+    "default": 5,
+    "hint": "同时存在的欲望数量上限"
+  },
+  "worldview_enabled": {
+    "description": "启用世界观系统",
+    "type": "bool",
+    "default": false,
+    "hint": "让角色对群环境和群友关系形成自己的认知"
+  },
+  "time_sense_enabled": {
+    "description": "启用时间感",
+    "type": "bool",
+    "default": false,
+    "hint": "让角色感知时间流逝和互动频率"
+  },
+  "forgetting_enabled": {
+    "description": "启用自然遗忘",
+    "type": "bool",
+    "default": false,
+    "hint": "长时间没有互动的记忆会逐渐模糊"
+  },
+  "forgetting_halflife_days": {
+    "description": "记忆半衰期（天）",
+    "type": "int",
+    "default": 14,
+    "hint": "多少天后记忆强度衰减到一半"
+  },
+  "self_notes_editor": {
+    "description": "编辑自我认知笔记",
+    "type": "text",
+    "default": "",
+    "editor_mode": true,
+    "editor_language": "markdown",
+    "editor_theme": "vs-dark",
+    "hint": "直接编辑 self_notes.md 的内容，保存后立即生效"
+  },
+  "log_level": {
+    "description": "日志级别",
+    "type": "string",
+    "default": "info",
+    "options": ["debug", "info"]
+  }
+}
