@@ -148,6 +148,12 @@
     "default": false,
     "hint": "允许角色自主决定何时搜索外部信息。可能产生不可控的外部请求。需要配置 fetch/search MCP。"
   },
+  "autonomous_web_tools": {
+    "description": "自主网络行动允许使用的工具列表",
+    "type": "list",
+    "default": ["fetch"],
+    "hint": "填写工具名称。可用工具在启动日志里查看（[Anima] 可用 LLM 工具）。留空则禁用自主网络行动。"
+  },
   "danger_relationship_inference": {
     "description": "⚠️ 高危：关系图谱推断",
     "type": "bool",

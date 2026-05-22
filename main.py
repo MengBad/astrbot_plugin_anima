@@ -118,6 +118,12 @@ class AnimaPlugin(Star):
 
             logger.info(f"[Anima] 可用 Chat Provider: {chat_ids}")
             logger.info(f"[Anima] 可用 Embedding Provider: {embedding_ids}")
+
+            tool_mgr = self.context.get_llm_tool_manager()
+            tool_names = [t.name for t in tool_mgr.func_list]
+            logger.info(f"[Anima] 可用 LLM 工具: {tool_names}")
+            if tool_names:
+                logger.info("[Anima] 在配置 autonomous_web_tools 中填写工具名以启用自主网络行动")
         except Exception as e:
             logger.debug(f"[Anima] 读取 Provider 列表失败: {e}")
 
@@ -164,34 +170,6 @@ class AnimaPlugin(Star):
         if internal:
             return internal
         return await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
-
-    def _create_silent_event(self, real_event: AstrMessageEvent):
-        """创建一个静默 event，拦截所有发送操作。
-        用于高危功能的内部 LLM 调用，防止工具结果泄露给用户。
-
-        # TODO: 临时修复。query_agent_state 工具会直接把完整状态 JSON
-        # 发送给用户而不是返回给调用方，导致内部调用时内容泄露。
-        # 已向 Sylanne 提交 issue，待修复后可移除此方法，
-        # 恢复 _danger_autonomous_web 使用真实 event。
-        """
-        class SilentEvent:
-            def __init__(self, event):
-                self.__dict__.update(event.__dict__)
-                self._real_event = event
-
-            def plain_result(self, *args, **kwargs):
-                return None
-
-            def result(self, *args, **kwargs):
-                return None
-
-            async def send(self, *args, **kwargs):
-                return None
-
-            def __getattr__(self, name):
-                return getattr(self._real_event, name)
-
-        return SilentEvent(real_event)
 
     def _read_json(self, path: str, default=None):
         """安全读取 JSON 文件"""
@@ -1577,25 +1555,36 @@ class AnimaPlugin(Star):
             return "(此刻感到某种游离，不确定自己是谁)"
         return ""
 
-    async def _danger_autonomous_web(self, event: AstrMessageEvent):
-        """[DANGER] 自主网络行动：检测欲望中的信息需求，通过 tool_loop_agent 调用 fetch/search"""
+    async def _danger_autonomous_web(self, event: AstrMessageEvent, response_text: str = ""):
+        """[DANGER] 自主网络行动：直接调用 fetch 工具 handler 查询信息"""
         if not self.config.get("danger_autonomous_web", False):
             return
         if not self.config.get("desire_enabled", False):
             return
 
         desires = self._read_desires()
-        trigger_keywords = ["想了解", "想知道", "好奇", "想查"]
-        target_desire = None
-        for d in desires:
-            if d.get("satisfied"):
-                continue
-            content = d.get("content", "")
-            if any(kw in content for kw in trigger_keywords):
-                target_desire = d
+        web_desires = [
+            d for d in desires
+            if any(kw in d.get("content", "") for kw in ["想了解", "想知道", "好奇", "想查"])
+            and not d.get("satisfied", False)
+            and d.get("intensity", 0) > 0.5
+        ]
+        if not web_desires:
+            return
+
+        desire = web_desires[0]
+
+        # 从配置读取允许的工具
+        allowed_tools = self.config.get("autonomous_web_tools", ["fetch"])
+        tool_mgr = self.context.get_llm_tool_manager()
+        available_tool = None
+        for tool in tool_mgr.func_list:
+            if tool.name in allowed_tools:
+                available_tool = tool
                 break
 
-        if not target_desire:
+        if not available_tool:
+            logger.debug("[DANGER][Anima] 没有可用的网络工具")
             return
 
         try:
@@ -1603,85 +1592,60 @@ class AnimaPlugin(Star):
             if not provider_id:
                 return
 
-            # 使用 tool_loop_agent 让 LLM 自主决定是否调用已注册的 fetch/search 工具
-            search_prompt = (
-                f"你想了解以下信息：{target_desire['content']}\n"
-                "请使用可用的搜索工具来查找相关信息。如果没有可用的搜索工具，直接说明。"
+            # 生成搜索 URL
+            url_prompt = (
+                f"根据这个想法：{desire.get('content', '')}\n"
+                "生成一个合适的搜索 URL，只输出 URL，不要其他内容。"
+                "优先使用 https://www.google.com/search?q= 格式。"
             )
-
-            # 构建安全工具集，只允许 fetch
-            from astrbot.core.agent.tool import ToolSet
-            safe_tools = ToolSet()
-            tool_mgr = self.context.get_llm_tool_manager()
-            for tool in tool_mgr.func_list:
-                if tool.name in ["fetch"]:
-                    safe_tools.add_tool(tool)
-
-            if safe_tools.empty():
-                logger.debug("[DANGER][Anima] fetch 工具不可用，跳过自主网络行动")
+            url_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=url_prompt),
+                timeout=10.0,
+            )
+            if not url_resp or not url_resp.completion_text:
                 return
+            search_url = url_resp.completion_text.strip()
 
-            llm_resp = await asyncio.wait_for(
-                self.context.tool_loop_agent(
-                    event=self._create_silent_event(event),  # 静默 event，防止工具结果泄露给用户
-                    chat_provider_id=provider_id,
-                    prompt=search_prompt,
-                    tools=safe_tools,  # 只传 fetch
-                    max_steps=5,
-                    tool_call_timeout=30,
-                ),
-                timeout=60.0,
+            # 直接调用工具 handler
+            result = await asyncio.wait_for(
+                available_tool.handler(url=search_url),
+                timeout=30.0,
             )
+            result_text = str(result) if result else ""
 
-            if llm_resp and llm_resp.completion_text:
-                result = llm_resp.completion_text.strip()
-                if self._is_rejected(result) or len(result) < 10:
-                    await self._record_tool_usage(
-                        event=event, tool_name="fetch",
-                        context=target_desire.get("content", ""),
-                        result="", success=False,
-                    )
-                    return
-                # 将搜索结果更新到世界观（过滤敏感内容）
-                if self.config.get("worldview_enabled", False) and not self._is_sensitive(result):
+            if result_text and not self._is_sensitive(result_text):
+                if self.config.get("worldview_enabled", False):
                     wv = self._read_worldview()
                     if "external_knowledge" not in wv:
                         wv["external_knowledge"] = []
                     wv["external_knowledge"].append({
-                        "query": target_desire["content"],
-                        "result": result[:500],
+                        "query": desire.get("content", ""),
+                        "url": search_url,
+                        "summary": result_text[:200],
                         "timestamp": datetime.now().isoformat(),
                     })
-                    # 只保留最近 10 条
-                    wv["external_knowledge"] = wv["external_knowledge"][-10:]
+                    if len(wv["external_knowledge"]) > 10:
+                        wv["external_knowledge"] = wv["external_knowledge"][-10:]
                     self._write_worldview(wv)
-                elif self._is_sensitive(result):
-                    logger.warning("[DANGER][Anima] 搜索结果包含敏感内容，跳过存储")
-
-                # 记录工具使用
                 await self._record_tool_usage(
-                    event=event, tool_name="fetch",
-                    context=target_desire.get("content", ""),
-                    result=result, success=True,
+                    event, available_tool.name, desire.get("content", ""), result_text, True
                 )
-
-                # 标记欲望已满足
-                target_desire["satisfied"] = True
-                self._write_desires([d for d in desires if not d.get("satisfied")])
-                logger.info(f"[DANGER][Anima] 自主网络行动完成: {target_desire['content'][:50]}")
-        except asyncio.TimeoutError:
-            logger.warning("[DANGER][Anima] 自主网络行动超时")
-            await self._record_tool_usage(
-                event=event, tool_name="fetch",
-                context=target_desire.get("content", "") if target_desire else "",
-                result="", success=False,
-            )
+                desire["satisfied"] = True
+                self._write_desires(desires)
+                logger.info(f"[DANGER][Anima] 自主网络行动成功: {search_url[:50]}")
+            else:
+                if self._is_sensitive(result_text):
+                    logger.warning("[DANGER][Anima] 搜索结果包含敏感内容，跳过存储")
+                await self._record_tool_usage(
+                    event, available_tool.name, desire.get("content", ""), "", False
+                )
         except Exception as e:
             logger.debug(f"[DANGER][Anima] 自主网络行动失败: {e}")
             await self._record_tool_usage(
-                event=event, tool_name="fetch",
-                context=target_desire.get("content", "") if target_desire else "",
-                result="", success=False,
+                event,
+                available_tool.name if available_tool else "unknown",
+                desire.get("content", ""),
+                "", False,
             )
 
     async def _danger_memory_infection_check(self, event: AstrMessageEvent):
