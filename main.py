@@ -1617,7 +1617,7 @@ class AnimaPlugin(Star):
                 if tool.name in ["fetch"]:
                     safe_tools.add_tool(tool)
 
-            if not safe_tools.get_tools():
+            if safe_tools.empty():
                 logger.debug("[DANGER][Anima] fetch 工具不可用，跳过自主网络行动")
                 return
 
