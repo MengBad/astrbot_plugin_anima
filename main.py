@@ -65,6 +65,19 @@ class AnimaPlugin(Star):
         # 沉淀锁，防止并发写入
         self._sediment_lock = asyncio.Lock()
 
+        # 动态读取已配置的 Provider 列表，启动时打印方便用户查看
+        try:
+            chat_providers = self.context.get_all_providers()
+            chat_ids = [p.meta().id for p in chat_providers]
+
+            embedding_providers = self.context.get_all_embedding_providers()
+            embedding_ids = [p.meta().id for p in embedding_providers]
+
+            logger.info(f"[Anima] 可用 Chat Provider: {chat_ids}")
+            logger.info(f"[Anima] 可用 Embedding Provider: {embedding_ids}")
+        except Exception as e:
+            logger.debug(f"[Anima] 读取 Provider 列表失败: {e}")
+
         logger.info("[Anima] 插件初始化完成")
 
     # ==================== 通用工具方法 ====================
@@ -76,6 +89,17 @@ class AnimaPlugin(Star):
             "I'm not able", "I don't think I should",
         ])
         return any(phrase.lower() in text.lower() for phrase in reject_phrases)
+
+    async def _get_provider_id(self, event: AstrMessageEvent, prefer: str = "") -> str:
+        """获取要使用的 Provider ID。
+        优先级：prefer 参数 > internal_provider_id 配置 > 当前对话主模型
+        """
+        if prefer:
+            return prefer
+        internal = self.config.get("internal_provider_id", "")
+        if internal:
+            return internal
+        return await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
 
     def _read_json(self, path: str, default=None):
         """安全读取 JSON 文件"""
@@ -259,8 +283,7 @@ class AnimaPlugin(Star):
     ) -> float:
         """轻量评估 LLM 回复的情绪强度，返回 0-1 的浮点数"""
         try:
-            umo = event.unified_msg_origin
-            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            provider_id = await self._get_provider_id(event)
             if not provider_id:
                 return 0.0
 
@@ -303,8 +326,7 @@ class AnimaPlugin(Star):
     ) -> Optional[str]:
         """以角色第一人称生成内心独白"""
         try:
-            umo = event.unified_msg_origin
-            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            provider_id = await self._get_provider_id(event)
             if not provider_id:
                 return None
 
@@ -410,8 +432,7 @@ class AnimaPlugin(Star):
             return
 
         try:
-            umo = event.unified_msg_origin
-            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            provider_id = await self._get_provider_id(event)
             if not provider_id:
                 return
 
@@ -489,8 +510,8 @@ class AnimaPlugin(Star):
             return
 
         try:
-            umo = event.unified_msg_origin
-            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            worldview_prov = self.config.get("worldview_provider_id", "")
+            provider_id = await self._get_provider_id(event, prefer=worldview_prov)
             if not provider_id:
                 return
 
@@ -498,13 +519,17 @@ class AnimaPlugin(Star):
             recent_notes = self._read_self_notes()[-1500:]
 
             prompt = (
-                "根据最近的对话记录和已有的世界观认知，更新你对这个群的理解。\n"
+                "你正在帮助一个 AI 聊天角色整理对群聊环境的认知。"
+                "以下是角色的内心独白记录，请从中提取对群环境的客观认知。\n"
+                "根据这些信息，更新角色对这个群的理解。"
                 "包括：environment（环境氛围）、social_graph（群友画像，用 user_id 做 key）、"
-                "norms（群内规范）、my_position（你的位置）。\n"
+                "norms（群内规范）、my_position（角色的位置）。\n"
                 "输出纯 JSON 格式，不要 markdown 代码块。\n\n"
-                f"已有世界观：{json.dumps(current_wv, ensure_ascii=False)[:500]}\n\n"
-                f"最近的自我认知：{recent_notes[:500]}"
+                f"已有世界观：{json.dumps(current_wv, ensure_ascii=False)}\n\n"
+                f"最近的内心独白：{recent_notes}"
             )
+
+            logger.debug(f"[Anima] 世界观更新 prompt: {prompt[:500]}")
 
             llm_resp = await asyncio.wait_for(
                 self.context.llm_generate(
@@ -737,8 +762,7 @@ class AnimaPlugin(Star):
 
             logger.info("[Anima] self_notes 超出长度限制，开始压缩...")
 
-            umo = event.unified_msg_origin
-            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            provider_id = await self._get_provider_id(event)
             if not provider_id:
                 return
 

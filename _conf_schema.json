@@ -32,7 +32,21 @@
     "description": "用于向量记忆的 Embedding Provider ID",
     "type": "string",
     "default": "",
-    "hint": "在服务提供商页面添加 Embedding 类型的提供商后，将其 ID 填写在此处。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3（免费）"
+    "hint": "在服务提供商页面添加 Embedding 类型的提供商后，将其 ID 填写在此处（注意：不是对话模型的 ID，是 Embedding 类型的 Provider ID）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3（免费）"
+  },
+  "internal_provider_id": {
+    "description": "内部 LLM 调用使用的模型 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "用于情绪评估、独白生成、欲望生成、世界观更新等内部调用。留空则使用当前对话的主模型。推荐配置一个审查更宽松的国产模型（如 DeepSeek、Qwen）",
+    "_special": "select_provider"
+  },
+  "worldview_provider_id": {
+    "description": "世界观更新专用 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "仅用于世界观更新。优先级高于 internal_provider_id。留空则回退到 internal_provider_id，再留空则用主模型",
+    "_special": "select_provider"
   },
   "memory_store_interval": {
     "description": "向量记忆存储最小间隔（秒）",
