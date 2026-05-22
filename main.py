@@ -993,23 +993,24 @@ class AnimaPlugin(Star):
         """定时反刍任务：对近期 self_notes 做反思"""
         if not self.config.get("rumination_enabled", False):
             return
-        if not self._last_active_umo:
-            return
 
         try:
+            # 获取 provider：优先 internal，其次 last_active_umo，最后回退到第一个可用 provider
             provider_id = ""
             internal = self.config.get("internal_provider_id", "")
             if internal:
                 provider_id = internal
-            else:
+            elif self._last_active_umo:
                 try:
                     provider_id = await self.context.get_current_chat_provider_id(
                         umo=self._last_active_umo
                     )
                 except Exception:
-                    providers = self.context.get_all_providers()
-                    if providers:
-                        provider_id = providers[0].meta().id
+                    pass
+            if not provider_id:
+                providers = self.context.get_all_providers()
+                if providers:
+                    provider_id = providers[0].meta().id
             if not provider_id:
                 return
 
@@ -1556,8 +1557,9 @@ class AnimaPlugin(Star):
             return
         if not sylanne_state:
             return
-        # 如果 scar 状态为 scarred 且有高关系分数的挑战
-        if "scarred" in sylanne_state.lower() or "rawVoid" in sylanne_state:
+        # 如果 scar 状态为 scarred 或 rawVoid 不为 none
+        state_lower = sylanne_state.lower()
+        if "scarred" in state_lower or ("rawvoid" in state_lower and "rawvoid: none" not in state_lower):
             self._identity_stability = max(0.0, self._identity_stability - 0.1)
             logger.debug(f"[DANGER][Anima] 身份稳定度下降: {self._identity_stability:.2f}")
 
