@@ -210,17 +210,23 @@ class AnimaPlugin(Star):
         if now - self._last_store_time.get(user_id, 0) < interval:
             return
         self._last_store_time[user_id] = now
+        # 敏感内容过滤
+        if self._is_sensitive(text):
+            return
         try:
             kb = await self.context.kb_manager.get_kb_by_name("anima_memory")
             if kb:
+                # 加时间戳，让 bot 知道这条记忆是什么时候的
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                text_with_time = f"[{timestamp}] {text}"
                 await kb.upload_document(
                     file_name=f"memory_{int(time.time())}",
                     file_content=None,
                     file_type="txt",
-                    pre_chunked_text=[text],
+                    pre_chunked_text=[text_with_time],
                 )
                 if self.config.get("log_level") == "debug":
-                    logger.debug(f"[Anima] 存储记忆: {text[:50]}...")
+                    logger.debug(f"[Anima] 存储记忆: {text_with_time[:50]}...")
         except Exception as e:
             logger.warning(f"[Anima] 向量存储失败: {e}")
 
