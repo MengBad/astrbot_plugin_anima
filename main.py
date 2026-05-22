@@ -1407,52 +1407,52 @@ class AnimaPlugin(Star):
         if not self.config.get("desire_enabled", False):
             return
 
+        desires = self._read_desires()
+        high_intensity = [
+            d for d in desires
+            if d.get("intensity", 0) > 0.8
+            and d.get("source") == "self"
+            and not d.get("satisfied", False)
+        ]
+        if not high_intensity:
+            return
+
+        desire = high_intensity[0]
         try:
-            desires = self._read_desires()
-            for d in desires:
-                if (
-                    d.get("intensity", 0) > 0.8
-                    and d.get("source") == "self"
-                    and any(kw in d.get("content", "") for kw in ["想说", "想表达", "想告诉"])
-                ):
-                    provider_id = await self._get_provider_id(event)
-                    if not provider_id:
-                        break
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
 
-                    # 用 llm_generate 生成自然表达，不用 tool_loop_agent（避免工具结果泄露）
-                    prompt = (
-                        f"你有一个强烈的想法想表达：{d.get('content', '')}\n"
-                        "用一句自然的话说出来，符合角色人设，不要解释为什么要说。不超过50字。"
-                    )
-                    llm_resp = await asyncio.wait_for(
-                        self.context.llm_generate(
-                            chat_provider_id=provider_id,
-                            prompt=prompt,
-                        ),
-                        timeout=15.0,
-                    )
-                    if not (llm_resp and llm_resp.completion_text):
-                        break
+            prompt = (
+                f"你有一个强烈的想法想表达：{desire.get('content', '')}\n"
+                "用一句自然的话说出来，符合角色人设，不要解释为什么要说。不超过50字。"
+            )
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=15.0,
+            )
 
-                    message = llm_resp.completion_text.strip()
-                    # 发言前审查
-                    if self._is_rejected(message) or self._is_sensitive(message):
-                        logger.warning("[DANGER][Anima] 主动发言内容被过滤，跳过发送")
-                        break
+            if llm_resp and llm_resp.completion_text:
+                message = llm_resp.completion_text.strip()
+                if self._is_rejected(message) or self._is_sensitive(message):
+                    logger.warning("[DANGER][Anima] 主动发言被过滤")
+                    return
 
-                    from astrbot.core.message.message_event_result import MessageChain
-                    import astrbot.api.message_components as Comp
-                    chain = MessageChain()
-                    chain.chain.append(Comp.Plain(message))
-                    await self.context.send_message(event.unified_msg_origin, chain)
-                    d["satisfied"] = True
-                    logger.info(f"[DANGER][Anima] 立场传播: {message[:50]}")
-                    break
-            self._write_desires([dd for dd in desires if not dd.get("satisfied")])
+                from astrbot.core.message.message_event_result import MessageChain
+                from astrbot.api.message_components import Plain
+                chain = MessageChain()
+                chain.chain.append(Plain(message))
+                await self.context.send_message(event.unified_msg_origin, chain)
+                desire["satisfied"] = True
+                self._write_desires(desires)
+                logger.info(f"[DANGER][Anima] 主动发言: {message[:50]}")
         except asyncio.TimeoutError:
-            logger.debug("[DANGER][Anima] 立场传播超时")
+            logger.debug("[DANGER][Anima] 主动发言超时")
         except Exception as e:
-            logger.debug(f"[DANGER][Anima] 立场传播失败: {e}")
+            logger.debug(f"[DANGER][Anima] 主动发言失败: {e}")
 
     async def _danger_core_mutation(self, event: AstrMessageEvent):
         """[DANGER] 自主修改核心人格"""
@@ -1567,12 +1567,16 @@ class AnimaPlugin(Star):
                 "请使用可用的搜索工具来查找相关信息。如果没有可用的搜索工具，直接说明。"
             )
 
-            # 获取当前可用的工具集（包含 MCP 注册的 fetch/search 工具）
+            # 构建安全工具集，只允许 fetch
             from astrbot.core.agent.tool import ToolSet
-            tool_mgr = self.context.provider_manager.llm_tools
-            available_tools = ToolSet(tool_mgr.func_list) if tool_mgr.func_list else None
+            safe_tools = ToolSet()
+            tool_mgr = self.context.get_llm_tool_manager()
+            for tool in tool_mgr.func_list:
+                if tool.name in ["fetch"]:
+                    safe_tools.add_tool(tool)
 
-            if not available_tools:
+            if not safe_tools.get_tools():
+                logger.debug("[DANGER][Anima] fetch 工具不可用，跳过自主网络行动")
                 return
 
             llm_resp = await asyncio.wait_for(
@@ -1580,7 +1584,7 @@ class AnimaPlugin(Star):
                     event=self._create_silent_event(event),  # 静默 event，防止工具结果泄露给用户
                     chat_provider_id=provider_id,
                     prompt=search_prompt,
-                    tools=available_tools,
+                    tools=safe_tools,  # 只传 fetch
                     max_steps=5,
                     tool_call_timeout=30,
                 ),
