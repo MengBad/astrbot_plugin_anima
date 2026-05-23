@@ -8,8 +8,12 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from datetime import datetime, timedelta
+from html.parser import HTMLParser
 from typing import Optional
+
+import aiohttp
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
@@ -1555,8 +1559,38 @@ class AnimaPlugin(Star):
             return "(此刻感到某种游离，不确定自己是谁)"
         return ""
 
+    async def _fetch_url(self, url: str) -> str:
+        """用 aiohttp 抓取 URL，提取 <p> 标签文本"""
+        class _TextExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.text = []
+                self.in_p = False
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "p":
+                    self.in_p = True
+
+            def handle_endtag(self, tag):
+                if tag == "p":
+                    self.in_p = False
+
+            def handle_data(self, data):
+                if self.in_p and data.strip():
+                    self.text.append(data.strip())
+
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; AstrBot/1.0)"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)
+            ) as resp:
+                html = await resp.text()
+                extractor = _TextExtractor()
+                extractor.feed(html)
+                return " ".join(extractor.text[:20])[:500]
+
     async def _danger_autonomous_web(self, event: AstrMessageEvent, response_text: str = ""):
-        """[DANGER] 自主网络行动：直接调用 fetch 工具 handler 查询信息"""
+        """[DANGER] 自主网络行动：用 aiohttp 抓取 Bing 搜索结果"""
         if not self.config.get("danger_autonomous_web", False):
             return
         if not self.config.get("desire_enabled", False):
@@ -1573,45 +1607,17 @@ class AnimaPlugin(Star):
             return
 
         desire = web_desires[0]
-
-        # 从配置读取允许的工具
-        allowed_tools = self.config.get("autonomous_web_tools", ["fetch"])
-        tool_mgr = self.context.get_llm_tool_manager()
-        available_tool = None
-        for tool in tool_mgr.func_list:
-            if tool.name in allowed_tools:
-                available_tool = tool
-                break
-
-        if not available_tool:
-            logger.debug("[DANGER][Anima] 没有可用的网络工具")
-            return
+        desire_content = desire.get("content", "")
 
         try:
-            provider_id = await self._get_provider_id(event)
-            if not provider_id:
-                return
+            # 构建 Bing 搜索 URL
+            search_url = f"https://cn.bing.com/search?q={urllib.parse.quote(desire_content)}"
 
-            # 生成搜索 URL
-            url_prompt = (
-                f"根据这个想法：{desire.get('content', '')}\n"
-                "生成一个合适的搜索 URL，只输出 URL，不要其他内容。"
-                "优先使用 https://www.google.com/search?q= 格式。"
+            # 抓取搜索结果
+            result_text = await asyncio.wait_for(
+                self._fetch_url(search_url),
+                timeout=25.0,
             )
-            url_resp = await asyncio.wait_for(
-                self.context.llm_generate(chat_provider_id=provider_id, prompt=url_prompt),
-                timeout=10.0,
-            )
-            if not url_resp or not url_resp.completion_text:
-                return
-            search_url = url_resp.completion_text.strip()
-
-            # 直接调用工具 handler
-            result = await asyncio.wait_for(
-                available_tool.handler(url=search_url),
-                timeout=30.0,
-            )
-            result_text = str(result) if result else ""
 
             if result_text and not self._is_sensitive(result_text):
                 if self.config.get("worldview_enabled", False):
@@ -1619,7 +1625,7 @@ class AnimaPlugin(Star):
                     if "external_knowledge" not in wv:
                         wv["external_knowledge"] = []
                     wv["external_knowledge"].append({
-                        "query": desire.get("content", ""),
+                        "query": desire_content,
                         "url": search_url,
                         "summary": result_text[:200],
                         "timestamp": datetime.now().isoformat(),
@@ -1628,24 +1634,21 @@ class AnimaPlugin(Star):
                         wv["external_knowledge"] = wv["external_knowledge"][-10:]
                     self._write_worldview(wv)
                 await self._record_tool_usage(
-                    event, available_tool.name, desire.get("content", ""), result_text, True
+                    event, "web_fetch", desire_content, result_text, True
                 )
                 desire["satisfied"] = True
                 self._write_desires(desires)
-                logger.info(f"[DANGER][Anima] 自主网络行动成功: {search_url[:50]}")
+                logger.info(f"[DANGER][Anima] 自主网络行动成功: {search_url[:60]}")
             else:
                 if self._is_sensitive(result_text):
                     logger.warning("[DANGER][Anima] 搜索结果包含敏感内容，跳过存储")
                 await self._record_tool_usage(
-                    event, available_tool.name, desire.get("content", ""), "", False
+                    event, "web_fetch", desire_content, "", False
                 )
         except Exception as e:
             logger.debug(f"[DANGER][Anima] 自主网络行动失败: {e}")
             await self._record_tool_usage(
-                event,
-                available_tool.name if available_tool else "unknown",
-                desire.get("content", ""),
-                "", False,
+                event, "web_fetch", desire_content, "", False
             )
 
     async def _danger_memory_infection_check(self, event: AstrMessageEvent):
