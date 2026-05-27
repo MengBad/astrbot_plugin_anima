@@ -91,11 +91,11 @@ class AnimaPlugin(Star):
         # 沉淀锁，防止并发写入
         self._sediment_lock = asyncio.Lock()
 
-        # 身份稳定度（身份危机模块）
-        self._identity_stability = 1.0
+        # 身份稳定度（身份危机模块，持久化）
+        self._identity_stability = self._load_state().get("identity_stability", 1.0)
 
-        # 最近活跃的 umo（用于离线反刍）
-        self._last_active_umo = ""
+        # 最近活跃的 umo（用于离线反刍，持久化）
+        self._last_active_umo = self._load_state().get("last_active_umo", "")
 
         # 新增数据文件路径
         self.contradictions_path = os.path.join(self.data_dir, "contradictions.json")
@@ -204,6 +204,8 @@ class AnimaPlugin(Star):
         """保存持久化状态"""
         state = self._load_state()
         state["sediment_count"] = self._sediment_count
+        state["identity_stability"] = self._identity_stability
+        state["last_active_umo"] = self._last_active_umo
         self._write_json(self._state_path, state)
 
     # ==================== 知识库 ====================
@@ -613,6 +615,48 @@ class AnimaPlugin(Star):
         except Exception as e:
             if self.config.get("log_level") == "debug":
                 logger.debug(f"[Anima] 欲望生成失败: {e}")
+
+    async def _evaluate_desire_from_monologue(self, monologue: str):
+        """从独白/反刍结果中提取潜在欲望"""
+        desires = self._read_desires()
+        max_queue = self.config.get("desire_max_queue", 5)
+        if len(desires) >= max_queue:
+            return
+
+        try:
+            providers = self.context.get_all_providers()
+            if not providers:
+                return
+            internal = self.config.get("internal_provider_id", "")
+            provider_id = internal if internal else providers[0].meta().id
+
+            prompt = (
+                "以下是一个角色的内心独白。从中提取它此刻想做的事、想知道的事、"
+                "或想对某人说的话。如果有，用一句话描述。如果没有，只回复'无'。\n\n"
+                f"独白：{monologue[:300]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=15.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if result and result != "无" and len(result) > 2:
+                    desires.append({
+                        "id": f"desire_{int(time.time())}",
+                        "content": result,
+                        "source": "self",
+                        "intensity": 0.6,
+                        "created_at": datetime.now().isoformat(),
+                        "target_user": "",
+                        "satisfied": False,
+                    })
+                    self._write_desires(desires)
+                    logger.debug(f"[Anima] 反刍产生欲望: {result[:50]}")
+        except Exception as e:
+            logger.debug(f"[Anima] 反刍欲望提取失败: {e}")
 
     def _get_active_desires_text(self) -> str:
         """获取高强度欲望的注入文本"""
@@ -1044,6 +1088,10 @@ class AnimaPlugin(Star):
                         new_content=entry,
                     )
                     logger.info(f"[Anima] 离线反刍完成: {result[:60]}")
+
+                    # 反刍结果喂给欲望系统：判断是否产生新欲望
+                    if self.config.get("desire_enabled", False):
+                        await self._evaluate_desire_from_monologue(result)
         except asyncio.TimeoutError:
             logger.warning("[Anima] 离线反刍超时")
         except Exception as e:
@@ -1742,6 +1790,11 @@ class AnimaPlugin(Star):
                 score = await self._evaluate_emotion(event, response_text)
                 threshold = self.config.get("emotion_threshold", 0.6)
 
+                # 持久化情绪评分供上下文注入
+                state = self._load_state()
+                state["last_emotion_score"] = score
+                self._write_json(self._state_path, state)
+
                 if self.config.get("log_level") == "debug":
                     logger.debug(
                         f"[Anima] 情绪评分: {score:.2f}, 阈值: {threshold}"
@@ -1829,6 +1882,7 @@ class AnimaPlugin(Star):
 
         # 记录最近活跃的 umo（用于离线反刍）
         self._last_active_umo = event.unified_msg_origin
+        self._save_state()
 
         # WebUI 编辑器同步：只有当内容与上次插件同步的不同时，才认为是用户手动编辑
         editor_content = self.config.get("self_notes_editor", "")
@@ -1882,6 +1936,24 @@ class AnimaPlugin(Star):
         identity_text = self._get_identity_crisis_text()
         if identity_text:
             injection_parts.append(identity_text)
+
+        # 矛盾注入：让角色意识到自己的矛盾
+        if self.config.get("contradiction_enabled", False):
+            contradictions = self._read_contradictions()
+            if contradictions:
+                recent = contradictions[-3:]  # 最多注入3条
+                c_lines = [c.get("description", "") for c in recent if c.get("description")]
+                if c_lines:
+                    injection_parts.append(
+                        "你内心存在以下未解决的矛盾（你不需要解决它们，但你知道它们存在）：\n"
+                        + "\n".join(f"- {c}" for c in c_lines)
+                    )
+
+        # 情绪强度注入：让主模型感知当前情绪状态
+        last_emotion = self._load_state().get("last_emotion_score", 0)
+        if last_emotion > 0.3:
+            level = "极高" if last_emotion > 0.8 else "高" if last_emotion > 0.6 else "中等"
+            injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
 
         # 工具学习：注入工具偏好规律
         if self.config.get("tool_learning_enabled", False):
