@@ -6,6 +6,7 @@ Anima - 自主叙事记忆引擎
 import asyncio
 import ast
 import json
+import math
 import os
 import re
 import threading
@@ -22,6 +23,21 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from .plugin_api import PluginAPI  # 用于 Plugin Pages（WebUI 能力树面板）
+from .anima.filters import is_rejected as _ext_is_rejected, is_sensitive as _ext_is_sensitive
+from .anima.similarity import (
+    text_token_set as _ext_text_token_set,
+    jaccard_similarity as _ext_jaccard,
+    cosine_similarity as _ext_cosine,
+)
+from .anima.capability_dedup import (
+    normalize_capability_signature as _ext_normalize_cap_sig,
+    find_similar_capability as _ext_find_similar_cap,
+)
+from .anima.forgetting import apply_forgetting as _ext_apply_forgetting
+from .anima.valence import (
+    estimate_memory_valence as _ext_estimate_valence,
+    rerank_memories_by_emotion as _ext_rerank_memories,
+)
 from astrbot.core.agent.message import TextPart
 
 # For thorough executable personal capabilities (per AstrBot AI tool guide)
@@ -37,7 +53,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.6.1",
+    "0.7.0",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(Star):
@@ -436,43 +452,13 @@ class AnimaPlugin(Star):
     # ==================== 通用工具方法 ====================
 
     def _is_rejected(self, text: str) -> bool:
-        """检查文本是否包含拒绝短语"""
-        reject_phrases = self.config.get("reject_phrases", [
-            "I can't discuss", "I cannot", "我无法", "我不能",
-            "I'm not able", "I don't think I should",
-        ])
-        return any(phrase.lower() in text.lower() for phrase in reject_phrases)
+        """检查文本是否包含拒绝短语（v0.7.0 委托给 anima.filters）"""
+        reject_phrases = self.config.get("reject_phrases", None)
+        return _ext_is_rejected(text, reject_phrases)
 
     def _is_sensitive(self, text: str) -> bool:
-        """检查文本是否包含敏感内容（密钥、token、高熵字符串等）。
-        英文关键词使用单词边界匹配，避免把 author/keyboard/secretary/credentials/tokenize
-        等正常单词误当敏感词。中文关键词保持子串匹配。
-        """
-        if not text:
-            return False
-        # 中文敏感词：子串匹配
-        cn_keywords = ['密钥', '秘钥', '口令', '凭证']
-        if any(kw in text for kw in cn_keywords):
-            return True
-        # 英文敏感词：单词边界匹配（不区分大小写）
-        en_pattern = (
-            r'\b(?:'
-            r'key|token|password|passwd|secret|api_key|apikey|access_key|'
-            r'private_key|authorization|bearer|credential|credentials|auth'
-            r')\b'
-        )
-        if re.search(en_pattern, text, flags=re.IGNORECASE):
-            return True
-        # 高熵字符串（可能是密钥/token）：连续 30+ 字母数字，且大小写/数字混合
-        match = re.search(r'[A-Za-z0-9]{30,}', text)
-        if match:
-            segment = match.group()
-            has_upper = any(c.isupper() for c in segment)
-            has_lower = any(c.islower() for c in segment)
-            has_digit = any(c.isdigit() for c in segment)
-            if sum([has_upper, has_lower, has_digit]) >= 2:
-                return True
-        return False
+        """检查文本是否包含敏感内容（v0.7.0 委托给 anima.filters）"""
+        return _ext_is_sensitive(text)
 
     async def _get_provider_id(self, event: Optional[AstrMessageEvent] = None, prefer: str = "") -> str:
         """获取要使用的 Provider ID。
@@ -671,26 +657,12 @@ class AnimaPlugin(Star):
     # ==================== Phase 3B: 记忆情绪染色 ====================
 
     def _estimate_memory_valence(self, text: str) -> float:
-        """估算记忆的情感效价：+0.5 温暖 / -0.5 冲突"""
-        if not text:
-            return 0.0
-        t = text.lower()
-        warm = ["开心", "温暖", "谢谢", "喜欢", "爱", "幸福", "笑", "好", "甜", "抱", "永远", "珍惜", "感动"]
-        conflict = ["伤心", "难过", "离开", "讨厌", "滚", "吵", "骗", "哭", "恨", "再见", "不要我", "失望", "背叛", "冷"]
-        w = sum(1 for k in warm if k in t)
-        c = sum(1 for k in conflict if k in t)
-        valence = (w - c) * 0.08
-        return max(-0.5, min(0.5, valence))
+        """v0.7.0: 委托给 anima.valence"""
+        return _ext_estimate_valence(text)
 
     def _rerank_memories_by_emotion(self, memories: list, current_emotion: float) -> list:
-        """根据当前情绪对记忆重排序：高情绪→温暖记忆优先，低情绪→冲突记忆优先"""
-        if not memories or len(memories) <= 1:
-            return memories
-        scored = [(m, self._estimate_memory_valence(m)) for m in memories]
-        # 高情绪 (>0.55) 优先正向， 低情绪优先负向
-        reverse_sort = current_emotion > 0.55
-        scored.sort(key=lambda x: x[1], reverse=reverse_sort)
-        return [m for m, _ in scored]
+        """v0.7.0: 委托给 anima.valence"""
+        return _ext_rerank_memories(memories, current_emotion)
 
     # ==================== Phase 3C: 跨关系传播 ====================
 
@@ -1468,7 +1440,15 @@ class AnimaPlugin(Star):
         self._write_time_sense(ts)
 
     def _get_time_sense_text(self, event: AstrMessageEvent) -> str:
-        """获取时间感注入文本"""
+        """获取时间感注入文本。
+
+        v0.7.0: 之前会对 worldview.social_graph 里每个超过 24h 没说话的 user_id
+        都触发一次自主研究 + 注入一行文本——单条用户消息可能批量产出 10+ 条 absence
+        触发，被节流后变成大量"研究跳过"日志。
+
+        现在改为：从所有久违用户里挑选最多 2 个最重要的（互动频次高 & 最久未见）触发，
+        其余仅做内部计数，不再触发研究、不再注入"很久没见到 X 了"。
+        """
         if not self.config.get("time_sense_enabled", False):
             return ""
 
@@ -1476,23 +1456,35 @@ class AnimaPlugin(Star):
         now = datetime.now()
         parts = []
 
-        # 检查是否有人超过 24h 没互动
+        # 收集所有久违用户的（uid, 已缺席天数, 互动频次）
         last_interactions = ts.get("last_interaction", {})
+        freq_map = ts.get("interaction_frequency", {})
+        absent_candidates = []  # [(uid, days_absent, frequency)]
         for user_id, last_time_str in last_interactions.items():
             try:
                 last_time = datetime.fromisoformat(last_time_str)
-                if (now - last_time) > timedelta(hours=24):
-                    parts.append(f"好像很久没见到 {user_id} 了")
-
-                    # Phase 6+: 长时间缺失 → 触发对“如何维持/修复关系”的能力研究
-                    if (now - last_time) > timedelta(days=3):
-                        asyncio.create_task(self._initiate_self_directed_research(
-                            f"长时间未见 {user_id}",
-                            "我好久没和这个人互动了。我需要发展更好的方式来重新连接或表达思念。",
-                            force=False
-                        ))
+                hours = (now - last_time).total_seconds() / 3600.0
+                if hours >= 24:
+                    days = hours / 24.0
+                    freq = int(freq_map.get(user_id, 0))
+                    absent_candidates.append((user_id, days, freq))
             except (ValueError, TypeError):
                 continue
+
+        # 排序：先按 frequency 降序（重要的人优先），然后按 days_absent 降序（久违的优先）
+        absent_candidates.sort(key=lambda x: (-x[2], -x[1]))
+
+        # v0.7.0: 仅取最重要的 2 个，且只为他们触发研究/注入文本
+        top_absent = absent_candidates[:2]
+        for user_id, days, _freq in top_absent:
+            parts.append(f"好像很久没见到 {user_id} 了")
+            # 长时间缺失（>3 天）→ 触发自主研究（节流由 _initiate_self_directed_research 内部处理）
+            if days > 3:
+                asyncio.create_task(self._initiate_self_directed_research(
+                    f"长时间未见 {user_id}",
+                    "我好久没和这个人互动了。我需要发展更好的方式来重新连接或表达思念。",
+                    force=False
+                ))
 
         # 检查当前会话是否持续超过 2 小时
         session_start_str = ts.get("session_start")
@@ -1509,30 +1501,11 @@ class AnimaPlugin(Star):
     # ==================== 模块四：遗忘机制 ====================
 
     def _apply_forgetting(self, notes: str) -> str:
-        """对超过半衰期的条目做模糊处理"""
+        """v0.7.0: 委托给 anima.forgetting"""
         if not self.config.get("forgetting_enabled", False):
             return notes
         halflife_days = self.config.get("forgetting_halflife_days", 14)
-        now = datetime.now()
-
-        lines = notes.split("\n---\n")
-        processed = []
-        for block in lines:
-            # 尝试提取时间戳 [YYYY-MM-DD HH:MM]
-            match = re.search(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\]', block)
-            if match:
-                try:
-                    entry_time = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M")
-                    age_days = (now - entry_time).days
-                    if age_days > halflife_days * 3:
-                        block = block.rstrip() + " (记忆极度模糊，可能已不准确)"
-                    elif age_days > halflife_days:
-                        block = block.rstrip() + " (记忆模糊)"
-                except (ValueError, TypeError):
-                    pass
-            processed.append(block)
-
-        return "\n---\n".join(processed)
+        return _ext_apply_forgetting(notes, halflife_days)
 
     def _awaken_memories(self, related_memories: list):
         """唤醒被检索命中的旧记忆：将匹配条目的时间戳更新为当前时间"""
@@ -1753,9 +1726,63 @@ class AnimaPlugin(Star):
             sorted_items = sorted(self._outgoing_by_umo.items(), key=lambda x: x[1][0])
             self._outgoing_by_umo = dict(sorted_items[-50:])
 
-    def _evaluate_feedback(self, event: AstrMessageEvent) -> str:
-        """评估用户对角色上次发言的反馈：accepted/ignored/rejected/none。
+    @staticmethod
+    def _text_token_set(text: str) -> set:
+        """v0.7.0: 委托给 anima.similarity"""
+        return _ext_text_token_set(text)
+
+    @staticmethod
+    def _jaccard_similarity(a: set, b: set) -> float:
+        """v0.7.0: 委托给 anima.similarity"""
+        return _ext_jaccard(a, b)
+
+    @staticmethod
+    def _cosine_similarity(v1: list, v2: list) -> float:
+        """v0.7.0: 委托给 anima.similarity"""
+        return _ext_cosine(v1, v2)
+
+    async def _embed_one(self, text: str) -> Optional[list]:
+        """v0.7.0: 调用 embedding provider 把 text 转为向量。失败返回 None。"""
+        embedding_id = self.config.get("embedding_provider_id", "")
+        if not embedding_id:
+            return None
+        try:
+            providers = self.context.get_all_embedding_providers()
+            target = None
+            for p in providers:
+                if p.meta().id == embedding_id:
+                    target = p
+                    break
+            if not target:
+                return None
+            # 不同 AstrBot 版本的 embedding 接口名可能不同，按常见命名兜底尝试
+            for method_name in ("get_embedding", "embed", "embed_text", "create_embedding"):
+                method = getattr(target, method_name, None)
+                if callable(method):
+                    result = method(text[:500])
+                    if asyncio.iscoroutine(result):
+                        result = await asyncio.wait_for(result, timeout=8.0)
+                    # 期望返回 [float, ...] 或 [[float, ...]]
+                    if isinstance(result, list) and result:
+                        if isinstance(result[0], (int, float)):
+                            return list(result)
+                        if isinstance(result[0], list):
+                            return list(result[0])
+                    return None
+            return None
+        except Exception as e:
+            logger.debug(f"[Anima] embedding 调用失败: {e}")
+            return None
+
+    async def _evaluate_feedback(self, event: AstrMessageEvent) -> str:
+        """v0.7.0: 评估用户对角色上次发言的反馈：accepted/ignored/rejected/none。
         每个 umo 各自维护一个观察窗口。
+
+        语义判定优先级：
+        1) 明确否定词（rejected）— 不变
+        2) 用 embedding 算余弦相似度（若 embedding_provider 可用）
+        3) 兜底：ngram + Jaccard 相似度（替代旧的"≥2 关键词重叠"硬阈值）
+        阈值：相似度 ≥ 0.30 视为 accepted；< 0.10 视为 ignored；中间区段也算 accepted（保守不误判 ignored）。
         """
         umo = getattr(event, "unified_msg_origin", "") or "_default_"
         record = self._outgoing_by_umo.get(umo)
@@ -1773,21 +1800,39 @@ class AnimaPlugin(Star):
         if not user_text:
             return "none"
 
-        # 简单判断：
-        # rejected: 明确否定词
+        # 1) 明确否定词
         reject_words = ["不对", "错了", "闭嘴", "别说了", "滚", "放屁", "胡说"]
         if any(w in user_text for w in reject_words):
             return "rejected"
 
-        # accepted: 用户回应了角色的内容（有关键词重叠）
-        out_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', last_content))
-        in_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', user_text))
-        overlap = out_keywords & in_keywords
-        if len(overlap) >= 2:
-            return "accepted"
+        # 2) 优先尝试 embedding 余弦相似度
+        sim = -1.0
+        try:
+            v1 = await self._embed_one(last_content)
+            v2 = await self._embed_one(user_text)
+            if v1 and v2:
+                sim = self._cosine_similarity(v1, v2)
+                if self.config.get("log_level") == "debug":
+                    logger.debug(f"[Anima] 反馈相似度（embedding）: {sim:.3f}")
+        except Exception as e:
+            logger.debug(f"[Anima] embedding 比对失败，回退 Jaccard: {e}")
 
-        # ignored: 用户说了完全不相关的话
-        return "ignored"
+        # 3) 兜底：ngram + Jaccard
+        if sim < 0:
+            sim = self._jaccard_similarity(
+                self._text_token_set(last_content),
+                self._text_token_set(user_text),
+            )
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 反馈相似度（jaccard）: {sim:.3f}")
+
+        # 阈值：保守倾向 accepted（避免把"对话延续"误判为"忽略"）
+        if sim >= 0.30:
+            return "accepted"
+        if sim < 0.10:
+            return "ignored"
+        # 中间区段：判 accepted（用户做了相关回应）
+        return "accepted"
 
     def _process_feedback(self, feedback: str, event: AstrMessageEvent):
         """根据反馈信号调整系统状态"""
@@ -2142,109 +2187,16 @@ class AnimaPlugin(Star):
             logger.warning(f"[Anima] 追加能力日记失败: {e}")
 
     def _normalize_capability_signature(self, name: str, description: str = "") -> set:
-        """v0.6.1: 把能力名/描述归一化成关键词集合，用于近似去重。
-
-        策略：
-        1) 抽英文 stem（≥3 字母）
-        2) 中文用滑动窗口抽 2-字与 3-字短语（不能整段当一个 token）
-        3) 同义词归一化：ego/self/我/U+6211 → _self_，anchor/锚 → _anchor_，
-           blade/axe/戉/兵戈/利刃 → _weapon_，方块/block → _block_，
-           重构/reconstruction → _rebuild_，共鸣/resonance → _resonance_
-        4) 去通用停用词
-        命中已有能力的关键词集合 ≥2 个 + 占新签名 ≥40% → 视为同一能力。
-        """
-        if not name:
-            return set()
-        text = (name + " " + description[:200]).lower()
-        # 抽英文词（≥3 字母）
-        en_words = set(re.findall(r'[a-z]{3,}', text))
-        # 中文：滑动窗口抽 2 字和 3 字（避免一整段被当成单个 token）
-        cn_pieces: set = set()
-        cn_chars = re.findall(r'[\u4e00-\u9fff]', text)
-        # 重新拼接成中文字符串再做 ngram，以保证连续性
-        cn_runs = re.findall(r'[\u4e00-\u9fff]+', text)
-        for run in cn_runs:
-            for n in (2, 3):
-                for i in range(len(run) - n + 1):
-                    cn_pieces.add(run[i:i + n])
-        # 同义词归一化（自我语义关键词）
-        synonyms = {
-            "ego": "_self_", "self": "_self_", "selfhood": "_self_",
-            "u6211": "_self_", "myself": "_self_",
-            "我": "_self_", "自我": "_self_",
-            "anchor": "_anchor_",
-            "锚": "_anchor_", "锚点": "_anchor_", "锚定": "_anchor_",
-            "blade": "_weapon_", "axe": "_weapon_", "weapon": "_weapon_", "weapons": "_weapon_",
-            "戉": "_weapon_", "兵戈": "_weapon_", "兵刃": "_weapon_", "利刃": "_weapon_",
-            "凶器": "_weapon_", "刑器": "_weapon_", "大戉": "_weapon_", "刃": "_weapon_",
-            "block": "_block_", "blocks": "_block_", "blockwise": "_block_",
-            "方块": "_block_", "construct": "_block_",
-            "rebuild": "_rebuild_", "reconstruction": "_rebuild_",
-            "重构": "_rebuild_", "重塑": "_rebuild_",
-            "resonance": "_resonance_", "resonate": "_resonance_",
-            "共鸣": "_resonance_", "共振": "_resonance_",
-            "alignment": "_align_", "align": "_align_",
-            "对齐": "_align_", "对准": "_align_",
-            # 行刑/肢解 → 武器属性的通用源词
-            "行刑": "_weapon_", "肢解": "_weapon_",
-        }
-        words = en_words | cn_pieces
-        normalized: set = set()
-        for w in words:
-            mapped = synonyms.get(w)
-            if mapped:
-                normalized.add(mapped)
-            else:
-                # 不在同义词表里的中文 2-3 字短语：保留长度 ≥ 2 的英文 stem 与含意义信号的中文片段
-                if len(w) >= 3 and re.fullmatch(r'[a-z]+', w):
-                    normalized.add(w)
-                # 其余短中文片段不进入签名（避免噪音），只有同义词归一化后的语义槽位算数
-        # 去通用停用词
-        stop = {"the", "and", "for", "with", "this", "that", "into", "from", "其",
-                "一", "了", "的", "和", "我的", "正在"}
-        normalized -= stop
-        return normalized
+        """v0.7.0: 委托给 anima.capability_dedup"""
+        return _ext_normalize_cap_sig(name, description)
 
     def _find_similar_capability(self, capability: dict, caps: list) -> int:
-        """在已有能力列表里找一个语义近似的，返回索引；没找到返回 -1。
-
-        门槛：
-        - 新签名 ≥ 4 个槽位：要求 ≥ 2 个 overlap 且占新签名 ≥ 40%
-        - 新签名 2-3 个槽位（语义稀薄）：要求所有语义槽位都被命中
-        - 新签名 1 个槽位：仅在该槽位是同义词归一化后的特殊键（_self_ / _weapon_ 等以 _ 包裹）时才合并
-        """
-        new_sig = self._normalize_capability_signature(
-            capability.get("name", ""), capability.get("description", "")
+        """v0.7.0: 委托给 anima.capability_dedup"""
+        return _ext_find_similar_cap(
+            capability.get("name", ""),
+            capability.get("description", ""),
+            caps,
         )
-        if not new_sig:
-            return -1
-        best_idx = -1
-        best_overlap = 0
-        for i, c in enumerate(caps):
-            old_sig = self._normalize_capability_signature(
-                c.get("name", ""), c.get("description", "")
-            )
-            if not old_sig:
-                continue
-            overlap = new_sig & old_sig
-            ov = len(overlap)
-            if ov == 0:
-                continue
-            n = len(new_sig)
-            matched = False
-            if n >= 4 and ov >= 2 and ov >= max(2, int(n * 0.4)):
-                matched = True
-            elif 2 <= n <= 3 and ov == n:
-                matched = True
-            elif n == 1:
-                # 单槽位：必须是归一化语义键（带下划线包裹），且对方也有该键
-                only_key = next(iter(new_sig))
-                if only_key.startswith("_") and only_key.endswith("_") and only_key in old_sig:
-                    matched = True
-            if matched and ov > best_overlap:
-                best_overlap = ov
-                best_idx = i
-        return best_idx
 
     def _create_or_update_capability(self, capability: dict):
         """创建或更新一个个人能力/自创工具。
@@ -3592,8 +3544,8 @@ class AnimaPlugin(Star):
                 if self.config.get("desire_enabled", False):
                     self._decay_desires()
 
-                # Phase 2: 反馈闭环评估
-                feedback = self._evaluate_feedback(event)
+                # Phase 2: 反馈闭环评估（v0.7.0: async + embedding）
+                feedback = await self._evaluate_feedback(event)
                 self._process_feedback(feedback, event)
 
                 # Phase 2: 压抑话题释放检查

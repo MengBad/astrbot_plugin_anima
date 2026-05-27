@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.7.0 - 反馈语义化 + 时间感聚焦 + 模块拆分起步 + 测试框架
+
+这是把"扎实的核心闭环"和"工程化健康度"拉齐的一个版本。三件大事：
+
+### 1. 反馈窗口语义化（embedding + jaccard 兜底）
+
+`_evaluate_feedback` 从 v0.5 时代的"中文 2-字关键词重叠 ≥2"硬阈值升级为：
+- **优先**：调用 `embedding_provider`（如已配置）算两段文本的余弦相似度
+- **兜底**：用 ngram tokenize + Jaccard 系数（覆盖率比朴素 2-字关键词高很多）
+- 阈值：相似度 ≥0.30 判 accepted；< 0.10 判 ignored；中间区段保守判 accepted（避免把"对话延续"误判为"忽略"）
+
+修复了之前每条用户回应都被判 `ignored → 转入压抑话题` 的空转。
+
+### 2. 时间感聚焦（解决 v0.6.1 的"10x 节流跳过"日志噪音）
+
+`_get_time_sense_text` 之前对 `worldview.social_graph` 里**每个**超过 24h 没说话的 user_id 都触发自主研究 + 注入"很久没见到 X 了"。在大群里这意味着单条用户消息可能批量产出 10+ 条 absence 触发，被 v0.6.1 节流后变成 10+ 条"研究跳过"日志。
+
+现在改为：按 `(互动频次, 缺席天数)` 排序后**只取最重要的 2 个**触发，从源头减少节流次数。
+
+### 3. 模块拆分（v0.7.0 起步，v0.8.0 继续）
+
+把 main.py 里的纯函数（不依赖 AstrBot context 的）抽到独立的 `anima/` 包：
+
+- `anima/filters.py` — 拒绝语 / 敏感词过滤
+- `anima/similarity.py` — Jaccard / Cosine / ngram tokenize
+- `anima/capability_dedup.py` — 能力归一化签名 + 近似匹配（v0.6.1 的核心去重）
+- `anima/forgetting.py` — 时间戳模糊化
+- `anima/valence.py` — 记忆情感效价 + 重排
+
+main.py 里对应方法改为薄封装委托调用，**所有现有调用零破坏**。这一步只是把可独立测试的部分先剥离，让 v0.8.0 的大模块重构（关系/欲望/世界观/能力等子系统）有更小的风险面。
+
+### 4. 测试框架（核心纯函数 56 个测试全过）
+
+- 新增 `pytest.ini` + `tests/` 目录
+- `test_filters.py`：覆盖单词边界、误伤防护（author/keyboard/secretary/tokenize 都不再被当敏感词）、高熵串检测
+- `test_similarity.py`：Jaccard / Cosine 边界 + ngram tokenize
+- `test_capability_dedup.py`：用真实日志里 11 条同质能力做回归测试，验证 4+ 条会被合并；用 4 个不相关工具做反向测试，验证不会误合并
+- `test_valence.py`：情感效价估算 + 重排
+- `test_forgetting.py`：时间戳模糊化（recent / past halflife / extreme blur / 多 block 独立处理）
+
+```
+56 passed, 0 failed
+```
+
+### 顺带修的小 bug
+
+- `_normalize_capability_signature` 之前 `u6211` / `apikey` 这种字母+数字混合形式抽不到 token（正则 `[a-z]{3,}` 漏掉），现在加 `[a-z]+\d+` 单独抽
+
+### 配置无变化
+
+v0.7.0 没新增任何配置项。所有变化都是行为改进 + 内部重构。
+
 ## v0.6.1 - 紧急防爆炸：自主研究节流 + 能力去重 + 动态工具配额
 
 针对 v0.6.0 实测中观察到的"单次对话产出 12+ 条同质能力 + 全部注册成独立 LLM 工具"问题做的紧急修复。建议所有 v0.6.0 用户升级。
