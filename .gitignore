@@ -37,3 +37,5 @@ diagnose_*.py
 
 # 临时 release notes（仅用于本地起草，不进仓库）
 .release_notes_*.md
+.commit_msg.txt
+.tag_msg.txt
