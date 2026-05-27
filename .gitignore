@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Plugin runtime data (Anima 持久化数据，不进仓库)
+data/
+
+# 历史 schema 备份 / 临时调试脚本（一律不再进仓库）
+*_proposed.json
+*_FINAL_CLEAN.json
+*_MINIMAL_SAFE.json
+diagnose_*.py
+*_temp.md
+
+# 上传打包临时
+*.zip
+
+# 临时 release notes（仅用于本地起草，不进仓库）
+.release_notes_*.md

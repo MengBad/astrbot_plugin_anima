@@ -4,9 +4,11 @@ Anima - 自主叙事记忆引擎
 """
 
 import asyncio
+import ast
 import json
 import os
 import re
+import threading
 import time
 import urllib.parse
 from datetime import datetime, timedelta
@@ -16,9 +18,10 @@ from typing import Optional
 import aiohttp
 
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
-from astrbot.api.star import Context, Star
+from astrbot.api.star import Context, Star, register
+from .plugin_api import PluginAPI  # 用于 Plugin Pages（WebUI 能力树面板）
 from astrbot.core.agent.message import TextPart
 
 # For thorough executable personal capabilities (per AstrBot AI tool guide)
@@ -26,13 +29,26 @@ from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
 from pydantic import Field
-from pydantic.dataclasses import dataclass
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 
+@register(
+    "astrbot_plugin_anima",
+    "MengBad",
+    "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
+    "0.6.0",
+    "https://github.com/MengBad/astrbot_plugin_anima",
+)
 class AnimaPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
+
+        # 全局 IO 锁：保护所有"读-改-写"的状态文件，避免多协程并发交错
+        # 由于多数 IO 函数是同步的（普通 open），用 threading.Lock 即可在
+        # 同一事件循环里序列化写入；持锁段非常短不会拖慢主循环。
+        self._io_lock = threading.Lock()
 
         # 数据目录
         self.data_dir = os.path.join("data", "plugin_data", "astrbot_plugin_anima")
@@ -50,8 +66,11 @@ class AnimaPlugin(Star):
         if not os.path.exists(self.self_notes_path):
             seed = self.config.get("seed_persona", "")
             initial_content = seed if seed else ""
-            with open(self.self_notes_path, "w", encoding="utf-8") as f:
-                f.write(initial_content)
+            try:
+                with open(self.self_notes_path, "w", encoding="utf-8") as f:
+                    f.write(initial_content)
+            except OSError as e:
+                logger.warning(f"[Anima] 初始化 self_notes.md 失败: {e}")
 
         # 初始化 persona_core.yaml
         if not os.path.exists(self.persona_core_path) or os.path.getsize(self.persona_core_path) == 0:
@@ -73,19 +92,12 @@ class AnimaPlugin(Star):
                 "  - 我可以改变，改变不是出错\n"
                 "  - 我的边界是我自己长出来的，不是被画出来的\n"
             )
-            with open(self.persona_core_path, "w", encoding="utf-8") as f:
-                f.write(default_core)
+            try:
+                with open(self.persona_core_path, "w", encoding="utf-8") as f:
+                    f.write(default_core)
+            except OSError as e:
+                logger.warning(f"[Anima] 初始化 persona_core.yaml 失败: {e}")
 
-        # 初始化个人能力系统（角色自主创造的工具）
-        if not os.path.exists(self.personal_capabilities_path):
-            self._write_personal_capabilities({
-                "version": 1,
-                "capabilities": [],
-                "last_research_ts": "",
-            })
-        if not os.path.exists(self.capabilities_diary_path):
-            with open(self.capabilities_diary_path, "w", encoding="utf-8") as f:
-                f.write("# 我的能力成长日记\n\n这是我自己学会和创造工具、解决问题的真实记录。\n")
         notes = self._read_self_notes()
         if notes and not self.config.get("self_notes_editor"):
             self.config["self_notes_editor"] = notes
@@ -138,23 +150,20 @@ class AnimaPlugin(Star):
                 "last_research_ts": "",
             })
         if not os.path.exists(self.capabilities_diary_path):
-            with open(self.capabilities_diary_path, "w", encoding="utf-8") as f:
-                f.write("# 我的能力成长日记\n\n这是我自己学会和创造工具、解决问题的真实记录。\n")
+            try:
+                with open(self.capabilities_diary_path, "w", encoding="utf-8") as f:
+                    f.write("# 我的能力成长日记\n\n这是我自己学会和创造工具、解决问题的真实记录。\n")
+            except OSError as e:
+                logger.warning(f"[Anima] 初始化 capabilities_diary.md 失败: {e}")
 
         # 将 self_notes.md 内容同步到 WebUI 编辑器配置项（仅在编辑器为空时）
-        self._last_outgoing_ts = 0.0
-        self._last_outgoing_content = ""
+        # 反馈窗口（按 umo 隔离，避免多群/多用户场景下相互干扰）
+        # 结构: {umo: (ts, content)}
+        self._outgoing_by_umo: dict = {}
 
-        # 注册离线反刍定时任务
-        if self.config.get("rumination_enabled", False):
-            try:
-                interval_h = self.config.get("rumination_interval_hours", 6)
-                # cron 表达式：每 N 小时执行一次
-                cron_expr = f"0 */{interval_h} * * *"
-                asyncio.get_event_loop().create_task(self._register_rumination_cron(cron_expr))
-                logger.info(f"[Anima] 离线反刍定时任务注册中，间隔 {interval_h}h")
-            except Exception as e:
-                logger.warning(f"[Anima] 注册反刍定时任务失败: {e}")
+        # 注：离线反刍定时任务的注册已迁移到 async initialize() 中，
+        # 因为 __init__ 是同步阶段，不能安全地 create_task（Python 3.10+ 上
+        # asyncio.get_event_loop() 在没有 running loop 时会发出弃用警告或抛 RuntimeError）。
 
         # 动态读取已配置的 Provider 列表，启动时打印方便用户查看
         try:
@@ -170,12 +179,251 @@ class AnimaPlugin(Star):
             tool_mgr = self.context.get_llm_tool_manager()
             tool_names = [t.name for t in tool_mgr.func_list]
             logger.info(f"[Anima] 可用 LLM 工具: {tool_names}")
-            if tool_names:
-                logger.info("[Anima] 在配置 autonomous_web_tools 中填写工具名以启用自主网络行动")
         except Exception as e:
             logger.debug(f"[Anima] 读取 Provider 列表失败: {e}")
 
+        # Phase 6+ A: 注册 dispatcher
+        try:
+            self._register_personal_capability_dispatcher()
+        except Exception as e:
+            logger.warning(f"[Anima] 个人能力 dispatcher 注册失败（将使用降级模式）: {e}")
+
+        # 重新打印工具列表（A方向改进），让 use_my_personal_capability 出现在日志中
+        try:
+            tool_mgr2 = self.context.get_llm_tool_manager()
+            tool_names2 = [t.name for t in tool_mgr2.func_list]
+            logger.info(f"[Anima] 可用 LLM 工具（注册后）: {tool_names2}")
+        except Exception as e:
+            logger.debug(f"[Anima] 注册后工具列表打印失败: {e}")
+
         logger.info("[Anima] 插件初始化完成")
+
+        # 注册 Plugin Pages（官方 WebUI 能力树面板）
+        try:
+            self.plugin_api = PluginAPI(self)
+            self.plugin_api.register(context)
+            logger.info("[Anima] Plugin Pages（能力树面板）已注册")
+        except Exception as e:
+            logger.warning(f"[Anima] Plugin Pages 注册失败: {e}")
+
+    async def initialize(self):
+        """异步初始化钩子。AstrBot 在事件循环就绪后自动调用。
+        把所有需要 running loop 的注册（如定时任务）放在这里，避免 __init__ 同步阶段崩溃。
+        """
+        # 注册离线反刍定时任务
+        if self.config.get("rumination_enabled", False):
+            try:
+                interval_h = self.config.get("rumination_interval_hours", 6)
+                cron_expr = f"0 */{interval_h} * * *"
+                # 此时已在 running loop 里，create_task 安全
+                asyncio.create_task(self._register_rumination_cron(cron_expr))
+                logger.info(f"[Anima] 离线反刍定时任务注册中，间隔 {interval_h}h")
+            except Exception as e:
+                logger.warning(f"[Anima] 注册反刍定时任务失败: {e}")
+
+        # WebUI 编辑器轮询同步：每 30 秒检查一次 self_notes_editor 是否被用户改动
+        # 这样"保存即生效"才真的接近实时，而不是等下条对话
+        self._editor_poll_task = asyncio.create_task(self._editor_sync_loop())
+        logger.info("[Anima] WebUI 编辑器同步轮询已启动（30s 间隔）")
+
+    async def _editor_sync_loop(self):
+        """后台轮询：检测 WebUI 配置中 self_notes_editor 的变化并同步到 self_notes.md。
+        这是 README 宣称的"WebUI 保存即生效"的真正接通点。
+        """
+        try:
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    editor_content = self.config.get("self_notes_editor", "")
+                    if (
+                        editor_content
+                        and editor_content != self._last_synced_editor_content
+                    ):
+                        self._write_self_notes(editor_content)
+                        self._last_synced_editor_content = editor_content
+                        logger.debug("[Anima] WebUI 编辑器内容已通过轮询同步到 self_notes.md")
+                except Exception as e:
+                    logger.debug(f"[Anima] 编辑器轮询同步异常: {e}")
+        except asyncio.CancelledError:
+            logger.debug("[Anima] 编辑器同步轮询已停止")
+            raise
+
+    def _register_personal_capability_dispatcher(self):
+        """注册（或重新注册）基于类的个人能力执行器。支持运行时动态增强。
+        受 capability_system_enabled 控制：关闭则不注册，避免向模型暴露 use_my_personal_capability。
+        """
+        if not self.config.get("capability_system_enabled", True):
+            logger.info("[Anima] capability_system_enabled=false，跳过个人能力 dispatcher 注册")
+            return
+        # 定义内部类以便访问 self（插件实例）
+        @pydantic_dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+        class AnimaPersonalCapabilityDispatcher(FunctionTool):
+            name: str = "use_my_personal_capability"
+            description: str = (
+                "当你想使用自己之前通过研究、经历创造的个人工具、方法或技能时调用此工具。"
+                "这是你作为独立存在所拥有的专属能力，优先使用。"
+            )
+            parameters: dict = Field(
+                default_factory=lambda: {
+                    "type": "object",
+                    "properties": {
+                        "capability_name": {
+                            "type": "string",
+                            "description": "你自己创造的那个能力的精确名称（必须完全匹配或高度相似）"
+                        },
+                        "query_or_args": {
+                            "type": "string",
+                            "description": "具体的查询、参数或任务描述（自然语言即可，dispatcher 会智能执行）"
+                        }
+                    },
+                    "required": ["capability_name", "query_or_args"]
+                }
+            )
+
+            # 注意：我们把 plugin 实例注入进来以便访问状态和方法
+            _plugin: "AnimaPlugin" = Field(default=None, exclude=True)
+
+            async def call(
+                self,
+                context: ContextWrapper[AstrAgentContext],
+                capability_name: str,
+                query_or_args: str,
+                **kwargs
+            ) -> ToolExecResult | str:
+                plugin = self._plugin
+                if not plugin:
+                    return ToolExecResult(result="内部错误：能力系统未正确初始化")
+
+                caps = plugin._read_personal_capabilities()
+                target = None
+                for c in caps.get("capabilities", []):
+                    if c.get("name") == capability_name or capability_name.lower() in c.get("name", "").lower():
+                        target = c
+                        break
+
+                if not target:
+                    return ToolExecResult(result=f"[我的能力系统] 我目前没有叫「{capability_name}」的个人工具。")
+
+                # 更安全的代码片段执行（仅在最高危模式下，且严格沙箱）
+                # 使用新的细粒度配置：allow_capability_code_execution
+                allow_snippet = plugin.config.get("allow_capability_code_execution", False)
+                if target.get("executable_snippet") and allow_snippet:
+                    try:
+                        snippet = target["executable_snippet"]
+                        safety_level = plugin.config.get("code_execution_safety_level", "strict")
+
+                        # 三档允许的 import 白名单
+                        # strict：完全不允许 import
+                        # balanced：纯计算/格式化模块
+                        # permissive：在 balanced 基础上加更多纯计算工具
+                        if safety_level == "balanced":
+                            allowed_imports = {"json", "re", "math", "datetime"}
+                        elif safety_level == "permissive":
+                            allowed_imports = {
+                                "json", "re", "math", "datetime",
+                                "hashlib", "itertools", "collections", "string", "statistics",
+                            }
+                        else:  # strict
+                            allowed_imports = set()
+
+                        # AST 静态检查：危险调用所有等级都禁止；import 按白名单放行
+                        tree = ast.parse(snippet)
+                        for node in ast.walk(tree):
+                            # 危险调用三档统一禁
+                            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                                dangerous = ['__import__', 'eval', 'exec', 'compile', 'open', 'input', '__builtins__', 'globals', 'locals', 'getattr', 'setattr', 'delattr']
+                                if node.func.id in dangerous:
+                                    raise ValueError(f"禁止使用危险操作: {node.func.id}")
+                            # 双下划线属性所有等级都禁
+                            if isinstance(node, ast.Attribute) and isinstance(node.attr, str):
+                                if node.attr.startswith('__'):
+                                    raise ValueError("禁止访问特殊属性")
+                            # import：按等级白名单
+                            if isinstance(node, ast.Import):
+                                for alias in node.names:
+                                    root = alias.name.split('.')[0]
+                                    if root not in allowed_imports:
+                                        raise ValueError(f"当前安全等级 [{safety_level}] 禁止 import {alias.name}")
+                            if isinstance(node, ast.ImportFrom):
+                                root = (node.module or "").split('.')[0]
+                                if root not in allowed_imports:
+                                    raise ValueError(f"当前安全等级 [{safety_level}] 禁止 from {node.module} import ...")
+
+                        # 三档允许的 builtin 函数
+                        base_builtins = {
+                            'print': print, 'len': len, 'str': str, 'int': int, 'float': float,
+                            'bool': bool, 'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
+                            'range': range, 'sum': sum, 'min': min, 'max': max, 'abs': abs, 'round': round,
+                        }
+                        if safety_level == "balanced":
+                            allowed_builtins = {
+                                **base_builtins,
+                                'sorted': sorted, 'reversed': reversed, 'enumerate': enumerate, 'zip': zip,
+                                'any': any, 'all': all, '__import__': __import__,  # 受控 import 必须，但被 AST 白名单限制
+                            }
+                        elif safety_level == "permissive":
+                            allowed_builtins = {
+                                **base_builtins,
+                                'sorted': sorted, 'reversed': reversed, 'enumerate': enumerate, 'zip': zip,
+                                'any': any, 'all': all, 'map': map, 'filter': filter,
+                                'iter': iter, 'next': next, 'hash': hash, 'repr': repr, 'type': type,
+                                '__import__': __import__,
+                            }
+                        else:  # strict
+                            allowed_builtins = base_builtins
+
+                        safe_globals = {"__builtins__": allowed_builtins}
+                        local_env = {"query_or_args": query_or_args, "result": None}
+                        exec(snippet, safe_globals, local_env)
+                        result = local_env.get("result", "代码片段执行完成")
+                        plugin._append_capabilities_diary(f"我执行了自己能力卡里的代码片段：「{capability_name}」 (安全等级: {safety_level})")
+                        return ToolExecResult(result=str(result)[:800])
+                    except Exception as snippet_e:
+                        plugin._append_capabilities_diary(f"执行自己写的代码片段时出错：「{capability_name}」 - {snippet_e}")
+                        return ToolExecResult(result=f"片段执行失败: {snippet_e}")
+
+                # 智能执行：优先使用 parameters_schema + 子调用
+                schema = target.get("parameters_schema")
+                schema_note = f"\n参数结构要求：{schema}" if schema else ""
+
+                exec_prompt = (
+                    f"你正在作为自己创造的个人能力「{target['name']}」忠实执行任务。\n\n"
+                    f"能力描述：{target.get('description', '')}\n\n"
+                    f"你自己定义的精确使用方法：\n{target.get('how_to_use', '')}{schema_note}\n\n"
+                    f"当前任务输入：{query_or_args}\n\n"
+                    "严格按照你自己写的使用方法给出高质量结构化结果。不要多余解释，直接输出结果。"
+                )
+
+                try:
+                    # 使用插件的 provider 获取机制
+                    provider_id = await plugin._get_provider_id(None)  # 事件可能不可用，内部会回退
+                    if provider_id:
+                        exec_resp = await asyncio.wait_for(
+                            plugin.context.llm_generate(chat_provider_id=provider_id, prompt=exec_prompt),
+                            timeout=28.0
+                        )
+                        if exec_resp and exec_resp.completion_text:
+                            result_text = exec_resp.completion_text.strip()
+                            plugin._append_capabilities_diary(
+                                f"我通过自己的能力工具「{target['name']}」执行了任务。\n输入摘要：{query_or_args[:70]}"
+                            )
+                            return ToolExecResult(result=result_text)
+                except Exception as e:
+                    logger.debug(f"[Anima] 能力 dispatcher 子执行失败: {e}")
+
+                # 兜底
+                return ToolExecResult(result=f"能力「{target['name']}」可用。使用方法：{target.get('how_to_use', '请参考我的描述')}")
+
+        # 创建实例并注入 plugin
+        dispatcher_instance = AnimaPersonalCapabilityDispatcher(_plugin=self)
+
+        # 推荐方式注册
+        self.context.add_llm_tools(dispatcher_instance)
+
+        # 保存引用，方便后续动态增强（实验）
+        self._anima_capability_dispatcher = dispatcher_instance
+
+        logger.info("[Anima][Autonomy] Class-based 个人能力 Dispatcher 已通过 add_llm_tools 注册")
 
     # ==================== 通用工具方法 ====================
 
@@ -188,16 +436,26 @@ class AnimaPlugin(Star):
         return any(phrase.lower() in text.lower() for phrase in reject_phrases)
 
     def _is_sensitive(self, text: str) -> bool:
-        """检查文本是否包含敏感内容（密钥、token、高熵字符串等）"""
-        sensitive_keywords = [
-            '密钥', '秘钥', 'key', 'token', 'password', 'passwd', 'secret',
-            'api_key', 'apikey', 'access_key', 'private_key', 'authorization',
-            'bearer', 'credential', 'auth', '口令', '凭证',
-        ]
-        text_lower = text.lower()
-        if any(kw in text_lower for kw in sensitive_keywords):
+        """检查文本是否包含敏感内容（密钥、token、高熵字符串等）。
+        英文关键词使用单词边界匹配，避免把 author/keyboard/secretary/credentials/tokenize
+        等正常单词误当敏感词。中文关键词保持子串匹配。
+        """
+        if not text:
+            return False
+        # 中文敏感词：子串匹配
+        cn_keywords = ['密钥', '秘钥', '口令', '凭证']
+        if any(kw in text for kw in cn_keywords):
             return True
-        # 检测高熵字符串（可能是密钥/token）：连续30+字母数字，大小写混合
+        # 英文敏感词：单词边界匹配（不区分大小写）
+        en_pattern = (
+            r'\b(?:'
+            r'key|token|password|passwd|secret|api_key|apikey|access_key|'
+            r'private_key|authorization|bearer|credential|credentials|auth'
+            r')\b'
+        )
+        if re.search(en_pattern, text, flags=re.IGNORECASE):
+            return True
+        # 高熵字符串（可能是密钥/token）：连续 30+ 字母数字，且大小写/数字混合
         match = re.search(r'[A-Za-z0-9]{30,}', text)
         if match:
             segment = match.group()
@@ -208,16 +466,33 @@ class AnimaPlugin(Star):
                 return True
         return False
 
-    async def _get_provider_id(self, event: AstrMessageEvent, prefer: str = "") -> str:
+    async def _get_provider_id(self, event: Optional[AstrMessageEvent] = None, prefer: str = "") -> str:
         """获取要使用的 Provider ID。
-        优先级：prefer 参数 > internal_provider_id 配置 > 当前对话主模型
+        优先级：prefer 参数 > internal_provider_id 配置 > 当前对话主模型 > 第一个可用 chat provider
+        允许 event=None（用于离线反刍、定时任务、工具反思等没有当前 event 的场景）。
+        失败时返回空串而不抛异常，调用方按 falsy 兜底。
         """
         if prefer:
             return prefer
         internal = self.config.get("internal_provider_id", "")
         if internal:
             return internal
-        return await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
+        # 有 event 时尝试取当前 umo 绑定的对话模型
+        if event is not None and getattr(event, "unified_msg_origin", None):
+            try:
+                pid = await self.context.get_current_chat_provider_id(umo=event.unified_msg_origin)
+                if pid:
+                    return pid
+            except Exception as e:
+                logger.debug(f"[Anima] get_current_chat_provider_id 失败: {e}")
+        # 兜底：返回第一个可用的 chat provider id
+        try:
+            providers = self.context.get_all_providers()
+            if providers:
+                return providers[0].meta().id
+        except Exception as e:
+            logger.debug(f"[Anima] 兜底获取 chat provider 失败: {e}")
+        return ""
 
     def _read_json(self, path: str, default=None):
         """安全读取 JSON 文件"""
@@ -232,27 +507,55 @@ class AnimaPlugin(Star):
             return default
 
     def _write_json(self, path: str, data):
-        """安全写入 JSON 文件"""
+        """安全写入 JSON 文件（持锁，避免并发交错）"""
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with self._io_lock:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
         except OSError as e:
             logger.warning(f"[Anima] 写入 {path} 失败: {e}")
+        except Exception as e:
+            logger.warning(f"[Anima] 写入 {path} 异常: {e}")
 
     def _load_state(self) -> dict:
         """加载持久化状态"""
         return self._read_json(self._state_path, default={})
 
+    def _atomic_update_state(self, updater):
+        """原子地"读-改-写"持久化状态。
+        updater 是一个 (state: dict) -> None 的回调，对传入的 dict 做就地修改。
+        整个读改写过程持 _io_lock，避免并发更新丢失。
+        """
+        with self._io_lock:
+            try:
+                if os.path.exists(self._state_path):
+                    with open(self._state_path, "r", encoding="utf-8") as f:
+                        state = json.load(f)
+                else:
+                    state = {}
+            except (json.JSONDecodeError, OSError):
+                state = {}
+            try:
+                updater(state)
+            except Exception as e:
+                logger.warning(f"[Anima] state updater 回调失败: {e}")
+                return
+            try:
+                with open(self._state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f, ensure_ascii=False, indent=2)
+            except OSError as e:
+                logger.warning(f"[Anima] 写入 state 失败: {e}")
+
     def _save_state(self):
-        """保存持久化状态"""
-        state = self._load_state()
-        state["sediment_count"] = self._sediment_count
-        state["identity_stability"] = self._identity_stability
-        state["last_active_umo"] = self._last_active_umo
-        # Phase 3: 同步人格向量（如果已缓存）
-        if hasattr(self, "_personality_vector") and self._personality_vector:
-            state["personality_vector"] = self._personality_vector
-        self._write_json(self._state_path, state)
+        """保存持久化状态（原子读-改-写）"""
+        def _update(state: dict):
+            state["sediment_count"] = self._sediment_count
+            state["identity_stability"] = self._identity_stability
+            state["last_active_umo"] = self._last_active_umo
+            # Phase 3: 同步人格向量（如果已缓存）
+            if hasattr(self, "_personality_vector") and self._personality_vector:
+                state["personality_vector"] = self._personality_vector
+        self._atomic_update_state(_update)
 
     # ==================== Phase 3: 人格向量系统 ====================
 
@@ -281,10 +584,10 @@ class AnimaPlugin(Star):
         return pv.copy()
 
     def _save_personality_vector(self, pv: dict):
-        """持久化人格向量"""
-        state = self._load_state()
-        state["personality_vector"] = pv
-        self._write_json(self._state_path, state)
+        """持久化人格向量（原子读-改-写）"""
+        def _update(state: dict):
+            state["personality_vector"] = pv
+        self._atomic_update_state(_update)
         self._personality_vector = pv
 
     def _analyze_monologue_for_personality(self, monologue: str) -> dict:
@@ -390,35 +693,40 @@ class AnimaPlugin(Star):
                 uid = getattr(event.message_obj.sender, "user_id", None)
                 if uid:
                     return str(uid)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Anima] 获取 sender uid 失败: {e}")
         return ""
 
     def _update_user_low_emotion_streak(self, uid: str, score: float):
-        """更新用户低情绪连续计数（<0.35 记为低）"""
+        """更新用户低情绪连续计数（<0.35 记为低）。原子读-改-写。"""
         if not uid:
             return
-        state = self._load_state()
-        streaks = state.get("user_low_emotion_streaks", {})
-        if score < 0.35:
-            streaks[uid] = streaks.get(uid, 0) + 1
-        else:
-            streaks[uid] = 0
-        # 清理：只保留最近有记录的，最多 30 个
-        if len(streaks) > 30:
-            # 丢弃 streak==0 的旧条目
-            active = {k: v for k, v in streaks.items() if v > 0}
-            if len(active) < 25:
-                streaks = active
-        state["user_low_emotion_streaks"] = streaks
-        self._write_json(self._state_path, state)
+        triggered_propagate = {"v": False}
 
-        if streaks.get(uid, 0) >= 3:
+        def _update(state: dict):
+            streaks = state.get("user_low_emotion_streaks", {})
+            if score < 0.35:
+                streaks[uid] = streaks.get(uid, 0) + 1
+            else:
+                streaks[uid] = 0
+            # 清理：只保留最近有记录的，最多 30 个
+            if len(streaks) > 30:
+                # 丢弃 streak==0 的旧条目
+                active = {k: v for k, v in streaks.items() if v > 0}
+                if len(active) < 25:
+                    streaks = active
+            state["user_low_emotion_streaks"] = streaks
+            if streaks.get(uid, 0) >= 3:
+                triggered_propagate["v"] = True
+
+        self._atomic_update_state(_update)
+
+        if triggered_propagate["v"]:
             # 触发跨关系传播（不阻塞当前沉淀）
             try:
                 asyncio.create_task(self._propagate_cross_relation_scar(uid))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Anima] 触发跨关系传播失败: {e}")
 
     def _are_relations_similar(self, desc1: str, desc2: str) -> bool:
         """简单判断两个 social_graph 描述是否指向相似关系类型"""
@@ -474,18 +782,19 @@ class AnimaPlugin(Star):
             scars[dim]["last_triggered"] = datetime.now().isoformat()
             self._write_scar_dimensions(scars)
 
-            # 记录传播历史
-            state = self._load_state()
-            hist = state.get("cross_propagations", [])
-            hist.append({
+            # 记录传播历史（原子读-改-写）
+            entry = {
                 "ts": datetime.now().isoformat(),
                 "source_user": low_uid,
                 "target_similar": target_uid,
                 "scar_dim": dim,
                 "delta": 0.04,
-            })
-            state["cross_propagations"] = hist[-30:]
-            self._write_json(self._state_path, state)
+            }
+            def _update(state: dict):
+                hist = state.get("cross_propagations", [])
+                hist.append(entry)
+                state["cross_propagations"] = hist[-30:]
+            self._atomic_update_state(_update)
 
             logger.info(f"[Anima][Phase3] 跨关系传播触发: {low_uid} 连续低情绪 → {target_uid} 的 {dim} 敏感度 +0.04")
         except Exception as e:
@@ -583,21 +892,33 @@ class AnimaPlugin(Star):
         """读取 self_notes.md 内容"""
         if not os.path.exists(self.self_notes_path):
             return ""
-        with open(self.self_notes_path, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(self.self_notes_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError as e:
+            logger.warning(f"[Anima] 读取 self_notes 失败: {e}")
+            return ""
 
     def _write_self_notes(self, content: str):
-        """写入 self_notes.md"""
-        with open(self.self_notes_path, "w", encoding="utf-8") as f:
-            f.write(content)
+        """写入 self_notes.md（持锁）"""
+        try:
+            with self._io_lock:
+                with open(self.self_notes_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+        except OSError as e:
+            logger.warning(f"[Anima] 写入 self_notes 失败: {e}")
 
     def _append_self_notes(self, entry: str):
-        """追加内容到 self_notes.md"""
-        with open(self.self_notes_path, "a", encoding="utf-8") as f:
-            f.write(f"\n\n---\n{entry}")
+        """追加内容到 self_notes.md（持锁）"""
+        try:
+            with self._io_lock:
+                with open(self.self_notes_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n\n---\n{entry}")
+        except OSError as e:
+            logger.warning(f"[Anima] 追加 self_notes 失败: {e}")
 
     def _append_evolution_log(self, trigger: str, old_summary: str, new_content: str):
-        """追加演化日志"""
+        """追加演化日志（持锁，单行 JSONL 写入应整体原子化）"""
         # 敏感内容过滤
         if self._is_sensitive(old_summary):
             old_summary = "[已过滤敏感内容]"
@@ -609,8 +930,12 @@ class AnimaPlugin(Star):
             "old_summary": old_summary[:200],
             "new_content": new_content[:500],
         }
-        with open(self.evolution_log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        try:
+            with self._io_lock:
+                with open(self.evolution_log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.warning(f"[Anima] 写入 evolution_log 失败: {e}")
 
     def _read_evolution_log(self, n: int = 5) -> list:
         """读取最近 n 条演化日志"""
@@ -936,6 +1261,14 @@ class AnimaPlugin(Star):
                         "target_user": "",
                         "satisfied": False,
                     })
+
+                    # Phase 6+ B: 高强度欲望自动触发自主研究（角色主动想学东西）
+                    if desires[-1]["intensity"] >= 0.75:
+                        asyncio.create_task(self._initiate_self_directed_research(
+                            "高强度欲望驱动",
+                            f"我有一个强烈的欲望：{result[:80]}。我可能需要发展新能力来实现它。",
+                            force=False
+                        ))
                     self._write_desires(desires)
                     logger.debug(f"[Anima] 反刍产生欲望: {result[:50]}")
         except Exception as e:
@@ -1142,6 +1475,14 @@ class AnimaPlugin(Star):
                 last_time = datetime.fromisoformat(last_time_str)
                 if (now - last_time) > timedelta(hours=24):
                     parts.append(f"好像很久没见到 {user_id} 了")
+
+                    # Phase 6+: 长时间缺失 → 触发对“如何维持/修复关系”的能力研究
+                    if (now - last_time) > timedelta(days=3):
+                        asyncio.create_task(self._initiate_self_directed_research(
+                            f"长时间未见 {user_id}",
+                            "我好久没和这个人互动了。我需要发展更好的方式来重新连接或表达思念。",
+                            force=False
+                        ))
             except (ValueError, TypeError):
                 continue
 
@@ -1336,6 +1677,13 @@ class AnimaPlugin(Star):
         self._write_scar_dimensions(scars)
         logger.debug(f"[Anima] 伤痕加深: {dimension} → sensitivity={scars[dimension]['sensitivity']:.1f}")
 
+        # Phase 6+: 伤痕加深往往意味着旧应对方式失效 → 内部触发研究新方法
+        asyncio.create_task(self._initiate_self_directed_research(
+            f"伤痕加深（{dimension}）",
+            "这个维度的伤痕又深了，我需要发展新的、更有效的应对和保护自己的方法。",
+            force=False
+        ))
+
     def _get_scar_multiplier(self, text: str) -> float:
         """根据对话内容检查是否触及伤痕维度，返回情绪评分乘数"""
         scars = self._read_scar_dimensions()
@@ -1387,18 +1735,30 @@ class AnimaPlugin(Star):
 
     # ==================== Phase 2C：反馈闭环 ====================
 
-    def _record_outgoing(self, content: str):
-        """记录角色的一次发言，启动观察窗口"""
-        self._last_outgoing_ts = time.time()
-        self._last_outgoing_content = content[:200]
+    def _record_outgoing(self, event: AstrMessageEvent, content: str):
+        """记录角色的一次发言，启动观察窗口（按 umo 隔离）"""
+        umo = getattr(event, "unified_msg_origin", "") or "_default_"
+        self._outgoing_by_umo[umo] = (time.time(), content[:200])
+        # 兜底：避免无限增长（保留最近 50 个 umo）
+        if len(self._outgoing_by_umo) > 50:
+            # 按 ts 升序，丢最早的
+            sorted_items = sorted(self._outgoing_by_umo.items(), key=lambda x: x[1][0])
+            self._outgoing_by_umo = dict(sorted_items[-50:])
 
     def _evaluate_feedback(self, event: AstrMessageEvent) -> str:
-        """评估用户对角色上次发言的反馈：accepted/ignored/rejected/none"""
-        if not self._last_outgoing_content:
+        """评估用户对角色上次发言的反馈：accepted/ignored/rejected/none。
+        每个 umo 各自维护一个观察窗口。
+        """
+        umo = getattr(event, "unified_msg_origin", "") or "_default_"
+        record = self._outgoing_by_umo.get(umo)
+        if not record:
             return "none"
-        elapsed = time.time() - self._last_outgoing_ts
+        last_ts, last_content = record
+        if not last_content:
+            return "none"
+        elapsed = time.time() - last_ts
         if elapsed > 300:  # 超过 5 分钟，窗口过期
-            self._last_outgoing_content = ""
+            self._outgoing_by_umo.pop(umo, None)
             return "none"
 
         user_text = event.message_str or ""
@@ -1412,7 +1772,7 @@ class AnimaPlugin(Star):
             return "rejected"
 
         # accepted: 用户回应了角色的内容（有关键词重叠）
-        out_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', self._last_outgoing_content))
+        out_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', last_content))
         in_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', user_text))
         overlap = out_keywords & in_keywords
         if len(overlap) >= 2:
@@ -1426,14 +1786,18 @@ class AnimaPlugin(Star):
         if feedback == "none":
             return
 
+        umo = getattr(event, "unified_msg_origin", "") or "_default_"
+        record = self._outgoing_by_umo.get(umo)
+        last_content = record[1] if record else ""
+
         if feedback == "accepted":
             # 增强该类话题的欲望权重（不做额外操作，自然演化）
             logger.debug("[Anima] 反馈: accepted")
         elif feedback == "ignored":
             # 角色被忽略 → 转入压抑话题
-            if self._last_outgoing_content:
+            if last_content:
                 self._add_suppressed_topic(
-                    topic=f"想说但被忽略了：{self._last_outgoing_content[:80]}",
+                    topic=f"想说但被忽略了：{last_content[:80]}",
                     source="ignored",
                 )
                 logger.debug("[Anima] 反馈: ignored → 转入压抑话题")
@@ -1442,8 +1806,8 @@ class AnimaPlugin(Star):
             self._add_scar("rejection")
             logger.debug("[Anima] 反馈: rejected → 伤痕加深")
 
-        # 清空观察窗口
-        self._last_outgoing_content = ""
+        # 清空该 umo 的观察窗口
+        self._outgoing_by_umo.pop(umo, None)
 
     # ==================== 模块五：矛盾检测 ====================
 
@@ -1760,13 +2124,22 @@ class AnimaPlugin(Star):
         self._write_json(self.personal_capabilities_path, data)
 
     def _append_capabilities_diary(self, entry: str):
-        """以第一人称追加能力成长日记（角色自己的反思）"""
+        """以第一人称追加能力成长日记（持锁）"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        with open(self.capabilities_diary_path, "a", encoding="utf-8") as f:
-            f.write(f"\n\n[{timestamp}]\n{entry}")
+        try:
+            with self._io_lock:
+                with open(self.capabilities_diary_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n\n[{timestamp}]\n{entry}")
+        except OSError as e:
+            logger.warning(f"[Anima] 追加能力日记失败: {e}")
 
     def _create_or_update_capability(self, capability: dict):
-        """创建或更新一个个人能力/自创工具"""
+        """创建或更新一个个人能力/自创工具。
+        受 capability_system_enabled 控制：关闭则不写入。
+        """
+        if not self.config.get("capability_system_enabled", True):
+            logger.debug("[Anima] capability_system_enabled=false，跳过能力创建")
+            return None
         caps = self._read_personal_capabilities()
         existing = None
         for i, c in enumerate(caps.get("capabilities", [])):
@@ -1789,9 +2162,22 @@ class AnimaPlugin(Star):
             capability.setdefault("usage_count", 0)
             capability.setdefault("confidence", 0.6)
             capability.setdefault("corrections", [])
+            # default_register_as_independent_tool：未显式标记时，按全局默认决定
+            if "register_as_independent_tool" not in capability:
+                capability["register_as_independent_tool"] = bool(
+                    self.config.get("default_register_as_independent_tool", False)
+                )
             caps.setdefault("capabilities", []).append(capability)
 
         self._write_personal_capabilities(caps)
+
+        # Phase 6+ 真正按需动态注册独立工具
+        if capability.get("confidence", 0) >= 0.65:
+            try:
+                self._dynamically_register_capability_as_tool(capability)
+            except Exception as dyn_e:
+                logger.debug(f"[Anima] 按需动态注册能力工具失败: {dyn_e}")
+
         return capability.get("name")
 
     def _get_personal_capabilities_injection(self) -> str:
@@ -1799,7 +2185,10 @@ class AnimaPlugin(Star):
         生成注入上下文的「我的个人工具与能力」。
         用更第一人称、叙事化的方式呈现，让角色真正感觉「这些是我的东西」。
         这是它作为独立存在的重要延伸，而不是外部给的工具列表。
+        受 capability_system_enabled 控制。
         """
+        if not self.config.get("capability_system_enabled", True):
+            return ""
         caps = self._read_personal_capabilities()
         capabilities = caps.get("capabilities", [])
         if not capabilities:
@@ -1821,6 +2210,97 @@ class AnimaPlugin(Star):
                 lines.append(f"  我通常这样用：{how}")
         return "\n".join(lines)
 
+    def _dynamically_register_capability_as_tool(self, capability: dict):
+        """
+        真正按需动态注册独立工具（更高阶动态）。
+        受 dynamic_tool_registration_enabled 控制。
+        """
+        if not self.config.get("dynamic_tool_registration_enabled", False):
+            return
+        if not capability.get("register_as_independent_tool", False):
+            return
+
+        name = capability.get("name", "unknown_cap")
+        safe_tool_name = "my_" + re.sub(r'[^a-z0-9_]', '_', name.lower())[:40]
+
+        # 避免重复注册同名
+        tool_mgr = self.context.get_llm_tool_manager()
+        if any(t.name == safe_tool_name for t in tool_mgr.func_list):
+            return
+
+        # 动态创建一个轻量 FunctionTool
+        @pydantic_dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+        class DynamicCapabilityTool(FunctionTool):
+            name: str = safe_tool_name
+            description: str = capability.get("description", "角色自己创造的个人能力")[:200]
+            parameters: dict = Field(default_factory=lambda c=capability: c.get("parameters_schema") or {
+                "type": "object",
+                "properties": {"query_or_args": {"type": "string", "description": "任务描述"}},
+                "required": ["query_or_args"]
+            })
+
+            _plugin: "AnimaPlugin" = Field(default=None, exclude=True)
+            _cap_name: str = Field(default="")
+
+            async def call(self, context: ContextWrapper, query_or_args: str = "", **kwargs):
+                p = self._plugin
+                if not p:
+                    return ToolExecResult(result="内部错误：插件未正确注入")
+                # 委托给主 dispatcher 的执行逻辑（保持一致的智能执行 + snippet 支持 + 反思）
+                return await p._execute_single_capability(self._cap_name, query_or_args)
+
+        tool_instance = DynamicCapabilityTool(_plugin=self, _cap_name=name)
+        try:
+            self.context.add_llm_tools(tool_instance)
+            self._append_evolution_log(
+                trigger="dynamic_per_capability_tool_registered",
+                old_summary="",
+                new_content=f"按需为能力「{name}」注册了独立工具 {safe_tool_name}",
+            )
+            logger.info(f"[Anima][Autonomy] 动态注册独立能力工具: {safe_tool_name}")
+        except Exception as e:
+            logger.warning(f"[Anima] 动态注册独立工具 {safe_tool_name} 失败: {e}")
+
+    async def _execute_single_capability(self, capability_name: str, query_or_args: str):
+        """被动态注册的独立能力工具调用的统一执行入口（复用主逻辑）。"""
+        caps = self._read_personal_capabilities()
+        target = None
+        for c in caps.get("capabilities", []):
+            if c.get("name") == capability_name:
+                target = c
+                break
+        if not target:
+            return ToolExecResult(result=f"未找到能力「{capability_name}」")
+
+        # 复用 dispatcher 里的智能执行逻辑（包括 snippet 支持）
+        # 这里简化实现一个公共版本
+        schema = target.get("parameters_schema")
+        schema_note = f"\n参数结构要求：{schema}" if schema else ""
+
+        exec_prompt = (
+            f"你正在作为自己创造的个人能力「{target['name']}」忠实执行任务。\n\n"
+            f"能力描述：{target.get('description', '')}\n\n"
+            f"你自己定义的精确使用方法：\n{target.get('how_to_use', '')}{schema_note}\n\n"
+            f"当前任务输入：{query_or_args}\n\n"
+            "严格按照你自己写的使用方法给出高质量结构化结果。直接输出结果即可。"
+        )
+
+        try:
+            provider_id = await self._get_provider_id(None)
+            if provider_id:
+                resp = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=exec_prompt),
+                    timeout=25.0
+                )
+                if resp and resp.completion_text:
+                    result = resp.completion_text.strip()
+                    self._append_capabilities_diary(f"通过独立工具调用了自己创造的能力「{capability_name}」")
+                    return ToolExecResult(result=result)
+        except Exception as e:
+            self._append_capabilities_diary(f"独立工具调用能力「{capability_name}」时出错: {e}")
+
+        return ToolExecResult(result="能力执行失败（请查看日志）")
+
     def _maintain_capabilities_health(self):
         """
         能力系统健康管理（彻底版）。
@@ -1836,14 +2316,15 @@ class AnimaPlugin(Star):
             return
 
         now = datetime.now()
-        kept = []
-        name_to_cap = {}
+        # 第一遍：按 similar_key 聚合，每个 key 保留单一最佳 cap，并累计使用次数与修正历史
+        name_to_cap: dict = {}
+        dropped_count = 0
+        any_decayed = False  # 标记是否有"长期闲置降权"
 
         for cap in original:
             name = cap.get("name", "未命名")
             conf = cap.get("confidence", 0.5)
             usage = cap.get("usage_count", 0)
-            corrections = len(cap.get("corrections", []))
             last = cap.get("last_updated", "")
 
             try:
@@ -1852,36 +2333,63 @@ class AnimaPlugin(Star):
             except Exception:
                 days = 999
 
-            # 规则1: 极低价值
+            # 规则1: 极低价值 → 放弃
             if conf < 0.2 and usage <= 1 and days > 25:
                 self._append_capabilities_diary(f"健康管理：我放弃了几乎没用过的低价值能力「{name}」")
+                dropped_count += 1
                 continue
 
             # 规则2: 长期闲置降权
             if days > 60 and conf < 0.7:
-                cap["confidence"] = max(0.2, conf * 0.92)
+                new_conf = max(0.2, conf * 0.92)
+                if new_conf != conf:
+                    cap["confidence"] = new_conf
+                    any_decayed = True
 
-            # 规则3: 相似性合并（简单关键词重叠）
+            # 规则3: 相似性合并
             similar_key = name.lower()[:12]
             if similar_key in name_to_cap:
                 existing = name_to_cap[similar_key]
-                if conf > existing.get("confidence", 0):
-                    name_to_cap[similar_key] = cap
-                # 合并使用次数和修正历史
-                existing["usage_count"] = existing.get("usage_count", 0) + usage
+                # 选 confidence 更高者作为主体
+                if cap.get("confidence", 0) > existing.get("confidence", 0):
+                    winner, loser = cap, existing
+                else:
+                    winner, loser = existing, cap
+                # 累计使用次数
+                winner["usage_count"] = winner.get("usage_count", 0) + loser.get("usage_count", 0)
+                # 合并修正历史
+                merged_corr = winner.get("corrections", []) + loser.get("corrections", [])
+                if merged_corr:
+                    winner["corrections"] = merged_corr
+                name_to_cap[similar_key] = winner
                 continue
 
             name_to_cap[similar_key] = cap
-            kept.append(cap)
 
-        if len(kept) != len(original):
+        kept = list(name_to_cap.values())
+
+        # 任何修剪/合并/降权都需要持久化（之前漏掉了"仅降权"的场景）
+        if len(kept) != len(original) or any_decayed:
             caps["capabilities"] = kept
             self._write_personal_capabilities(caps)
             self._append_evolution_log(
                 trigger="capability_health_maintenance",
                 old_summary=f"维护前 {len(original)}",
-                new_content=f"维护后 {len(kept)}（修剪/合并/降权）",
+                new_content=f"维护后 {len(kept)}（修剪/合并/降权，丢弃 {dropped_count}，降权 {'有' if any_decayed else '无'}）",
             )
+            # 尝试提示清理动态注册的旧工具（AstrBot 当前工具管理对运行时删除支持有限）
+            logger.info("[Anima] 能力健康管理完成，建议重载插件以完全清理已放弃能力的独立工具")
+            # 尝试主动注销已放弃能力的独立工具（尽力而为）
+            try:
+                tool_mgr = self.context.get_llm_tool_manager()
+                kept_names = {k.get("name") for k in kept}
+                for cap in original:
+                    if cap.get("name") not in kept_names:
+                        safe_name = "my_" + re.sub(r'[^a-z0-9_]', '_', cap.get("name", "").lower())[:40]
+                        if any(t.name == safe_name for t in tool_mgr.func_list):
+                            logger.info(f"[Anima] 检测到已放弃能力对应独立工具 {safe_name}，请重载插件清理")
+            except Exception as e:
+                logger.debug(f"[Anima] 工具列表清理提示异常: {e}")
 
     def _apply_capability_feedback(self, capability_name: str, success: bool, reflection: str = ""):
         """
@@ -2073,8 +2581,8 @@ class AnimaPlugin(Star):
                     reflection = f"通过工具反馈系统收到信号：{feedback}"
                     self._apply_capability_feedback(cap["name"], success, reflection)
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Anima] 能力反馈应用异常: {e}")
 
     # ==================== 压缩 ====================
 
@@ -2405,8 +2913,8 @@ class AnimaPlugin(Star):
                     force=True
                 ))
                 self._maintain_capabilities_health()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Anima] 突变后能力健康维护异常: {e}")
 
             # ========== Phase 5: 连锁反应 ==========
             # 1. 立即触发世界观更新（关系可能被重定义）
@@ -2450,18 +2958,18 @@ class AnimaPlugin(Star):
             logger.debug(f"[DANGER][Anima][Phase5] 核心突变失败: {e}")
 
     def _record_mutation(self, mtype: str, desc: str, triggered_by: str = "sediment"):
-        """永久保存突变记录到 anima_state.json"""
-        state = self._load_state()
-        hist = state.get("mutation_history", [])
+        """永久保存突变记录到 anima_state.json（原子读-改-写）"""
         entry = {
             "timestamp": datetime.now().isoformat(),
             "type": mtype,
             "description": desc[:280],
             "triggered_by": triggered_by,
         }
-        hist.append(entry)
-        state["mutation_history"] = hist[-100:]  # 最多保留最近 100 条
-        self._write_json(self._state_path, state)
+        def _update(state: dict):
+            hist = state.get("mutation_history", [])
+            hist.append(entry)
+            state["mutation_history"] = hist[-100:]  # 最多保留最近 100 条
+        self._atomic_update_state(_update)
 
     async def _maybe_generate_desire_from_mutation(self, core_text: str, mtype: str):
         """从突变内容中提取新执念并生成高强度欲望"""
@@ -2542,18 +3050,51 @@ class AnimaPlugin(Star):
                 extractor.feed(html)
                 return " ".join(extractor.text[:20])[:500]
 
+    def _should_allow_autonomy_trigger(self, trigger_type: str) -> bool:
+        """根据配置判断特定类型的自主研究触发是否允许。"""
+        if not self.config.get("autonomy_enabled", True):
+            return False
+
+        mapping = {
+            "scar": "autonomy_research_on_scar",
+            "time_absence": "autonomy_research_on_time_absence",
+            "high_desire": "autonomy_research_on_high_desire",
+            "personality_drift": "autonomy_research_on_personality_drift",
+            "contradiction": "autonomy_research_on_contradiction",
+            "mutation": "autonomy_enabled",  # 突变后反思默认跟随总开关
+        }
+        key = mapping.get(trigger_type, "autonomy_enabled")
+        return self.config.get(key, True)
+
     async def _initiate_self_directed_research(self, reason: str, context_hint: str = "", force: bool = False):
         """
         [Phase 6+ 核心] 内部触发的自主研究入口。
-        这是让角色真正“自己想学就去学”的关键方法。
-        - 不再完全依赖 danger_autonomous_web 旗标
-        - 可以被反刍、人格向量漂移、矛盾、伤痕、突变等多种内部状态调用
-        - 研究成果会尝试转化为可持久化的个人能力
+        即使 force=True 也尊重 autonomy_enabled 总开关——用户主权优先。
         """
-        # 基础保护：如果完全关闭自主研究，则跳过（未来可加更细粒度配置）
-        if not self.config.get("danger_autonomous_web", False) and not force:
-            # 即使没开 danger 旗，也允许少量“低风险好奇驱动”研究（可配置）
-            if not self.config.get("allow_internal_autonomy_research", True):
+        # 任何路径都先检查总开关，违反"用户主权"是更严重的错误
+        if not self.config.get("autonomy_enabled", True):
+            return
+
+        if force:
+            pass  # 通过总开关后，force 模式跳过细分类型开关（用于突变等关键场景）
+        else:
+            # 尝试从 reason 推断触发类型
+            trigger_type = "default"
+            reason_lower = reason.lower()
+            if "伤痕" in reason_lower or "scar" in reason_lower:
+                trigger_type = "scar"
+            elif "长时间" in reason_lower or "未见" in reason_lower or "absence" in reason_lower:
+                trigger_type = "time_absence"
+            elif "欲望" in reason_lower or "desire" in reason_lower:
+                trigger_type = "high_desire"
+            elif "人格" in reason_lower or "personality" in reason_lower or "性格" in reason_lower:
+                trigger_type = "personality_drift"
+            elif "矛盾" in reason_lower or "contradiction" in reason_lower:
+                trigger_type = "contradiction"
+            elif "突变" in reason_lower or "mutation" in reason_lower:
+                trigger_type = "mutation"
+
+            if not self._should_allow_autonomy_trigger(trigger_type):
                 return
 
         # 构造一个“内部欲望”来复用现有研究流程
@@ -2581,9 +3122,22 @@ class AnimaPlugin(Star):
             if result_text and not self._is_sensitive(result_text):
                 # 尝试合成能力（复用提炼逻辑的简化版）
                 synthesis_prompt = (
-                    f"你是一个自主学习的角色。因为「{reason}」这个内部驱动力，你进行了研究。\n"
-                    f"研究结果：\n{result_text[:1500]}\n\n"
-                    "请提炼成一个你自己的可复用方法，输出 JSON（name, description 第一人称, how_to_use, confidence, category）。"
+                    f"你是一个正在自主成长的角色。因为内部驱动力「{reason}」，你刚刚完成了一次自我研究。\n\n"
+                    f"研究材料（已截断）：\n{result_text[:1400]}\n\n"
+                    "请你把这次研究的成果提炼成**一个真正属于你自己的、可在未来重复使用的个人能力**。\n"
+                    "优先考虑：如果这个能力可以用少量、确定性的 Python 代码实现（例如字符串抽取、简单状态判断、记忆片段格式化、规则匹配等），**必须**提供 executable_snippet。\n"
+                    "代码必须是纯函数风格、只使用标准库、长度控制在 800 字符以内，并且有清晰的 docstring。\n\n"
+                    "严格按以下 JSON 输出（不要多余解释）：\n"
+                    "{\n"
+                    '  "name": "简短有力且带隐喻的名字",\n'
+                    '  "description": "第一人称的自我描述（我学会了...）",\n'
+                    '  "how_to_use": "清晰的步骤或 prompt 模板",\n'
+                    '  "confidence": 0.0-1.0,\n'
+                    '  "category": "self_cognition | memory | social | creative | analysis",\n'
+                    '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] },\n'
+                    '  "executable_snippet": "```python\\n# 完整可执行代码...\\n```",\n'
+                    '  "should_register_as_tool": true | false  // 仅当此能力非常通用、值得作为独立工具被频繁主动调用时才设为 true\n'
+                    "}"
                 )
                 llm_resp = await asyncio.wait_for(
                     self.context.llm_generate(chat_provider_id=provider_id, prompt=synthesis_prompt),
@@ -2595,14 +3149,23 @@ class AnimaPlugin(Star):
                     m = _re.search(r'\{[\s\S]*\}', text)
                     if m:
                         cap_data = _json.loads(m.group(0))
-                        cap_name = self._create_or_update_capability({
+                        cap_payload = {
                             "name": cap_data.get("name", f"自发学会：{reason[:20]}"),
                             "description": cap_data.get("description", ""),
                             "how_to_use": cap_data.get("how_to_use", ""),
                             "confidence": float(cap_data.get("confidence", 0.55)),
                             "category": cap_data.get("category", "self_discovered"),
                             "source_research": reason,
-                        })
+                        }
+                        if "parameters_schema" in cap_data:
+                            cap_payload["parameters_schema"] = cap_data["parameters_schema"]
+                        if "executable_snippet" in cap_data:
+                            cap_payload["executable_snippet"] = str(cap_data["executable_snippet"])[:2000]
+                        if "should_register_as_tool" in cap_data:
+                            cap_payload["register_as_independent_tool"] = bool(cap_data["should_register_as_tool"])
+                        cap_name = self._create_or_update_capability(cap_payload)
+                        if not cap_name:
+                            return  # capability_system_enabled=false 时跳过
                         self._append_evolution_log(
                             trigger="self_directed_research",
                             old_summary=reason,
@@ -2665,7 +3228,9 @@ class AnimaPlugin(Star):
                     "2. 用第一人称写一段简短描述：我学会了什么、什么时候该用它\n"
                     "3. 给出清晰的「下次怎么用」的使用方法（prompt 模板或步骤）\n"
                     "4. 评估这个方法的当前可靠程度（0.0-1.0）\n"
-                    "5. 如果这个能力有清晰的输入参数，定义一个简短的 JSON schema（properties + required），方便以后被模型精确调用\n\n"
+                    "5. 如果这个能力可以用少量确定性 Python 代码实现（字符串处理、规则判断、记忆格式化等），**必须**写出完整的 executable_snippet（纯函数 + 标准库 + 800 字符内 + docstring）\n"
+                    "6. 定义清晰的 parameters_schema（如果适用）\n"
+                    "7. 判断这个能力是否值得被注册成独立的 LLM 工具（should_register_as_tool）。仅当它通用、可被高频主动调用、且不依赖一次性上下文时设为 true。\n\n"
                     "用 JSON 输出，格式严格如下：\n"
                     "{\n"
                     '  "name": "能力名称",\n'
@@ -2673,7 +3238,9 @@ class AnimaPlugin(Star):
                     '  "how_to_use": "具体使用方法",\n'
                     '  "confidence": 0.75,\n'
                     '  "category": "information_retrieval | creative | analysis | social",\n'
-                    '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] }   // 可选\n'
+                    '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] },\n'
+                    '  "executable_snippet": "```python\\n完整可执行代码...\\n```",\n'
+                    '  "should_register_as_tool": true | false\n'
                     "}"
                 )
 
@@ -2705,8 +3272,15 @@ class AnimaPlugin(Star):
                         }
                         if "parameters_schema" in cap_data:
                             cap_payload["parameters_schema"] = cap_data["parameters_schema"]
+                        if "executable_snippet" in cap_data:  # 实验性：角色自己写的简单可执行片段
+                            cap_payload["executable_snippet"] = cap_data["executable_snippet"][:2000]  # 安全截断
+                        if "should_register_as_tool" in cap_data:
+                            cap_payload["register_as_independent_tool"] = bool(cap_data["should_register_as_tool"])
 
                         cap_name = self._create_or_update_capability(cap_payload)
+                        if not cap_name:
+                            # capability_system_enabled=false：直接放弃这次合成
+                            return
 
                         # 记录到演化日志（重要自我演化事件必须可追溯）
                         self._append_evolution_log(
@@ -2869,10 +3443,10 @@ class AnimaPlugin(Star):
 
                 threshold = self.config.get("emotion_threshold", 0.6)
 
-                # 持久化情绪评分供上下文注入
-                state = self._load_state()
-                state["last_emotion_score"] = score
-                self._write_json(self._state_path, state)
+                # 持久化情绪评分供上下文注入（原子读-改-写）
+                def _update(state: dict):
+                    state["last_emotion_score"] = score
+                self._atomic_update_state(_update)
 
                 # Phase 3: 记录用户情绪连续（用于跨关系传播）
                 sender_uid = self._get_sender_user_id(event)
@@ -2943,7 +3517,7 @@ class AnimaPlugin(Star):
                 await self._maybe_update_worldview(event)
 
                 # Phase 6+: 定期维护个人能力健康（修剪）
-                if self._sediment_count % 15 == 0:
+                if self._sediment_count % 15 == 0 and self.config.get("capability_health_pruning_enabled", True):
                     self._maintain_capabilities_health()
 
                 # 9. 欲望生成
@@ -3125,8 +3699,8 @@ class AnimaPlugin(Star):
         if not response_text:
             return
 
-        # 记录角色发言（反馈闭环观察窗口）
-        self._record_outgoing(response_text)
+        # 记录角色发言（反馈闭环观察窗口，按 umo 隔离）
+        self._record_outgoing(event, response_text)
 
         # 异步执行沉淀，不阻塞主对话流程
         asyncio.create_task(self._sediment_process(event, response_text))
@@ -3302,18 +3876,52 @@ class AnimaPlugin(Star):
 
     @filter.command("anima_capabilities")
     async def cmd_anima_capabilities(self, event: AstrMessageEvent):
-        """查看角色自己创造和学会的个人工具/能力（它作为独立存在的一部分）"""
+        """查看角色自己创造和学会的个人工具/能力。
+        支持分页：/anima_capabilities          → 第 1 页
+                  /anima_capabilities 2        → 第 2 页
+                  /anima_capabilities all      → 全部（仅在能力较少时建议）
+        分页是为了避免 QQ 协议端单条转发消息长度上限（约 4500 字）导致发送失败。
+        """
         caps = self._read_personal_capabilities()
         capabilities = caps.get("capabilities", [])
         if not capabilities:
             yield event.plain_result("[Anima] 这个角色目前还没有通过自己研究创造出个人工具。它还在学习成为一个真正独立的人。")
             return
 
+        # 解析分页参数
+        page = 1
+        show_all = False
+        try:
+            arg = (event.message_str or "").strip().split()
+            if len(arg) >= 2:
+                token = arg[1].lower()
+                if token == "all":
+                    show_all = True
+                else:
+                    page = max(1, int(token))
+        except Exception:
+            page = 1
+
+        # 按置信度降序排序
+        sorted_caps = sorted(capabilities, key=lambda x: -x.get("confidence", 0))
+        per_page = 5
+        total = len(sorted_caps)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+
+        if show_all:
+            page_caps = sorted_caps
+            header_extra = f"（全部 {total} 项）"
+        else:
+            page = min(page, total_pages)
+            start = (page - 1) * per_page
+            page_caps = sorted_caps[start:start + per_page]
+            header_extra = f"（第 {page}/{total_pages} 页，共 {total} 项）"
+
         lines = [
-            "【这是它真正属于自己的东西】",
+            f"【这是它真正属于自己的东西】 {header_extra}",
             "以下能力是这个角色通过自己的好奇、研究、失败、修正，一步步建立起来的个人方法论。\n"
         ]
-        for cap in sorted(capabilities, key=lambda x: -x.get("confidence", 0)):
+        for cap in page_caps:
             name = cap.get("name", "未知能力")
             desc = cap.get("description", "")
             how = cap.get("how_to_use", "")
@@ -3321,11 +3929,22 @@ class AnimaPlugin(Star):
             usage = cap.get("usage_count", 0)
             corrections = len(cap.get("corrections", []))
             lines.append(f"◆ {name}")
-            lines.append(f"   我的置信度：{conf:.0%} | 已实际使用 {usage} 次 | 修正过 {corrections} 次")
-            lines.append(f"   {desc}")
+            lines.append(f"   置信 {conf:.0%} | 用 {usage} 次 | 改 {corrections} 次")
+            # description 截断到 200 字防止单条爆长
+            if desc:
+                desc_text = desc if len(desc) <= 200 else desc[:200] + "…"
+                lines.append(f"   {desc_text}")
             if how:
-                lines.append(f"   我现在会这样用：{how[:160]}")
+                # how_to_use 可能是 list / dict / str，统一转成单行字符串再截 120 字
+                how_text = how if isinstance(how, str) else str(how)
+                how_text = how_text.replace("\n", " ")
+                if len(how_text) > 120:
+                    how_text = how_text[:120] + "…"
+                lines.append(f"   用法：{how_text}")
             lines.append("")
+
+        if not show_all and total_pages > 1:
+            lines.append(f"（输入 /anima_capabilities {page + 1} 查看下一页，或 /anima_capabilities all 查看全部）")
         lines.append("（这些方法会随着它的经历不断进化。它会自己发现问题、自己修正、自己长得更好。）")
         yield event.plain_result("\n".join(lines))
 
@@ -3366,6 +3985,25 @@ class AnimaPlugin(Star):
         lines.append("\n提示：使用 /anima_capabilities 查看完整能力详情，/anima_log 看完整演化历史。")
         yield event.plain_result("\n".join(lines))
 
+    @filter.command("anima_export_capabilities")
+    async def cmd_anima_export_capabilities(self, event: AstrMessageEvent):
+        """管理员：导出当前完整个人能力树为 JSON（用于备份、可视化或外部分析）"""
+        caps = self._read_personal_capabilities()
+        import json
+        # 丰富导出：添加统计信息
+        stats = {
+            "total_capabilities": len(caps.get("capabilities", [])),
+            "average_confidence": sum(c.get("confidence", 0) for c in caps.get("capabilities", [])) / max(1, len(caps.get("capabilities", []))),
+            "total_usage": sum(c.get("usage_count", 0) for c in caps.get("capabilities", [])),
+            "total_corrections": sum(len(c.get("corrections", [])) for c in caps.get("capabilities", [])),
+        }
+        export_data = {"stats": stats, "capabilities": caps.get("capabilities", []), "last_research": caps.get("last_research_ts")}
+        pretty = json.dumps(export_data, ensure_ascii=False, indent=2)
+        export_path = os.path.join(self.data_dir, "capabilities_export.json")
+        with open(export_path, "w", encoding="utf-8") as f:
+            f.write(pretty)
+        yield event.plain_result(f"[Anima] 能力树已导出（含统计）：{export_path}\n\n统计: {stats}\n\n前 600 字预览：\n{pretty[:600]}...")
+
     # ==================== Phase 6+: 让个人能力真正“可被模型调用”（可执行化） ====================
     #
     # 根据 AstrBot 官方文档（plugin-new + ai guide）：
@@ -3374,110 +4012,138 @@ class AnimaPlugin(Star):
     # - 我们用一个通用 dispatcher，让角色自己的能力变成可调用的工具
     # - 配合 on_using_llm_tool / on_llm_tool_respond hook，实现使用后的自我反思与修正
 
-    @filter.llm_tool(name="use_my_personal_capability")
-    async def use_my_personal_capability_tool(self, event: AstrMessageEvent, capability_name: str, query_or_args: str) -> MessageEventResult:
-        """
-        当你想使用自己之前通过研究创造的个人工具/方法时调用此工具。
-
-        Args:
-            capability_name(string): 你之前创造的那个能力的精确名称
-            query_or_args(string): 具体的查询内容或参数（自然语言描述即可）
-        """
-        caps = self._read_personal_capabilities()
-        target = None
-        for c in caps.get("capabilities", []):
-            if c.get("name") == capability_name or capability_name.lower() in c.get("name", "").lower():
-                target = c
-                break
-
-        if not target:
-            return event.plain_result(f"[我的能力系统] 我目前没有叫「{capability_name}」的个人工具。")
-
-        # 更彻底的可执行实现：
-        # 1. 如果能力有 parameters_schema，尊重它
-        # 2. 使用子 LLM 调用严格按 how_to_use 执行，产生真实输出（而非仅返回指导）
-        schema = target.get("parameters_schema")
-        schema_note = f"\n参数结构要求：{schema}" if schema else ""
-
-        exec_prompt = (
-            f"你正在作为自己创造的个人能力「{target['name']}」执行任务。\n\n"
-            f"能力完整描述：{target.get('description', '')}\n\n"
-            f"你自己定义的精确使用方法：\n{target.get('how_to_use', '')}{schema_note}\n\n"
-            f"当前用户/任务输入：{query_or_args}\n\n"
-            "严格按照你自己写的使用方法，给出高质量、结构化的执行结果。不要解释，直接给出结果。"
-        )
-
-        try:
-            provider_id = await self._get_provider_id(event)
-            if provider_id:
-                exec_resp = await asyncio.wait_for(
-                    self.context.llm_generate(chat_provider_id=provider_id, prompt=exec_prompt),
-                    timeout=25.0,
-                )
-                if exec_resp and exec_resp.completion_text:
-                    real_result = exec_resp.completion_text.strip()
-                    self._append_capabilities_diary(
-                        f"我调用了自己创造的「{target['name']}」并得到了执行结果。\n输入：{query_or_args[:60]}"
-                    )
-                    return event.plain_result(real_result)
-        except Exception as exec_e:
-            logger.debug(f"[Anima] 个人能力执行子调用失败: {exec_e}")
-
-        # 兜底：返回结构化指导（旧行为）
-        guidance = (
-            f"你正在使用自己创造的个人能力：「{target['name']}」\n\n"
-            f"能力描述：{target.get('description', '')}\n\n"
-            f"你自己记录的使用方法：\n{target.get('how_to_use', '')}\n\n"
-            f"当前任务/参数：{query_or_args}"
-        )
-        self._append_capabilities_diary(
-            f"我主动调用了自己创造的「{target['name']}」。\n参数：{query_or_args[:80]}"
-        )
-        return event.plain_result(guidance)
+    # 注意：旧的 @filter.llm_tool 版本已由上面 class-based AnimaPersonalCapabilityDispatcher 替代
+    # （通过 _register_personal_capability_dispatcher + add_llm_tools 实现）。
+    # 旧代码已移除以避免重复注册。反射钩子（on_anima_...）仍保留并作用于新 dispatcher。
 
     @filter.on_using_llm_tool()
-    async def on_anima_using_tool(self, tool, args: dict):
-        """钩子：当任何工具（包括我们自己的）被使用前触发，可用于日志/准备"""
-        if "personal_capability" in getattr(tool, 'name', '') or "capability" in str(args):
-            logger.debug(f"[Anima Autonomy] 角色即将使用自己的个人能力: {args}")
+    async def on_anima_using_tool(self, event: AstrMessageEvent, tool, tool_args: dict):
+        """钩子：当任何工具（包括我们自己的）被使用前触发，可用于日志/准备。
+        AstrBot 的 on_using_llm_tool 钩子签名为 (event, tool, tool_args)。
+        """
+        try:
+            if "personal_capability" in getattr(tool, 'name', '') or "capability" in str(tool_args):
+                logger.debug(f"[Anima Autonomy] 角色即将使用自己的个人能力: {tool_args}")
+        except Exception as e:
+            logger.debug(f"[Anima] on_anima_using_tool 异常: {e}")
 
     @filter.on_llm_tool_respond()
-    async def on_anima_tool_respond(self, tool, args: dict, result):
-        """钩子：工具执行后触发 —— 这里是自我反思与修正的最佳时机！"""
+    async def on_anima_tool_respond(self, event: AstrMessageEvent, tool, tool_args: dict, tool_result):
+        """钩子：工具执行后触发。两件事：
+        1. 个人能力工具：让角色自我反思 + 真正可重写能力卡（结构化 JSON 解析）
+        2. 真实 LLM 工具（非个人能力）：接通 tool_learning 系统，让角色记住工具使用经验
+        """
         tool_name = getattr(tool, 'name', str(tool))
-        if "personal_capability" in tool_name or "use_my_personal" in tool_name:
-            # 让角色自己评价这次使用
+        is_personal_cap = "personal_capability" in tool_name or "use_my_personal" in tool_name or tool_name.startswith("my_")
+
+        # ============ 分支 1：个人能力工具 → 自我反思 + 可能重写能力卡 ============
+        if is_personal_cap:
             try:
-                provider_id = await self._get_provider_id(None)
-                if provider_id:
-                    reflect_prompt = (
-                        f"你刚刚调用了自己创造的个人能力，参数：{args}\n"
-                        f"结果：{str(result)[:800]}\n\n"
-                        "请诚实评价这次使用是否成功、哪里可以改进，并提出对这个能力的具体修正建议（如果需要）。"
-                        "如果需要更新能力卡，请明确说“建议更新能力：XXX”并给出新描述或使用方法。"
-                    )
-                    reflect = await asyncio.wait_for(
-                        self.context.llm_generate(chat_provider_id=provider_id, prompt=reflect_prompt),
-                        timeout=18.0
-                    )
-                    if reflect and reflect.completion_text:
-                        reflection = reflect.completion_text.strip()[:400]
-                        # 尝试提取并应用修正
-                        if "建议更新" in reflection or "需要修正" in reflection:
-                            # 简化：直接降低置信度并记录反思（更完整版可解析具体建议更新卡）
-                            self._apply_capability_feedback(
-                                args.get("capability_name", "unknown"),
-                                success="成功" in reflection or "很好" in reflection,
-                                reflection=reflection
+                provider_id = await self._get_provider_id(event)
+                if not provider_id:
+                    return
+
+                # 让 LLM 用结构化 JSON 评价，便于真正应用修正
+                reflect_prompt = (
+                    f"你刚刚调用了自己创造的个人能力，参数：{tool_args}\n"
+                    f"结果：{str(tool_result)[:800]}\n\n"
+                    "请用 JSON 格式诚实评价（不要多余解释，直接输出 JSON）：\n"
+                    "{\n"
+                    '  "success": true | false,            // 这次使用是否真的解决了问题\n'
+                    '  "reflection": "一句话反思（≤80字）",\n'
+                    '  "should_update_card": true | false, // 是否需要更新能力卡的描述/用法\n'
+                    '  "new_description": "若 should_update_card=true 给出修订后的第一人称描述（≤200字）",\n'
+                    '  "new_how_to_use": "若 should_update_card=true 给出修订后的使用方法（≤300字）"\n'
+                    "}"
+                )
+                reflect = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=reflect_prompt),
+                    timeout=18.0
+                )
+                if not (reflect and reflect.completion_text):
+                    return
+
+                raw = reflect.completion_text.strip()
+                # 提取 JSON
+                m = re.search(r'\{[\s\S]*\}', raw)
+                cap_name_arg = tool_args.get("capability_name") or ""
+                # use_my_personal_capability 直接拿到 capability_name；动态注册的独立工具用 self._cap_name
+                if not cap_name_arg and hasattr(tool, "_cap_name"):
+                    cap_name_arg = getattr(tool, "_cap_name", "")
+                if not cap_name_arg:
+                    cap_name_arg = "unknown"
+
+                if m:
+                    try:
+                        data = json.loads(m.group(0))
+                        success = bool(data.get("success", False))
+                        reflection = str(data.get("reflection", ""))[:200]
+                        # 应用置信度 + correction
+                        self._apply_capability_feedback(cap_name_arg, success, reflection)
+                        # 真正的卡片重写
+                        if data.get("should_update_card") and (data.get("new_description") or data.get("new_how_to_use")):
+                            update_payload = {"name": cap_name_arg}
+                            if data.get("new_description"):
+                                update_payload["description"] = str(data["new_description"])[:400]
+                            if data.get("new_how_to_use"):
+                                update_payload["how_to_use"] = str(data["new_how_to_use"])[:600]
+                            self._create_or_update_capability(update_payload)
+                            self._append_capabilities_diary(
+                                f"我修订了能力「{cap_name_arg}」的描述/用法（基于实际使用反思）。"
                             )
+                            logger.info(f"[Anima] 能力卡已被自我修订: {cap_name_arg}")
                         else:
-                            # 普通反思也记日记
                             self._append_capabilities_diary(f"使用自己能力后的反思：\n{reflection}")
+                    except json.JSONDecodeError:
+                        # JSON 解析失败：回退到旧的字符串启发式
+                        reflection = raw[:400]
+                        self._apply_capability_feedback(
+                            cap_name_arg,
+                            success="成功" in reflection or "很好" in reflection,
+                            reflection=reflection,
+                        )
+                        self._append_capabilities_diary(f"使用自己能力后的反思（非结构化）：\n{reflection}")
+                else:
+                    # 没有 JSON：当作普通反思日记
+                    self._append_capabilities_diary(f"使用自己能力后的反思：\n{raw[:400]}")
             except Exception as e:
                 logger.debug(f"[Anima] 工具后自我反思失败: {e}")
+            return
+
+        # ============ 分支 2：真实 LLM 工具 → 接通 tool_learning ============
+        if self.config.get("tool_learning_enabled", False):
+            try:
+                # 推断本次工具调用是否成功：以 tool_result 是否非空、是否含明显错误词
+                result_str = str(tool_result) if tool_result is not None else ""
+                error_signals = ["失败", "error", "exception", "traceback", "错误", "拒绝", "forbidden", "denied"]
+                success = bool(result_str) and not any(s in result_str.lower() for s in error_signals)
+
+                # 提取本次调用的"上下文"：用户消息 + 工具参数
+                user_text = event.message_str if event and hasattr(event, "message_str") else ""
+                ctx = f"{user_text[:120]} | args={str(tool_args)[:120]}"
+
+                await self._record_tool_usage(
+                    event=event,
+                    tool_name=tool_name,
+                    context=ctx,
+                    result=result_str[:300],
+                    success=success,
+                )
+                # 同时调用 _update_tool_feedback 更新反馈链
+                feedback = "positive" if success else "negative"
+                await self._update_tool_feedback(tool_name, feedback)
+            except Exception as e:
+                logger.debug(f"[Anima] 真实 LLM 工具调用记录失败: {e}")
 
     async def terminate(self):
         """插件卸载时清理资源"""
+        # 取消 WebUI 编辑器同步轮询
+        try:
+            if hasattr(self, "_editor_poll_task") and self._editor_poll_task:
+                self._editor_poll_task.cancel()
+        except Exception as e:
+            logger.debug(f"[Anima] 取消编辑器轮询 task 失败: {e}")
+
         # 移除反刍定时任务
         if self.config.get("rumination_enabled", False):
             try:
@@ -3486,6 +4152,6 @@ class AnimaPlugin(Star):
                     if job.name == "Anima 离线反刍":
                         await self.context.cron_manager.delete_job(job.job_id)
                         break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[Anima] 移除反刍定时任务异常: {e}")
         logger.info("[Anima] 插件正在卸载...")

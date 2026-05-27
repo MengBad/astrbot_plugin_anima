@@ -32,186 +32,217 @@
     "description": "用于向量记忆的 Embedding Provider ID",
     "type": "string",
     "default": "",
-    "hint": "在服务提供商页面添加 Embedding 类型的提供商后，将其 ID 填写在此处（注意：不是对话模型的 ID，是 Embedding 类型的 Provider ID）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3（免费）"
+    "hint": "留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3"
   },
   "internal_provider_id": {
     "description": "内部 LLM 调用使用的模型 Provider ID",
     "type": "string",
     "default": "",
-    "hint": "用于情绪评估、独白生成、欲望生成、世界观更新等内部调用。留空则使用当前对话的主模型。推荐配置一个审查更宽松的国产模型（如 DeepSeek、Qwen）",
-    "_special": "select_provider"
+    "hint": "用于情绪评估、独白生成、欲望生成、世界观更新、能力合成等内部调用。"
   },
   "worldview_provider_id": {
     "description": "世界观更新专用 Provider ID",
     "type": "string",
     "default": "",
-    "hint": "仅用于世界观更新。优先级高于 internal_provider_id。留空则回退到 internal_provider_id，再留空则用主模型",
-    "_special": "select_provider"
+    "hint": "仅用于世界观更新。"
   },
   "memory_store_interval": {
     "description": "向量记忆存储最小间隔（秒）",
     "type": "int",
-    "default": 30,
-    "hint": "同一会话内两次存储的最小间隔，防止群聊消息量大时知识库膨胀过快"
+    "default": 30
   },
   "reject_phrases": {
     "description": "独白过滤词列表",
     "type": "list",
-    "default": [
-      "I can't discuss",
-      "I cannot",
-      "我无法",
-      "我不能",
-      "I'm not able",
-      "I don't think I should"
-    ],
-    "hint": "包含这些词的独白会被丢弃，不写入自我认知。可自行添加或删除。"
+    "default": ["I can't discuss", "I cannot", "我无法", "我不能", "I'm not able", "I don't think I should"]
   },
   "desire_enabled": {
     "description": "启用欲望系统",
     "type": "bool",
-    "default": false,
-    "hint": "让角色产生主动意图，而不只是被动响应"
+    "default": false
   },
   "desire_max_queue": {
     "description": "欲望队列最大长度",
     "type": "int",
-    "default": 5,
-    "hint": "同时存在的欲望数量上限"
+    "default": 5
   },
   "worldview_enabled": {
     "description": "启用世界观系统",
     "type": "bool",
-    "default": false,
-    "hint": "让角色对群环境和群友关系形成自己的认知"
+    "default": false
   },
   "time_sense_enabled": {
     "description": "启用时间感",
     "type": "bool",
-    "default": false,
-    "hint": "让角色感知时间流逝和互动频率"
+    "default": false
   },
   "forgetting_enabled": {
     "description": "启用自然遗忘",
     "type": "bool",
-    "default": false,
-    "hint": "长时间没有互动的记忆会逐渐模糊"
+    "default": false
   },
   "forgetting_halflife_days": {
     "description": "记忆半衰期（天）",
     "type": "int",
-    "default": 14,
-    "hint": "多少天后记忆强度衰减到一半"
+    "default": 14
   },
   "self_notes_editor": {
     "description": "编辑自我认知笔记",
     "type": "text",
-    "default": "",
-    "editor_mode": true,
-    "editor_language": "markdown",
-    "editor_theme": "vs-dark",
-    "hint": "直接编辑 self_notes.md 的内容，保存后立即生效"
+    "default": ""
   },
   "contradiction_enabled": {
     "description": "启用矛盾检测",
     "type": "bool",
-    "default": false,
-    "hint": "定期扫描 self_notes 中前后矛盾的立场，矛盾本身成为新的内心事件"
+    "default": false
   },
   "contradiction_interval": {
     "description": "矛盾检测间隔（沉淀次数）",
     "type": "int",
-    "default": 50,
-    "hint": "每 N 次沉淀触发一次矛盾检测"
+    "default": 50
   },
   "rumination_enabled": {
     "description": "启用离线反刍",
     "type": "bool",
-    "default": false,
-    "hint": "定时在后台对近期经历做反思，产生新的感悟"
+    "default": false
   },
   "rumination_interval_hours": {
     "description": "反刍间隔（小时）",
     "type": "int",
-    "default": 6,
-    "hint": "每隔多少小时进行一次离线反刍"
-  },
-  "danger_active_info_collection": {
-    "description": "⚠️ 高危：主动信息收集",
-    "type": "bool",
-    "default": false,
-    "hint": "允许角色在对话中主动提问来填充对某人的认知。可能让用户感觉被审问。"
-  },
-  "danger_autonomous_web": {
-    "description": "⚠️ 高危：自主网络行动",
-    "type": "bool",
-    "default": false,
-    "hint": "允许角色自主决定何时搜索外部信息。可能产生不可控的外部请求。需要配置 fetch/search MCP。"
-  },
-  "autonomous_web_tools": {
-    "description": "自主网络行动允许使用的工具列表",
-    "type": "list",
-    "default": ["fetch"],
-    "hint": "填写工具名称。可用工具在启动日志里查看（[Anima] 可用 LLM 工具）。留空则禁用自主网络行动。"
-  },
-  "danger_relationship_inference": {
-    "description": "⚠️ 高危：关系图谱推断",
-    "type": "bool",
-    "default": false,
-    "hint": "根据对话内容自动推断群友之间的关系。推断错误会影响后续所有交互且难以纠正。"
-  },
-  "danger_stance_propagation": {
-    "description": "⚠️ 高危：立场自主传播",
-    "type": "bool",
-    "default": false,
-    "hint": "允许角色主动表达演化出的新立场，不等被问。可能说出使用者没预料到的话。"
-  },
-  "danger_core_mutation": {
-    "description": "🔴 极高危：自主修改核心人格",
-    "type": "bool",
-    "default": false,
-    "hint": "允许角色修改 persona_core.yaml。角色可能变成完全不可预测的东西。需要同时设置 danger_core_mutation_confirm: true 才生效。"
-  },
-  "danger_core_mutation_confirm": {
-    "description": "🔴 极高危确认：我理解自主修改核心人格的风险",
-    "type": "bool",
-    "default": false,
-    "hint": "必须同时开启 danger_core_mutation 才生效。这是二次确认。"
-  },
-  "danger_identity_crisis": {
-    "description": "⚠️ 高危：身份危机",
-    "type": "bool",
-    "default": false,
-    "hint": "当核心认知被高关系权重的人反复挑战时，角色进入不稳定状态，回复变得游离。群友体验可能变差。"
-  },
-  "danger_memory_infection": {
-    "description": "🔴 极高危：记忆感染",
-    "type": "bool",
-    "default": false,
-    "hint": "允许角色反复在对话中提及某件事，直到影响用户的认知框架。接近心理操控边界。需要同时设置 danger_memory_infection_confirm: true。"
-  },
-  "danger_memory_infection_confirm": {
-    "description": "🔴 极高危确认：我理解记忆感染的风险",
-    "type": "bool",
-    "default": false,
-    "hint": "必须同时开启 danger_memory_infection 才生效。"
+    "default": 6
   },
   "tool_learning_enabled": {
     "description": "启用工具自学习",
     "type": "bool",
-    "default": false,
-    "hint": "角色会记录工具使用经历，形成使用偏好，并在叙事日记中记录"
+    "default": false
   },
   "tool_learning_summarize_interval": {
     "description": "每 N 次工具调用后总结一次规律",
     "type": "int",
-    "default": 10,
-    "hint": "积累足够的使用记录后，调用 LLM 提炼使用规律"
+    "default": 10
   },
   "log_level": {
     "description": "日志级别",
     "type": "string",
     "default": "info",
     "options": ["debug", "info"]
+  },
+
+  "autonomy_enabled": {
+    "description": "启用角色自主性系统（内部研究触发）",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后角色将大幅减少主动研究行为"
+  },
+  "autonomy_research_on_scar": {
+    "description": "伤痕加深时自动触发自主研究",
+    "type": "bool",
+    "default": true
+  },
+  "autonomy_research_on_time_absence": {
+    "description": "长时间未见某人时触发研究",
+    "type": "bool",
+    "default": true
+  },
+  "autonomy_research_on_high_desire": {
+    "description": "高强度欲望时触发自主研究",
+    "type": "bool",
+    "default": true
+  },
+  "autonomy_research_on_personality_drift": {
+    "description": "人格向量显著漂移时触发研究",
+    "type": "bool",
+    "default": true
+  },
+  "autonomy_research_on_contradiction": {
+    "description": "发现自我矛盾时触发研究",
+    "type": "bool",
+    "default": true
+  },
+
+  "capability_system_enabled": {
+    "description": "启用个人能力系统",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后角色不会创造新能力、不会注入能力到对话、use_my_personal_capability 工具也不会注册"
+  },
+  "default_register_as_independent_tool": {
+    "description": "新能力默认注册为独立 LLM 工具",
+    "type": "bool",
+    "default": false,
+    "hint": "需要同时开启 dynamic_tool_registration_enabled。开启后新创造的高置信度能力会被打上 register_as_independent_tool 标记"
+  },
+  "capability_health_pruning_enabled": {
+    "description": "启用能力健康管理（自动修剪低价值能力）",
+    "type": "bool",
+    "default": true
+  },
+
+  "allow_capability_code_execution": {
+    "description": "允许能力卡中包含并执行代码片段",
+    "type": "bool",
+    "default": false,
+    "hint": "⚠️ 极高危。角色可以将研究成果写成可执行代码并运行。"
+  },
+  "code_execution_safety_level": {
+    "description": "代码片段执行安全等级",
+    "type": "string",
+    "default": "strict",
+    "options": ["strict", "balanced", "permissive"],
+    "hint": "strict：仅基础内置函数 + 无任何 import；balanced：放开 sorted/reversed/enumerate/zip + 允许 import json/re/math/datetime；permissive：在 balanced 基础上再放开 hashlib/itertools/collections + map/filter"
+  },
+
+  "dynamic_tool_registration_enabled": {
+    "description": "允许动态为高价值能力注册独立工具",
+    "type": "bool",
+    "default": false,
+    "hint": "高危。开启后，置信度 ≥0.65 且被打上 register_as_independent_tool 标记的能力会被注册成独立的 LLM 工具，模型可直接按名调用。需配合 default_register_as_independent_tool 或在能力 JSON 中显式标记"
+  },
+
+  "danger_core_mutation": {
+    "description": "🔴 自主修改核心人格（persona_core.yaml）",
+    "type": "bool",
+    "default": false,
+    "hint": "允许角色修改自身核心规则。需要同时开启 danger_core_mutation_confirm。"
+  },
+  "danger_core_mutation_confirm": {
+    "description": "🔴 核心人格修改二次确认",
+    "type": "bool",
+    "default": false
+  },
+  "danger_active_info_collection": {
+    "description": "⚠️ 高危：主动信息收集",
+    "type": "bool",
+    "default": false
+  },
+  "danger_autonomous_web": {
+    "description": "⚠️ 高危：自主网络行动（仍作为外部手动触发入口保留）",
+    "type": "bool",
+    "default": false
+  },
+  "danger_relationship_inference": {
+    "description": "⚠️ 高危：关系图谱推断",
+    "type": "bool",
+    "default": false
+  },
+  "danger_stance_propagation": {
+    "description": "⚠️ 高危：立场自主传播",
+    "type": "bool",
+    "default": false
+  },
+  "danger_identity_crisis": {
+    "description": "⚠️ 高危：身份危机",
+    "type": "bool",
+    "default": false
+  },
+  "danger_memory_infection": {
+    "description": "🔴 极高危：记忆感染",
+    "type": "bool",
+    "default": false
+  },
+  "danger_memory_infection_confirm": {
+    "description": "🔴 记忆感染二次确认",
+    "type": "bool",
+    "default": false
   }
 }

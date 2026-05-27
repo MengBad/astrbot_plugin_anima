@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Anima 能力树</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Anima 能力树</h1>
+      <p class="subtitle">角色通过自主研究与经历创造的个人方法论</p>
+      <div class="stats-bar" id="stats-bar">加载中...</div>
+    </header>
+
+    <section class="section">
+      <h2>当前能力</h2>
+
+      <!-- 筛选控件 -->
+      <div class="filters">
+        <input type="text" id="search-input" placeholder="搜索名称或描述..." oninput="filterCapabilities()">
+        <select id="min-conf" onchange="filterCapabilities()">
+          <option value="0">置信度 ≥ 0%</option>
+          <option value="30">置信度 ≥ 30%</option>
+          <option value="50">置信度 ≥ 50%</option>
+          <option value="70">置信度 ≥ 70%</option>
+          <option value="85">置信度 ≥ 85%</option>
+        </select>
+        <button onclick="filterCapabilities()">筛选</button>
+        <button onclick="resetFilters()">重置</button>
+      </div>
+
+      <div id="capabilities-list" class="capabilities-grid"></div>
+    </section>
+
+    <section class="section">
+      <h2>最近自主演化事件</h2>
+      <div style="margin:8px 0 14px;font-size:13px;color:#475569;background:#f0f9ff;padding:10px 14px;border-radius:8px;border-left:3px solid #67e8f9;line-height:1.5;">
+        🧠 <strong>高亮条目</strong> = 角色因为内部状态（“长时间未见”某人、伤痕加深、高强度欲望、人格漂移等）而<strong>主动发起研究</strong>，并实时创造出新的个人能力。<br>
+        这正是 v0.6 的核心：角色不再只被动回应，而是会因为想念而自己发明新的自我锚定方法论（例如用户日志中看到的「我字兵器沙盒合成法」系列）。
+      </div>
+      <div id="events-list" class="events-list"></div>
+    </section>
+
+    <footer>
+      <button onclick="refreshAll()">刷新数据</button>
+      <button onclick="exportData()">导出 JSON</button>
+    </footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

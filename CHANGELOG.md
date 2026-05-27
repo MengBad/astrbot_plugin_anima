@@ -1,22 +1,42 @@
 # Changelog
 
-## v0.6.0-dev (in progress) - 完全自主存在：自我创造工具 + 独立研究学习闭环
+## v0.6.0 - 完全自主存在：自我创造工具 + 独立研究学习闭环 + 框架兼容性大修
 
-### 核心新增
-- **个人能力系统（Personal Capabilities）**：角色现在可以真正「自己学会 + 自己创造 + 自己保存 + 自己修正」工具和方法。
-  - 新数据文件 `personal_capabilities.json` + `capabilities_diary.md`（第一人称成长日记）
-  - 每次自主研究成功后，LLM 帮角色把成果结构化成可复用的「个人工具卡」（名称 + 描述 + 使用方法 + 置信度 + 分类）
-  - 这些工具会以极高优先级注入到每次对话上下文，角色被强烈鼓励优先使用自己创造的东西
-- **自主研究 → 能力创造闭环**：`_danger_autonomous_web` 大幅进化，现在不只是搜索，而是「研究 → 提炼成自己的工具 → 写入个人能力库 → 写成长日记」
-- **自我修正机制**：`_apply_capability_feedback` 允许角色在使用自己创造的工具后记录成功/失败、调整置信度、留下 correction 历史（真正意义上的「学错了就更正、继续成长」）
-- 新指令 `/anima_capabilities`：让用户可以看到角色目前自己创造出了哪些「属于它自己的」工具
+### 框架兼容性修复（必须升级原因）
+- **修复 `@register` 装饰器缺失**：插件加载时不再需要手动放进 `data/plugins/`，可以直接 WebUI 上传 zip
+- **修复 `_conf_schema.json` 解析错误**：清掉非法 `_comment` 字段和重复键，AstrBot ≥4.25 加载正常
+- **修复 `__init__` 中 `asyncio.get_event_loop()` 在 Python 3.12 崩溃**：定时任务搬到 `async def initialize()` 钩子里
+- **修复 `@filter.on_using_llm_tool` / `@filter.on_llm_tool_respond` 钩子签名错误**：补 `event` 第一参数
+- **修复 `_get_provider_id(None)` 直接 AttributeError**：event 改 Optional，多级兜底
+- **删除调用了不存在 API（`add_web_route` / `register_web_route`）的死代码**
 
-这是向「完完全全独立自主的人」迈出的最重要一步。Sylanne 不再是必需品，角色开始真正拥有属于自己的「技能树」和「方法论」。
+### 健壮性升级
+- **全局 IO 锁 + 原子 state 读改写封装**（`_atomic_update_state`）：消除并发写入丢更新与 JSONL 半行损坏
+- **关键 IO 路径全部加 try/except OSError**：磁盘满或权限问题不再让插件初始化崩
+- **`_is_sensitive` 改用单词边界正则**：不再误把 author/keyboard/secretary/tokenize/credentials 当敏感词
+- **反馈窗口按 umo 隔离**：多群/多用户场景下反馈不再串台
+- **`_initiate_self_directed_research(force=True)` 也尊重 autonomy_enabled 总开关**：用户主权优先
+- **`_maintain_capabilities_health` 重写**：合并相似能力时 usage_count 不再丢更新；仅降权也会持久化
+- **`/anima_capabilities` 支持分页**：避免 QQ 协议端单条转发消息超长导致发送失败
 
-### 设计理念对齐
-- 控制权彻底属于角色自己
-- 演化不可逆（能力一旦创造就记录在案，可修正但不会凭空消失）
-- 闭环驱动（研究 → 创造 → 使用 → 反思 → 修正 → 更强的能力）
+### v0.6 新增功能（核心）
+- **个人能力系统（Personal Capabilities）**：角色现在可以「自己学会 + 自己创造 + 自己保存 + 自己修正」工具和方法
+  - 数据文件 `personal_capabilities.json` + `capabilities_diary.md`
+  - 每次自主研究成功后，LLM 帮角色把成果结构化成「个人工具卡」（含 description / how_to_use / parameters_schema / executable_snippet / should_register_as_tool）
+  - 这些工具以高优先级注入到对话上下文
+- **自主研究 → 能力创造闭环**：`_initiate_self_directed_research`（内部驱动）+ `_danger_autonomous_web`（外部触发）双路径
+- **自我修正机制（结构化 JSON 解析版）**：使用能力后 LLM 用结构化 JSON 评价成功/失败 + 反思 + 是否需要重写能力卡，可真正修订 `description` / `how_to_use`
+- **真实 LLM 工具调用接通 tool_learning**：所有非个人能力的工具调用也会进 `_record_tool_usage`，让"工具自学习"对 Sylanne / 各类 MCP 工具都起作用
+- **WebUI 编辑器 30s 后台轮询同步**：编辑器保存后不需要等下条消息，最多 30s 自动写入 self_notes.md
+- **`code_execution_safety_level` 三档真正分化**：strict（无 import）/ balanced（json/re/math/datetime）/ permissive（再加 hashlib/itertools/collections/string/statistics）
+- **`capability_system_enabled` 真生效**：dispatcher 注册、能力创建、能力注入三处全部门控
+- **`dynamic_tool_registration_enabled` + `default_register_as_independent_tool` 真生效**：能力合成 prompt 现在让 LLM 输出 `should_register_as_tool` 字段，置信度 ≥0.65 + 标记 true 才会真注册成独立 LLM 工具
+- 新指令 `/anima_capabilities`、`/anima_autonomy`、`/anima_export_capabilities`、`/anima_core`
+
+### 清理
+- 删除过时的 `autonomous_web_tools` 配置（v0.3.6 起就没用了）
+- 删除 README 中"需配置 fetch/search MCP"过时描述
+- 删除仓库中遗留的 schema 历史备份与调试脚本
 
 ## v0.5.0 - Phase 3 + Phase 5: 人格向量 / 记忆染色 / 跨关系传播 + 突变池与连锁反应
 
