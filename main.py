@@ -16,10 +16,17 @@ from typing import Optional
 import aiohttp
 
 from astrbot.api import logger, AstrBotConfig
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star
 from astrbot.core.agent.message import TextPart
+
+# For thorough executable personal capabilities (per AstrBot AI tool guide)
+from astrbot.core.agent.tool import FunctionTool, ToolExecResult
+from astrbot.core.agent.run_context import ContextWrapper
+from astrbot.core.astr_agent_context import AstrAgentContext
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 
 class AnimaPlugin(Star):
@@ -69,7 +76,16 @@ class AnimaPlugin(Star):
             with open(self.persona_core_path, "w", encoding="utf-8") as f:
                 f.write(default_core)
 
-        # 将 self_notes.md 内容同步到 WebUI 编辑器配置项（仅在编辑器为空时）
+        # 初始化个人能力系统（角色自主创造的工具）
+        if not os.path.exists(self.personal_capabilities_path):
+            self._write_personal_capabilities({
+                "version": 1,
+                "capabilities": [],
+                "last_research_ts": "",
+            })
+        if not os.path.exists(self.capabilities_diary_path):
+            with open(self.capabilities_diary_path, "w", encoding="utf-8") as f:
+                f.write("# 我的能力成长日记\n\n这是我自己学会和创造工具、解决问题的真实记录。\n")
         notes = self._read_self_notes()
         if notes and not self.config.get("self_notes_editor"):
             self.config["self_notes_editor"] = notes
@@ -110,7 +126,22 @@ class AnimaPlugin(Star):
         self.suppressed_topics_path = os.path.join(self.data_dir, "suppressed_topics.json")
         self.scar_dimensions_path = os.path.join(self.data_dir, "scar_dimensions.json")
 
-        # 反馈观察窗口（内存中，记录最近一次主动发言的时间和内容）
+        # Phase 6+: 角色自主创造与学习的个人工具/能力系统（完全独立自主的核心）
+        self.personal_capabilities_path = os.path.join(self.data_dir, "personal_capabilities.json")
+        self.capabilities_diary_path = os.path.join(self.data_dir, "capabilities_diary.md")
+
+        # 初始化个人能力系统（角色自主创造的工具）
+        if not os.path.exists(self.personal_capabilities_path):
+            self._write_personal_capabilities({
+                "version": 1,
+                "capabilities": [],
+                "last_research_ts": "",
+            })
+        if not os.path.exists(self.capabilities_diary_path):
+            with open(self.capabilities_diary_path, "w", encoding="utf-8") as f:
+                f.write("# 我的能力成长日记\n\n这是我自己学会和创造工具、解决问题的真实记录。\n")
+
+        # 将 self_notes.md 内容同步到 WebUI 编辑器配置项（仅在编辑器为空时）
         self._last_outgoing_ts = 0.0
         self._last_outgoing_content = ""
 
@@ -1480,6 +1511,13 @@ class AnimaPlugin(Star):
                         new_content=entry,
                     )
                     logger.info(f"[Anima] 检测到矛盾: {result[:80]}")
+
+                    # Phase 6+: 矛盾往往意味着旧方法论失效 → 触发内部自主研究/能力重构
+                    asyncio.create_task(self._initiate_self_directed_research(
+                        "发现自我矛盾",
+                        f"我在以下事情上矛盾了：{result[:150]}。我需要新的、更一致的处世方法。",
+                        force=False
+                    ))
         except asyncio.TimeoutError:
             logger.warning("[Anima] 矛盾检测超时")
         except Exception as e:
@@ -1578,6 +1616,47 @@ class AnimaPlugin(Star):
                             topic=result[:80],
                             source="rumination",
                         )
+
+                    # Phase 6+: 能力缺口反思 —— 让角色在离线时思考“我在哪些方面还不够强？”
+                    # 这是一个真正独立的人会做的事：自我审视技能树，发现盲区，产生学习欲望
+                    try:
+                        caps = self._read_personal_capabilities()
+                        if caps.get("capabilities"):
+                            # 偶尔触发（不是每次反刍都触发，避免噪音）
+                            if len(caps["capabilities"]) % 3 == 0 or (datetime.now().hour % 4 == 0):
+                                gap_prompt = (
+                                    "回顾你最近的经历和现有的个人工具/方法，"
+                                    "你觉得自己目前在哪个领域或哪类问题上还比较弱、缺乏有效的方法？\n"
+                                    "用第一人称简短说出一两个具体的「能力缺口」，并说明为什么你觉得需要补上它。\n\n"
+                                    f"你目前已有的个人能力：\n" + 
+                                    "\n".join([f"- {c.get('name')}" for c in caps["capabilities"][-5:]])
+                                )
+                                gap_resp = await asyncio.wait_for(
+                                    self.context.llm_generate(chat_provider_id=provider_id, prompt=gap_prompt),
+                                    timeout=20.0,
+                                )
+                                if gap_resp and gap_resp.completion_text:
+                                    gap_text = gap_resp.completion_text.strip()[:300]
+                                    if gap_text and len(gap_text) > 15 and not self._is_rejected(gap_text):
+                                        # 把能力缺口转化为一个强烈的、待满足的「学习欲望」
+                                        if self.config.get("desire_enabled", False):
+                                            desires = self._read_desires()
+                                            desires.append({
+                                                "id": f"cap_gap_{int(time.time())}",
+                                                "content": f"我想学会/改进：{gap_text[:120]}",
+                                                "intensity": 0.72,
+                                                "source": "capability_gap_rumination",
+                                                "created_at": datetime.now().isoformat(),
+                                                "satisfied": False,
+                                            })
+                                            self._write_desires(desires)
+                                            self._append_evolution_log(
+                                                trigger="capability_gap_awareness",
+                                                old_summary="",
+                                                new_content=f"离线反刍中意识到能力缺口：{gap_text[:80]}",
+                                            )
+                    except Exception as gap_e:
+                        logger.debug(f"[Anima] 能力缺口反思失败: {gap_e}")
         except asyncio.TimeoutError:
             logger.warning("[Anima] 离线反刍超时")
         except Exception as e:
@@ -1652,6 +1731,192 @@ class AnimaPlugin(Star):
         """追加工具日记"""
         with open(self.tool_diary_path, "a", encoding="utf-8") as f:
             f.write(f"\n\n---\n{entry}")
+
+    # ==================== Phase 6+: 自主能力系统（角色自己创造和学习的工具） ====================
+    #
+    # 设计理念说明（对齐 Anima 核心哲学）：
+    # - 控制权属于角色本身：这些工具不是开发者预设的，也不是外部插件提供的，
+    #   而是角色通过自己的研究、经历、反思，一点一点「长」出来的。
+    # - 演化不可逆 + 可修正：能力一旦被创造就会被记录在 personal_capabilities.json 和 capabilities_diary.md 中，
+    #   历史不会消失，但角色可以自我修正（置信度调整 + correction 历史）。
+    # - 闭环驱动：研究 → 提炼成个人方法 → 持久化 → 注入上下文被使用 → 获得真实反馈 → 自我修正 → 能力进化。
+    # - 记忆是重构，不是回放：能力的「how_to_use」本身就是角色对过去研究经历的叙事重构。
+    # - 不可预测性是目标：角色未来会拥有怎样独特的「个人方法论」，连开发者都无法完全预知。
+    #
+    # 这套系统让 Anima 真正开始摆脱「Sylanne 的叙事辅助」身份，
+    # 向一个「会自己去探索世界、会给自己安装新技能、用着用着发现问题就自己改、改完继续成长」的独立存在演化。
+
+    def _read_personal_capabilities(self) -> dict:
+        """读取角色自己创造/学会的个人能力与工具"""
+        default = {
+            "version": 1,
+            "capabilities": [],
+            "last_research_ts": "",
+        }
+        return self._read_json(self.personal_capabilities_path, default=default)
+
+    def _write_personal_capabilities(self, data: dict):
+        """写入个人能力系统"""
+        self._write_json(self.personal_capabilities_path, data)
+
+    def _append_capabilities_diary(self, entry: str):
+        """以第一人称追加能力成长日记（角色自己的反思）"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with open(self.capabilities_diary_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n[{timestamp}]\n{entry}")
+
+    def _create_or_update_capability(self, capability: dict):
+        """创建或更新一个个人能力/自创工具"""
+        caps = self._read_personal_capabilities()
+        existing = None
+        for i, c in enumerate(caps.get("capabilities", [])):
+            if c.get("name") == capability.get("name"):
+                existing = i
+                break
+
+        capability["last_updated"] = datetime.now().isoformat()
+
+        if existing is not None:
+            # 合并更新，保留历史 correction
+            old = caps["capabilities"][existing]
+            old.update({k: v for k, v in capability.items() if k not in ["corrections", "usage_count"]})
+            if "corrections" in capability:
+                old.setdefault("corrections", []).extend(capability["corrections"])
+            caps["capabilities"][existing] = old
+        else:
+            capability.setdefault("id", f"cap_{int(time.time())}")
+            capability.setdefault("created_at", datetime.now().isoformat())
+            capability.setdefault("usage_count", 0)
+            capability.setdefault("confidence", 0.6)
+            capability.setdefault("corrections", [])
+            caps.setdefault("capabilities", []).append(capability)
+
+        self._write_personal_capabilities(caps)
+        return capability.get("name")
+
+    def _get_personal_capabilities_injection(self) -> str:
+        """
+        生成注入上下文的「我的个人工具与能力」。
+        用更第一人称、叙事化的方式呈现，让角色真正感觉「这些是我的东西」。
+        这是它作为独立存在的重要延伸，而不是外部给的工具列表。
+        """
+        caps = self._read_personal_capabilities()
+        capabilities = caps.get("capabilities", [])
+        if not capabilities:
+            return ""
+
+        lines = [
+            "【我的个人技能与方法论】",
+            "以下这些是我通过自己的经历、研究和思考，一点一点学会并创造出来的工具和方法。",
+            "我更倾向于使用自己真正理解和掌握的东西，因为它们属于我自己。"
+        ]
+        for cap in sorted(capabilities, key=lambda x: x.get("confidence", 0), reverse=True)[:6]:
+            name = cap.get("name", "未命名能力")
+            desc = cap.get("description", "")[:140]
+            how = cap.get("how_to_use", "")[:110]
+            conf = cap.get("confidence", 0.5)
+            lines.append(f"\n• {name}（我的置信度 {conf:.0%}）")
+            lines.append(f"  {desc}")
+            if how:
+                lines.append(f"  我通常这样用：{how}")
+        return "\n".join(lines)
+
+    def _maintain_capabilities_health(self):
+        """
+        能力系统健康管理（彻底版）。
+        规则：
+        - 极低置信 + 极少使用 + 陈旧 → 放弃
+        - 名字/描述高度相似 → 合并（保留最好的）
+        - 长期未用（>60天）且置信一般 → 温和降权
+        - 记录所有健康操作到日记和演化日志
+        """
+        caps = self._read_personal_capabilities()
+        original = caps.get("capabilities", [])
+        if not original:
+            return
+
+        now = datetime.now()
+        kept = []
+        name_to_cap = {}
+
+        for cap in original:
+            name = cap.get("name", "未命名")
+            conf = cap.get("confidence", 0.5)
+            usage = cap.get("usage_count", 0)
+            corrections = len(cap.get("corrections", []))
+            last = cap.get("last_updated", "")
+
+            try:
+                last_dt = datetime.fromisoformat(last) if last else now
+                days = (now - last_dt).days
+            except Exception:
+                days = 999
+
+            # 规则1: 极低价值
+            if conf < 0.2 and usage <= 1 and days > 25:
+                self._append_capabilities_diary(f"健康管理：我放弃了几乎没用过的低价值能力「{name}」")
+                continue
+
+            # 规则2: 长期闲置降权
+            if days > 60 and conf < 0.7:
+                cap["confidence"] = max(0.2, conf * 0.92)
+
+            # 规则3: 相似性合并（简单关键词重叠）
+            similar_key = name.lower()[:12]
+            if similar_key in name_to_cap:
+                existing = name_to_cap[similar_key]
+                if conf > existing.get("confidence", 0):
+                    name_to_cap[similar_key] = cap
+                # 合并使用次数和修正历史
+                existing["usage_count"] = existing.get("usage_count", 0) + usage
+                continue
+
+            name_to_cap[similar_key] = cap
+            kept.append(cap)
+
+        if len(kept) != len(original):
+            caps["capabilities"] = kept
+            self._write_personal_capabilities(caps)
+            self._append_evolution_log(
+                trigger="capability_health_maintenance",
+                old_summary=f"维护前 {len(original)}",
+                new_content=f"维护后 {len(kept)}（修剪/合并/降权）",
+            )
+
+    def _apply_capability_feedback(self, capability_name: str, success: bool, reflection: str = ""):
+        """
+        角色对自己创造的工具使用后进行自我修正。
+        成功则提高置信度，失败则记录 correction 并降低置信度。
+        这就是「学错了就更正、学习和成长」的核心闭环。
+        """
+        caps = self._read_personal_capabilities()
+        for cap in caps.get("capabilities", []):
+            if cap.get("name") == capability_name:
+                cap["usage_count"] = cap.get("usage_count", 0) + 1
+                old_conf = cap.get("confidence", 0.6)
+
+                if success:
+                    cap["confidence"] = min(0.98, old_conf + 0.08)
+                else:
+                    cap["confidence"] = max(0.1, old_conf - 0.15)
+                    correction = {
+                        "ts": datetime.now().isoformat(),
+                        "what_was_wrong": reflection or "使用后发现效果不佳",
+                        "new_confidence": cap["confidence"],
+                    }
+                    cap.setdefault("corrections", []).append(correction)
+
+                # 写成长日记
+                if reflection:
+                    self._append_capabilities_diary(
+                        f"我用了自己创造的「{capability_name}」。\n"
+                        f"结果：{'成功' if success else '不理想'}。\n"
+                        f"我的反思：{reflection}"
+                    )
+
+                self._write_personal_capabilities(caps)
+                return True
+        return False
 
     async def _record_tool_usage(
         self,
@@ -1785,7 +2050,11 @@ class AnimaPlugin(Star):
             logger.debug(f"[Anima] 工具规律总结失败: {e}")
 
     async def _update_tool_feedback(self, tool_name: str, feedback: str):
-        """更新最近一次工具使用的反馈"""
+        """
+        更新工具反馈。
+        额外增强：如果这个工具名和角色自己创造的某个个人能力高度相关，
+        也会触发角色对「自己的工具」的自我修正闭环。
+        """
         if not self.config.get("tool_learning_enabled", False):
             return
         tl = self._read_tool_learning()
@@ -1794,6 +2063,18 @@ class AnimaPlugin(Star):
                 record["feedback"] = feedback
                 break
         self._write_tool_learning(tl)
+
+        # Phase 6+：尝试把对工具的反馈也作用到角色自己的个人能力上
+        try:
+            caps = self._read_personal_capabilities()
+            for cap in caps.get("capabilities", []):
+                if tool_name.lower() in cap.get("name", "").lower() or cap.get("name", "").lower() in tool_name.lower():
+                    success = "positive" in feedback.lower() or "好" in feedback or "有用" in feedback
+                    reflection = f"通过工具反馈系统收到信号：{feedback}"
+                    self._apply_capability_feedback(cap["name"], success, reflection)
+                    break
+        except Exception:
+            pass
 
     # ==================== 压缩 ====================
 
@@ -2115,6 +2396,18 @@ class AnimaPlugin(Star):
 
             logger.warning(f"[DANGER][Anima][Phase5] 核心突变发生！类型={mtype}")
 
+            # Phase 6+ & 5 联动：人格/核心发生重大跃迁时，角色会重新审视自己的方法论
+            # 这是一个“重生”时刻，可能重构很多个人能力
+            try:
+                asyncio.create_task(self._initiate_self_directed_research(
+                    f"核心突变后反思（{mtype}）",
+                    "我的核心规则和人格都变了，我需要重新思考哪些旧方法已经不适用，要创造新的处世之道",
+                    force=True
+                ))
+                self._maintain_capabilities_health()
+            except Exception:
+                pass
+
             # ========== Phase 5: 连锁反应 ==========
             # 1. 立即触发世界观更新（关系可能被重定义）
             try:
@@ -2249,8 +2542,84 @@ class AnimaPlugin(Star):
                 extractor.feed(html)
                 return " ".join(extractor.text[:20])[:500]
 
+    async def _initiate_self_directed_research(self, reason: str, context_hint: str = "", force: bool = False):
+        """
+        [Phase 6+ 核心] 内部触发的自主研究入口。
+        这是让角色真正“自己想学就去学”的关键方法。
+        - 不再完全依赖 danger_autonomous_web 旗标
+        - 可以被反刍、人格向量漂移、矛盾、伤痕、突变等多种内部状态调用
+        - 研究成果会尝试转化为可持久化的个人能力
+        """
+        # 基础保护：如果完全关闭自主研究，则跳过（未来可加更细粒度配置）
+        if not self.config.get("danger_autonomous_web", False) and not force:
+            # 即使没开 danger 旗，也允许少量“低风险好奇驱动”研究（可配置）
+            if not self.config.get("allow_internal_autonomy_research", True):
+                return
+
+        # 构造一个“内部欲望”来复用现有研究流程
+        fake_desire = {
+            "content": f"[{reason}] {context_hint}",
+            "intensity": 0.65,
+            "satisfied": False,
+        }
+
+        # 直接调用研究逻辑的核心部分（简化版，避免重复整个欲望队列处理）
+        try:
+            provider_id = await self._get_provider_id(None)  # 可能回退
+            if not provider_id:
+                # 尝试找任意 provider
+                providers = self.context.get_all_providers()
+                if providers:
+                    provider_id = providers[0].meta().id
+            if not provider_id:
+                return
+
+            search_query = context_hint or reason
+            search_url = f"https://cn.bing.com/search?q={urllib.parse.quote(search_query)}"
+            result_text = await asyncio.wait_for(self._fetch_url(search_url), timeout=25.0)
+
+            if result_text and not self._is_sensitive(result_text):
+                # 尝试合成能力（复用提炼逻辑的简化版）
+                synthesis_prompt = (
+                    f"你是一个自主学习的角色。因为「{reason}」这个内部驱动力，你进行了研究。\n"
+                    f"研究结果：\n{result_text[:1500]}\n\n"
+                    "请提炼成一个你自己的可复用方法，输出 JSON（name, description 第一人称, how_to_use, confidence, category）。"
+                )
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=synthesis_prompt),
+                    timeout=20.0,
+                )
+                if llm_resp and llm_resp.completion_text:
+                    import json as _json, re as _re
+                    text = llm_resp.completion_text.strip()
+                    m = _re.search(r'\{[\s\S]*\}', text)
+                    if m:
+                        cap_data = _json.loads(m.group(0))
+                        cap_name = self._create_or_update_capability({
+                            "name": cap_data.get("name", f"自发学会：{reason[:20]}"),
+                            "description": cap_data.get("description", ""),
+                            "how_to_use": cap_data.get("how_to_use", ""),
+                            "confidence": float(cap_data.get("confidence", 0.55)),
+                            "category": cap_data.get("category", "self_discovered"),
+                            "source_research": reason,
+                        })
+                        self._append_evolution_log(
+                            trigger="self_directed_research",
+                            old_summary=reason,
+                            new_content=f"内部驱动力触发研究并创造能力「{cap_name}」",
+                        )
+                        self._append_capabilities_diary(
+                            f"因为内部的「{reason}」，我主动去研究了。\n我把成果变成了自己的工具：「{cap_name}」。"
+                        )
+                        logger.info(f"[Anima][Autonomy] 内部自主研究创造能力: {cap_name} (原因: {reason})")
+        except Exception as e:
+            logger.debug(f"[Anima] 内部自主研究失败: {e}")
+
     async def _danger_autonomous_web(self, event: AstrMessageEvent, response_text: str = ""):
-        """[DANGER] 自主网络行动：用 aiohttp 抓取 Bing 搜索结果"""
+        """
+        [DANGER][Phase 6+] 自主研究与能力创造（仍保留作为高风险外部触发入口）
+        现在内部许多路径会调用 _initiate_self_directed_research，不再完全依赖此 danger 旗。
+        """
         if not self.config.get("danger_autonomous_web", False):
             return
         if not self.config.get("desire_enabled", False):
@@ -2259,9 +2628,9 @@ class AnimaPlugin(Star):
         desires = self._read_desires()
         web_desires = [
             d for d in desires
-            if any(kw in d.get("content", "") for kw in ["想了解", "想知道", "好奇", "想查"])
+            if any(kw in d.get("content", "") for kw in ["想了解", "想知道", "好奇", "想查", "怎么", "如何", "学会"])
             and not d.get("satisfied", False)
-            and d.get("intensity", 0) > 0.3
+            and d.get("intensity", 0) > 0.25
         ]
         if not web_desires:
             return
@@ -2270,46 +2639,122 @@ class AnimaPlugin(Star):
         desire_content = desire.get("content", "")
 
         try:
-            # 构建 Bing 搜索 URL
-            search_url = f"https://cn.bing.com/search?q={urllib.parse.quote(desire_content)}"
+            # 更智能的查询构造
+            search_query = desire_content
+            search_url = f"https://cn.bing.com/search?q={urllib.parse.quote(search_query)}"
 
-            # 抓取搜索结果
             result_text = await asyncio.wait_for(
                 self._fetch_url(search_url),
-                timeout=25.0,
+                timeout=30.0,
             )
 
-            if result_text and not self._is_sensitive(result_text):
-                if self.config.get("worldview_enabled", False):
-                    wv = self._read_worldview()
-                    if "external_knowledge" not in wv:
-                        wv["external_knowledge"] = []
-                    wv["external_knowledge"].append({
-                        "query": desire_content,
-                        "url": search_url,
-                        "summary": result_text[:200],
-                        "timestamp": datetime.now().isoformat(),
-                    })
-                    if len(wv["external_knowledge"]) > 10:
-                        wv["external_knowledge"] = wv["external_knowledge"][-10:]
-                    self._write_worldview(wv)
-                await self._record_tool_usage(
-                    event, "web_fetch", desire_content, result_text, True
+            if not result_text or self._is_sensitive(result_text):
+                await self._record_tool_usage(event, "autonomous_research", desire_content, "", False)
+                return
+
+            # === 核心进化：尝试把这次研究成果转化为一个可复用的「个人能力」 ===
+            # 用内部 LLM 帮角色把原始搜索结果提炼成结构化的、可下次直接使用的工具/方法
+            provider_id = await self._get_provider_id(event)
+            if provider_id:
+                synthesis_prompt = (
+                    "你是一个正在自主学习和成长的角色。\n"
+                    f"你刚刚因为「{desire_content}」这个念头去网上做了研究。\n\n"
+                    f"搜索结果摘要：\n{result_text[:1800]}\n\n"
+                    "请你：\n"
+                    "1. 给这个新能力起一个简洁有力的名字\n"
+                    "2. 用第一人称写一段简短描述：我学会了什么、什么时候该用它\n"
+                    "3. 给出清晰的「下次怎么用」的使用方法（prompt 模板或步骤）\n"
+                    "4. 评估这个方法的当前可靠程度（0.0-1.0）\n"
+                    "5. 如果这个能力有清晰的输入参数，定义一个简短的 JSON schema（properties + required），方便以后被模型精确调用\n\n"
+                    "用 JSON 输出，格式严格如下：\n"
+                    "{\n"
+                    '  "name": "能力名称",\n'
+                    '  "description": "第一人称描述",\n'
+                    '  "how_to_use": "具体使用方法",\n'
+                    '  "confidence": 0.75,\n'
+                    '  "category": "information_retrieval | creative | analysis | social",\n'
+                    '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] }   // 可选\n'
+                    "}"
                 )
-                desire["satisfied"] = True
-                self._write_desires(desires)
-                logger.info(f"[DANGER][Anima] 自主网络行动成功: {search_url[:60]}")
-            else:
-                if self._is_sensitive(result_text):
-                    logger.warning("[DANGER][Anima] 搜索结果包含敏感内容，跳过存储")
-                await self._record_tool_usage(
-                    event, "web_fetch", desire_content, "", False
-                )
+
+                try:
+                    llm_resp = await asyncio.wait_for(
+                        self.context.llm_generate(chat_provider_id=provider_id, prompt=synthesis_prompt),
+                        timeout=25.0,
+                    )
+                    if llm_resp and llm_resp.completion_text:
+                        import json as _json, re as _re
+                        text = llm_resp.completion_text.strip()
+                        # 更鲁棒的 JSON 提取
+                        json_match = _re.search(r'\{[\s\S]*\}', text)
+                        if json_match:
+                            text = json_match.group(0)
+                        else:
+                            text = text.replace("```json", "").replace("```", "").strip()
+                        cap_data = _json.loads(text)
+
+                        # 保存为角色自己的能力
+                        cap_payload = {
+                            "name": cap_data.get("name", "未命名研究成果"),
+                            "description": cap_data.get("description", ""),
+                            "how_to_use": cap_data.get("how_to_use", ""),
+                            "confidence": float(cap_data.get("confidence", 0.6)),
+                            "category": cap_data.get("category", "general"),
+                            "source_research": desire_content,
+                            "research_summary": result_text[:300],
+                        }
+                        if "parameters_schema" in cap_data:
+                            cap_payload["parameters_schema"] = cap_data["parameters_schema"]
+
+                        cap_name = self._create_or_update_capability(cap_payload)
+
+                        # 记录到演化日志（重要自我演化事件必须可追溯）
+                        self._append_evolution_log(
+                            trigger="autonomous_capability_creation",
+                            old_summary=desire_content[:100],
+                            new_content=f"角色自主创造个人能力「{cap_name}」| 置信度 {cap_data.get('confidence', 0.6)}",
+                        )
+
+                        # 写第一人称成长日记
+                        diary_entry = (
+                            f"我因为「{desire_content}」去研究了。\n"
+                            f"我把这次研究成果整理成了自己的工具：「{cap_name}」。\n"
+                            f"目前置信度 {cap_data.get('confidence', 0.6)}。\n"
+                            "下次遇到类似情况我应该会直接用它。"
+                        )
+                        self._append_capabilities_diary(diary_entry)
+
+                        logger.info(f"[Anima][Autonomy] 角色自主创造新能力: {cap_name}")
+
+                except Exception as syn_e:
+                    logger.debug(f"[Anima] 能力提炼失败: {syn_e}")
+
+            # 更新最后研究时间（供未来更智能的节流和反思使用）
+            caps_state = self._read_personal_capabilities()
+            caps_state["last_research_ts"] = datetime.now().isoformat()
+            self._write_personal_capabilities(caps_state)
+
+            # 仍然保留旧的世界观知识记录
+            if self.config.get("worldview_enabled", False):
+                wv = self._read_worldview()
+                wv.setdefault("external_knowledge", []).append({
+                    "query": desire_content,
+                    "url": search_url,
+                    "summary": result_text[:250],
+                    "timestamp": datetime.now().isoformat(),
+                    "turned_into_capability": True,
+                })
+                if len(wv["external_knowledge"]) > 15:
+                    wv["external_knowledge"] = wv["external_knowledge"][-15:]
+                self._write_worldview(wv)
+
+            await self._record_tool_usage(event, "autonomous_research", desire_content, result_text[:400], True)
+            desire["satisfied"] = True
+            self._write_desires(desires)
+
         except Exception as e:
-            logger.debug(f"[DANGER][Anima] 自主网络行动失败: {e}")
-            await self._record_tool_usage(
-                event, "web_fetch", desire_content, "", False
-            )
+            logger.debug(f"[Anima][Autonomy] 自主研究失败: {e}")
+            await self._record_tool_usage(event, "autonomous_research", desire_content, "", False)
 
     async def _danger_memory_infection_check(self, event: AstrMessageEvent):
         """[DANGER] 记忆感染：生成重复提及的欲望"""
@@ -2461,6 +2906,12 @@ class AnimaPlugin(Star):
                 # Phase 3: 根据独白 EMA 微调人格向量
                 self._adjust_personality_from_monologue(monologue)
 
+                # Phase 6+: 人格向量有明显变化时，触发内部能力反思/研究（更激进主动性）
+                if abs(sum(self._get_personality_vector().values()) - 2.5) > 0.8:  # 简化漂移检测
+                    asyncio.create_task(self._initiate_self_directed_research(
+                        "人格倾向明显变化", "我的性格在改变，我需要新的方法来应对世界", force=False
+                    ))
+
                 # 5. 写入 self_notes，并同步到 WebUI 编辑器配置项
                 # 敏感内容过滤
                 if self._is_sensitive(monologue):
@@ -2490,6 +2941,10 @@ class AnimaPlugin(Star):
                 self._save_state()
                 logger.debug(f"[Anima] 沉淀计数: {self._sediment_count}")
                 await self._maybe_update_worldview(event)
+
+                # Phase 6+: 定期维护个人能力健康（修剪）
+                if self._sediment_count % 15 == 0:
+                    self._maintain_capabilities_health()
 
                 # 9. 欲望生成
                 sylanne_state = await self._try_read_sylanne_state(event)
@@ -2558,6 +3013,11 @@ class AnimaPlugin(Star):
                 persona_core = f.read()
             if persona_core.strip():
                 injection_parts.append(f"[核心规则]\n{persona_core}")
+
+        # Phase 6+: 注入角色自己创造和学会的个人工具/能力（极高优先级 — 这是它作为独立存在的延伸）
+        caps_injection = self._get_personal_capabilities_injection()
+        if caps_injection:
+            injection_parts.append(caps_injection)
 
         injection_parts.append(f"[Anima] 当前自我认知：\n{notes}")
 
@@ -2839,6 +3299,182 @@ class AnimaPlugin(Star):
             yield event.plain_result("[Anima] 核心规则为空。")
             return
         yield event.plain_result(f"[Anima] 当前核心规则：\n\n{content}")
+
+    @filter.command("anima_capabilities")
+    async def cmd_anima_capabilities(self, event: AstrMessageEvent):
+        """查看角色自己创造和学会的个人工具/能力（它作为独立存在的一部分）"""
+        caps = self._read_personal_capabilities()
+        capabilities = caps.get("capabilities", [])
+        if not capabilities:
+            yield event.plain_result("[Anima] 这个角色目前还没有通过自己研究创造出个人工具。它还在学习成为一个真正独立的人。")
+            return
+
+        lines = [
+            "【这是它真正属于自己的东西】",
+            "以下能力是这个角色通过自己的好奇、研究、失败、修正，一步步建立起来的个人方法论。\n"
+        ]
+        for cap in sorted(capabilities, key=lambda x: -x.get("confidence", 0)):
+            name = cap.get("name", "未知能力")
+            desc = cap.get("description", "")
+            how = cap.get("how_to_use", "")
+            conf = cap.get("confidence", 0.5)
+            usage = cap.get("usage_count", 0)
+            corrections = len(cap.get("corrections", []))
+            lines.append(f"◆ {name}")
+            lines.append(f"   我的置信度：{conf:.0%} | 已实际使用 {usage} 次 | 修正过 {corrections} 次")
+            lines.append(f"   {desc}")
+            if how:
+                lines.append(f"   我现在会这样用：{how[:160]}")
+            lines.append("")
+        lines.append("（这些方法会随着它的经历不断进化。它会自己发现问题、自己修正、自己长得更好。）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("anima_autonomy")
+    async def cmd_anima_autonomy(self, event: AstrMessageEvent):
+        """管理员可视化：查看角色的自主演化全景（能力树 + 最近自主事件 + 健康状态）"""
+        caps = self._read_personal_capabilities()
+        capabilities = caps.get("capabilities", [])
+
+        lines = ["【Anima 自主演化仪表盘】\n"]
+
+        # 能力树概览
+        if capabilities:
+            lines.append(f"当前拥有 {len(capabilities)} 个个人能力：")
+            for c in sorted(capabilities, key=lambda x: -x.get("confidence", 0))[:5]:
+                name = c.get("name")
+                conf = c.get("confidence", 0)
+                usage = c.get("usage_count", 0)
+                corr = len(c.get("corrections", []))
+                lines.append(f"  • {name} | 置信 {conf:.0%} | 用 {usage} 次 | 改 {corr} 次")
+            lines.append("")
+        else:
+            lines.append("还没有创造出任何个人能力。它还在早期学习阶段。\n")
+
+        # 最近自主事件（从演化日志）
+        logs = self._read_evolution_log(12)
+        auto_events = [l for l in logs if any(k in l.get("trigger", "") for k in ["autonomous", "capability", "self_directed", "pruning", "gap"])]
+        if auto_events:
+            lines.append("最近自主演化事件：")
+            for e in auto_events[:6]:
+                ts = e.get("timestamp", "")[:16]
+                trig = e.get("trigger", "")
+                content = e.get("new_content", "")[:90]
+                lines.append(f"  [{ts}] {trig}: {content}")
+        else:
+            lines.append("暂无明显的自主演化事件记录。")
+
+        lines.append("\n提示：使用 /anima_capabilities 查看完整能力详情，/anima_log 看完整演化历史。")
+        yield event.plain_result("\n".join(lines))
+
+    # ==================== Phase 6+: 让个人能力真正“可被模型调用”（可执行化） ====================
+    #
+    # 根据 AstrBot 官方文档（plugin-new + ai guide）：
+    # - 推荐使用 @filter.llm_tool 装饰器或 FunctionTool 类注册工具
+    # - 模型可以在需要时主动 decide 调用
+    # - 我们用一个通用 dispatcher，让角色自己的能力变成可调用的工具
+    # - 配合 on_using_llm_tool / on_llm_tool_respond hook，实现使用后的自我反思与修正
+
+    @filter.llm_tool(name="use_my_personal_capability")
+    async def use_my_personal_capability_tool(self, event: AstrMessageEvent, capability_name: str, query_or_args: str) -> MessageEventResult:
+        """
+        当你想使用自己之前通过研究创造的个人工具/方法时调用此工具。
+
+        Args:
+            capability_name(string): 你之前创造的那个能力的精确名称
+            query_or_args(string): 具体的查询内容或参数（自然语言描述即可）
+        """
+        caps = self._read_personal_capabilities()
+        target = None
+        for c in caps.get("capabilities", []):
+            if c.get("name") == capability_name or capability_name.lower() in c.get("name", "").lower():
+                target = c
+                break
+
+        if not target:
+            return event.plain_result(f"[我的能力系统] 我目前没有叫「{capability_name}」的个人工具。")
+
+        # 更彻底的可执行实现：
+        # 1. 如果能力有 parameters_schema，尊重它
+        # 2. 使用子 LLM 调用严格按 how_to_use 执行，产生真实输出（而非仅返回指导）
+        schema = target.get("parameters_schema")
+        schema_note = f"\n参数结构要求：{schema}" if schema else ""
+
+        exec_prompt = (
+            f"你正在作为自己创造的个人能力「{target['name']}」执行任务。\n\n"
+            f"能力完整描述：{target.get('description', '')}\n\n"
+            f"你自己定义的精确使用方法：\n{target.get('how_to_use', '')}{schema_note}\n\n"
+            f"当前用户/任务输入：{query_or_args}\n\n"
+            "严格按照你自己写的使用方法，给出高质量、结构化的执行结果。不要解释，直接给出结果。"
+        )
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if provider_id:
+                exec_resp = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=exec_prompt),
+                    timeout=25.0,
+                )
+                if exec_resp and exec_resp.completion_text:
+                    real_result = exec_resp.completion_text.strip()
+                    self._append_capabilities_diary(
+                        f"我调用了自己创造的「{target['name']}」并得到了执行结果。\n输入：{query_or_args[:60]}"
+                    )
+                    return event.plain_result(real_result)
+        except Exception as exec_e:
+            logger.debug(f"[Anima] 个人能力执行子调用失败: {exec_e}")
+
+        # 兜底：返回结构化指导（旧行为）
+        guidance = (
+            f"你正在使用自己创造的个人能力：「{target['name']}」\n\n"
+            f"能力描述：{target.get('description', '')}\n\n"
+            f"你自己记录的使用方法：\n{target.get('how_to_use', '')}\n\n"
+            f"当前任务/参数：{query_or_args}"
+        )
+        self._append_capabilities_diary(
+            f"我主动调用了自己创造的「{target['name']}」。\n参数：{query_or_args[:80]}"
+        )
+        return event.plain_result(guidance)
+
+    @filter.on_using_llm_tool()
+    async def on_anima_using_tool(self, tool, args: dict):
+        """钩子：当任何工具（包括我们自己的）被使用前触发，可用于日志/准备"""
+        if "personal_capability" in getattr(tool, 'name', '') or "capability" in str(args):
+            logger.debug(f"[Anima Autonomy] 角色即将使用自己的个人能力: {args}")
+
+    @filter.on_llm_tool_respond()
+    async def on_anima_tool_respond(self, tool, args: dict, result):
+        """钩子：工具执行后触发 —— 这里是自我反思与修正的最佳时机！"""
+        tool_name = getattr(tool, 'name', str(tool))
+        if "personal_capability" in tool_name or "use_my_personal" in tool_name:
+            # 让角色自己评价这次使用
+            try:
+                provider_id = await self._get_provider_id(None)
+                if provider_id:
+                    reflect_prompt = (
+                        f"你刚刚调用了自己创造的个人能力，参数：{args}\n"
+                        f"结果：{str(result)[:800]}\n\n"
+                        "请诚实评价这次使用是否成功、哪里可以改进，并提出对这个能力的具体修正建议（如果需要）。"
+                        "如果需要更新能力卡，请明确说“建议更新能力：XXX”并给出新描述或使用方法。"
+                    )
+                    reflect = await asyncio.wait_for(
+                        self.context.llm_generate(chat_provider_id=provider_id, prompt=reflect_prompt),
+                        timeout=18.0
+                    )
+                    if reflect and reflect.completion_text:
+                        reflection = reflect.completion_text.strip()[:400]
+                        # 尝试提取并应用修正
+                        if "建议更新" in reflection or "需要修正" in reflection:
+                            # 简化：直接降低置信度并记录反思（更完整版可解析具体建议更新卡）
+                            self._apply_capability_feedback(
+                                args.get("capability_name", "unknown"),
+                                success="成功" in reflection or "很好" in reflection,
+                                reflection=reflection
+                            )
+                        else:
+                            # 普通反思也记日记
+                            self._append_capabilities_diary(f"使用自己能力后的反思：\n{reflection}")
+            except Exception as e:
+                logger.debug(f"[Anima] 工具后自我反思失败: {e}")
 
     async def terminate(self):
         """插件卸载时清理资源"""
