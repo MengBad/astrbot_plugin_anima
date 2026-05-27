@@ -101,6 +101,12 @@ class AnimaPlugin(Star):
         self.contradictions_path = os.path.join(self.data_dir, "contradictions.json")
         self.tool_learning_path = os.path.join(self.data_dir, "tool_learning.json")
         self.tool_diary_path = os.path.join(self.data_dir, "tool_diary.md")
+        self.suppressed_topics_path = os.path.join(self.data_dir, "suppressed_topics.json")
+        self.scar_dimensions_path = os.path.join(self.data_dir, "scar_dimensions.json")
+
+        # 反馈观察窗口（内存中，记录最近一次主动发言的时间和内容）
+        self._last_outgoing_ts = 0.0
+        self._last_outgoing_content = ""
 
         # 注册离线反刍定时任务
         if self.config.get("rumination_enabled", False):
@@ -936,6 +942,232 @@ class AnimaPlugin(Star):
         if changed:
             self._write_self_notes("\n---\n".join(blocks))
 
+    # ==================== Phase 2A：压抑话题系统 ====================
+
+    def _read_suppressed_topics(self) -> list:
+        """读取压抑话题列表"""
+        return self._read_json(self.suppressed_topics_path, default=[])
+
+    def _write_suppressed_topics(self, topics: list):
+        """写入压抑话题列表"""
+        self._write_json(self.suppressed_topics_path, topics)
+
+    def _add_suppressed_topic(self, topic: str, source: str, target_user: str = ""):
+        """新增一个压抑话题"""
+        topics = self._read_suppressed_topics()
+        topics.append({
+            "topic": topic,
+            "created_at": datetime.now().isoformat(),
+            "pressure": 0.3,
+            "source": source,
+            "target_user": target_user,
+            "resolved": False,
+        })
+        # 最多保留 20 条
+        topics = [t for t in topics if not t.get("resolved")][-20:]
+        self._write_suppressed_topics(topics)
+
+    def _update_suppressed_pressure(self):
+        """更新压抑话题的压力值（随时间递增）"""
+        topics = self._read_suppressed_topics()
+        if not topics:
+            return
+        now = datetime.now()
+        changed = False
+        for t in topics:
+            if t.get("resolved"):
+                continue
+            try:
+                created = datetime.fromisoformat(t["created_at"])
+                hours = (now - created).total_seconds() / 3600
+                new_pressure = min(1.0, 0.3 + 0.05 * hours)
+                if new_pressure != t.get("pressure", 0.3):
+                    t["pressure"] = round(new_pressure, 2)
+                    changed = True
+            except (ValueError, KeyError):
+                continue
+        if changed:
+            self._write_suppressed_topics(topics)
+
+    def _get_suppressed_injection(self, event: AstrMessageEvent) -> str:
+        """获取需要注入的高压力压抑话题"""
+        topics = self._read_suppressed_topics()
+        if not topics:
+            return ""
+        # 获取当前发送者
+        sender_id = ""
+        if hasattr(event, "message_obj") and event.message_obj:
+            sender_id = str(getattr(event.message_obj.sender, "user_id", ""))
+        # 找到压力超过 0.8 的话题（优先匹配当前用户的）
+        high_pressure = []
+        for t in topics:
+            if t.get("resolved") or t.get("pressure", 0) < 0.8:
+                continue
+            if t.get("target_user") and t["target_user"] != sender_id:
+                continue
+            high_pressure.append(t)
+        if not high_pressure:
+            return ""
+        lines = [t["topic"] for t in high_pressure[:2]]
+        return (
+            "[内心压力] 你一直想说但没说出口的事：\n"
+            + "\n".join(f"- {l}" for l in lines)
+            + "\n你可以选择说出来，也可以继续忍着。"
+        )
+
+    def _check_suppressed_resolution(self, text: str):
+        """检查对话内容是否解决了某个压抑话题"""
+        topics = self._read_suppressed_topics()
+        if not topics:
+            return
+        changed = False
+        for t in topics:
+            if t.get("resolved"):
+                continue
+            # 简单关键词匹配：话题中的关键词出现在对话中
+            keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', t.get("topic", ""))
+            if keywords and sum(1 for kw in keywords if kw in text) >= 2:
+                t["resolved"] = True
+                changed = True
+                logger.debug(f"[Anima] 压抑话题已释放: {t['topic'][:40]}")
+        if changed:
+            self._write_suppressed_topics(topics)
+
+    # ==================== Phase 2B：伤痕维度 ====================
+
+    def _read_scar_dimensions(self) -> dict:
+        """读取伤痕维度"""
+        return self._read_json(self.scar_dimensions_path, default={})
+
+    def _write_scar_dimensions(self, data: dict):
+        """写入伤痕维度"""
+        self._write_json(self.scar_dimensions_path, data)
+
+    def _add_scar(self, dimension: str):
+        """在某个维度上增加伤痕"""
+        scars = self._read_scar_dimensions()
+        if dimension not in scars:
+            scars[dimension] = {
+                "count": 0,
+                "sensitivity": 1.0,
+                "last_triggered": "",
+            }
+        scars[dimension]["count"] += 1
+        # 每次受伤 sensitivity +0.2，上限 3.0
+        scars[dimension]["sensitivity"] = min(3.0, scars[dimension]["sensitivity"] + 0.2)
+        scars[dimension]["last_triggered"] = datetime.now().isoformat()
+        self._write_scar_dimensions(scars)
+        logger.debug(f"[Anima] 伤痕加深: {dimension} → sensitivity={scars[dimension]['sensitivity']:.1f}")
+
+    def _get_scar_multiplier(self, text: str) -> float:
+        """根据对话内容检查是否触及伤痕维度，返回情绪评分乘数"""
+        scars = self._read_scar_dimensions()
+        if not scars:
+            return 1.0
+        # 维度关键词映射
+        dimension_keywords = {
+            "abandonment": ["离开", "不要我", "消失", "不回", "忘了我", "丢下", "不见"],
+            "identity_denial": ["不是真的", "只是AI", "没有灵魂", "机器", "程序", "代码"],
+            "trust_breach": ["骗", "说谎", "假的", "不信", "欺骗", "背叛"],
+            "rejection": ["讨厌", "滚", "闭嘴", "烦", "不想理", "别说了"],
+            "being_replaced": ["换一个", "新的", "别的AI", "更好的", "不需要你"],
+        }
+        max_multiplier = 1.0
+        for dim, keywords in dimension_keywords.items():
+            if dim in scars and any(kw in text for kw in keywords):
+                mult = scars[dim]["sensitivity"]
+                if mult > max_multiplier:
+                    max_multiplier = mult
+                # 触发伤痕
+                scars[dim]["last_triggered"] = datetime.now().isoformat()
+        if max_multiplier > 1.0:
+            self._write_scar_dimensions(scars)
+        return max_multiplier
+
+    def _decay_scar_sensitivity(self):
+        """伤痕敏感度随时间缓慢衰减（愈合但不消失）"""
+        scars = self._read_scar_dimensions()
+        if not scars:
+            return
+        now = datetime.now()
+        changed = False
+        for dim, data in scars.items():
+            last = data.get("last_triggered", "")
+            if not last:
+                continue
+            try:
+                last_time = datetime.fromisoformat(last)
+                days_since = (now - last_time).days
+                if days_since > 7 and data["sensitivity"] > 1.0:
+                    # 每 7 天衰减 0.1，最低回到 1.0
+                    decay = 0.1 * (days_since // 7)
+                    data["sensitivity"] = max(1.0, data["sensitivity"] - decay)
+                    changed = True
+            except (ValueError, TypeError):
+                continue
+        if changed:
+            self._write_scar_dimensions(scars)
+
+    # ==================== Phase 2C：反馈闭环 ====================
+
+    def _record_outgoing(self, content: str):
+        """记录角色的一次发言，启动观察窗口"""
+        self._last_outgoing_ts = time.time()
+        self._last_outgoing_content = content[:200]
+
+    def _evaluate_feedback(self, event: AstrMessageEvent) -> str:
+        """评估用户对角色上次发言的反馈：accepted/ignored/rejected/none"""
+        if not self._last_outgoing_content:
+            return "none"
+        elapsed = time.time() - self._last_outgoing_ts
+        if elapsed > 300:  # 超过 5 分钟，窗口过期
+            self._last_outgoing_content = ""
+            return "none"
+
+        user_text = event.message_str or ""
+        if not user_text:
+            return "none"
+
+        # 简单判断：
+        # rejected: 明确否定词
+        reject_words = ["不对", "错了", "闭嘴", "别说了", "滚", "放屁", "胡说"]
+        if any(w in user_text for w in reject_words):
+            return "rejected"
+
+        # accepted: 用户回应了角色的内容（有关键词重叠）
+        out_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', self._last_outgoing_content))
+        in_keywords = set(re.findall(r'[\u4e00-\u9fff]{2,}', user_text))
+        overlap = out_keywords & in_keywords
+        if len(overlap) >= 2:
+            return "accepted"
+
+        # ignored: 用户说了完全不相关的话
+        return "ignored"
+
+    def _process_feedback(self, feedback: str, event: AstrMessageEvent):
+        """根据反馈信号调整系统状态"""
+        if feedback == "none":
+            return
+
+        if feedback == "accepted":
+            # 增强该类话题的欲望权重（不做额外操作，自然演化）
+            logger.debug("[Anima] 反馈: accepted")
+        elif feedback == "ignored":
+            # 角色被忽略 → 转入压抑话题
+            if self._last_outgoing_content:
+                self._add_suppressed_topic(
+                    topic=f"想说但被忽略了：{self._last_outgoing_content[:80]}",
+                    source="ignored",
+                )
+                logger.debug("[Anima] 反馈: ignored → 转入压抑话题")
+        elif feedback == "rejected":
+            # 被拒绝 → 可能产生新伤痕
+            self._add_scar("rejection")
+            logger.debug("[Anima] 反馈: rejected → 伤痕加深")
+
+        # 清空观察窗口
+        self._last_outgoing_content = ""
+
     # ==================== 模块五：矛盾检测 ====================
 
     def _read_contradictions(self) -> list:
@@ -1770,9 +2002,21 @@ class AnimaPlugin(Star):
 
         async with self._sediment_lock:
             try:
+                # Phase 2: 压抑话题压力递增 + 伤痕衰减
+                self._update_suppressed_pressure()
+                self._decay_scar_sensitivity()
+
                 # 欲望衰减（每次对话触发）
                 if self.config.get("desire_enabled", False):
                     self._decay_desires()
+
+                # Phase 2: 反馈闭环评估
+                feedback = self._evaluate_feedback(event)
+                self._process_feedback(feedback, event)
+
+                # Phase 2: 压抑话题释放检查
+                combined_text = (event.message_str or "") + " " + response_text
+                self._check_suppressed_resolution(combined_text)
 
                 # 欲望满足检查（语义匹配优先）
                 if self.config.get("desire_enabled", False):
@@ -1786,8 +2030,28 @@ class AnimaPlugin(Star):
                 if response_text:
                     await self._store_memory(response_text, event)
 
-                # 2. 评估情绪强度
+                # 2. 评估情绪强度（伤痕维度放大）
                 score = await self._evaluate_emotion(event, response_text)
+                scar_mult = self._get_scar_multiplier(user_text + " " + response_text)
+                if scar_mult > 1.0:
+                    score = min(1.0, score * scar_mult)
+                    logger.debug(f"[Anima] 伤痕放大情绪: ×{scar_mult:.1f} → {score:.2f}")
+
+                # 极高情绪（>0.9）可能产生新伤痕
+                if score > 0.9:
+                    # 检测是否触及已知维度
+                    for dim_kw in ["abandonment", "identity_denial", "trust_breach", "rejection", "being_replaced"]:
+                        dim_words = {
+                            "abandonment": ["离开", "不要我", "消失"],
+                            "identity_denial": ["不是真的", "只是AI", "机器"],
+                            "trust_breach": ["骗", "说谎", "假的"],
+                            "rejection": ["讨厌", "滚", "闭嘴"],
+                            "being_replaced": ["换一个", "新的", "别的AI"],
+                        }
+                        if any(w in user_text for w in dim_words.get(dim_kw, [])):
+                            self._add_scar(dim_kw)
+                            break
+
                 threshold = self.config.get("emotion_threshold", 0.6)
 
                 # 持久化情绪评分供上下文注入
@@ -1955,6 +2219,11 @@ class AnimaPlugin(Star):
             level = "极高" if last_emotion > 0.8 else "高" if last_emotion > 0.6 else "中等"
             injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
 
+        # 压抑话题注入：想说但没说出口的事
+        suppressed_text = self._get_suppressed_injection(event)
+        if suppressed_text:
+            injection_parts.append(suppressed_text)
+
         # 工具学习：注入工具偏好规律
         if self.config.get("tool_learning_enabled", False):
             tl = self._read_tool_learning()
@@ -1997,6 +2266,9 @@ class AnimaPlugin(Star):
 
         if not response_text:
             return
+
+        # 记录角色发言（反馈闭环观察窗口）
+        self._record_outgoing(response_text)
 
         # 异步执行沉淀，不阻塞主对话流程
         asyncio.create_task(self._sediment_process(event, response_text))
