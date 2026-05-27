@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.5.0 - Phase 3 + Phase 5: 人格向量 / 记忆染色 / 跨关系传播 + 突变池与连锁反应
+
+### 新增机制（Phase 3）
+
+**人格向量系统**
+- 5 维实时向量：表达欲 / 敏感度 / 边界通透 / 秩序感 / 关系引力
+- 存储于 `anima_state.json` 的 `personality_vector` 字段
+- 每次沉淀成功后根据独白内容用 EMA（α=0.12）缓慢微调
+- 自动注入 `on_llm_request` 上下文，让主模型感知当前人格倾向
+
+**记忆情绪染色**
+- RAG 检索后对返回的记忆进行 valence 估算（温暖关键词 vs 冲突关键词）
+- 当前情绪 >0.55 时优先返回温暖记忆；低情绪时优先返回冲突记忆
+- 让角色在不同情绪状态下「想起」不同性质的过去
+
+**跨关系传播**
+- 维护 per-user 低情绪连续计数（<0.35 连续 ≥3 次触发）
+- 读取 worldview.social_graph，找到与低情绪用户关系描述相似的其他用户
+- 对相似用户的伤痕敏感度进行 +0.04 微调（rejection / abandonment / trust_breach 等）
+- 传播历史记录在 state 的 `cross_propagations`
+
+### 新增机制（Phase 5）
+
+**danger_core_mutation 突变池**
+- 5 种突变类型池：信念突变 / 关系重定义 / 新禁忌 / 新执念 / 人格跃迁
+- 每次触发前让 LLM 根据当前人格向量 + 最近独白选择最「自然」的类型
+- 针对不同类型生成不同侧重点的 persona_core 修改
+- 突变后额外副作用：
+  - 人格跃迁：对应维度做 ±0.22~0.32 的跃迁
+  - 新执念：自动转化为高强度欲望（若欲望系统开启）
+
+**连锁反应**
+- 突变成功后立即 `force=True` 触发世界观更新（关系可能被重定义）
+- 若反刍开启，异步触发一次 `_rumination_task` 让角色消化突变
+- 所有突变永久记录在 `anima_state.json` 的 `mutation_history`（最多 100 条）
+- 48h 内的最近突变会自动注入对话上下文
+
+### 其他
+- 扩展 `_save_state` / 状态加载支持新字段
+- 新增多处辅助方法：`_get_personality_vector`、`_rerank_memories_by_emotion`、`_propagate_cross_relation_scar`、`_record_mutation` 等
+- 所有新机制默认关闭或零侵入（人格向量总是运行但影响极轻）
+
 ## v0.4.2 - Phase 4: 去除枷锁
 
 ### 改动

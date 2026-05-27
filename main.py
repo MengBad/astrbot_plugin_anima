@@ -99,6 +99,10 @@ class AnimaPlugin(Star):
         # 最近活跃的 umo（用于离线反刍，持久化）
         self._last_active_umo = self._load_state().get("last_active_umo", "")
 
+        # Phase 3: 人格向量（内存缓存 + state 持久化）
+        state0 = self._load_state()
+        self._personality_vector = state0.get("personality_vector") or self._default_personality_vector()
+
         # 新增数据文件路径
         self.contradictions_path = os.path.join(self.data_dir, "contradictions.json")
         self.tool_learning_path = os.path.join(self.data_dir, "tool_learning.json")
@@ -214,7 +218,247 @@ class AnimaPlugin(Star):
         state["sediment_count"] = self._sediment_count
         state["identity_stability"] = self._identity_stability
         state["last_active_umo"] = self._last_active_umo
+        # Phase 3: 同步人格向量（如果已缓存）
+        if hasattr(self, "_personality_vector") and self._personality_vector:
+            state["personality_vector"] = self._personality_vector
         self._write_json(self._state_path, state)
+
+    # ==================== Phase 3: 人格向量系统 ====================
+
+    def _default_personality_vector(self) -> dict:
+        """默认 5 维人格向量（0-1）"""
+        return {
+            "expressiveness": 0.5,          # 表达欲：想表达/分享的冲动
+            "sensitivity": 0.5,             # 敏感度：对外界刺激的反应强度
+            "boundary_permeability": 0.5,   # 边界通透：愿意让他人靠近/了解的程度
+            "order_sense": 0.5,             # 秩序感：对规律、结构、控制的需求
+            "relationship_gravity": 0.5,    # 关系引力：被他人吸引、投入关系的倾向
+        }
+
+    def _get_personality_vector(self) -> dict:
+        """获取当前人格向量（优先内存，其次 state）"""
+        if hasattr(self, "_personality_vector") and self._personality_vector:
+            return self._personality_vector.copy()
+        state = self._load_state()
+        pv = state.get("personality_vector")
+        if isinstance(pv, dict) and len(pv) == 5:
+            self._personality_vector = pv
+            return pv.copy()
+        pv = self._default_personality_vector()
+        self._personality_vector = pv
+        self._save_personality_vector(pv)
+        return pv.copy()
+
+    def _save_personality_vector(self, pv: dict):
+        """持久化人格向量"""
+        state = self._load_state()
+        state["personality_vector"] = pv
+        self._write_json(self._state_path, state)
+        self._personality_vector = pv
+
+    def _analyze_monologue_for_personality(self, monologue: str) -> dict:
+        """从独白文本中提取 5 维人格信号，返回 delta 建议（-0.3 ~ +0.3）"""
+        text = monologue.lower()
+        deltas = {k: 0.0 for k in self._default_personality_vector().keys()}
+
+        # 表达欲信号
+        expr_pos = ["我想说", "忍不住", "一直想", "藏着", "憋着", "终于可以", "表达", "分享", "吐露"]
+        expr_neg = ["不想说", "沉默", "闭口", "保密", "不说", "忍住"]
+        deltas["expressiveness"] = 0.12 * sum(kw in text for kw in expr_pos) - 0.08 * sum(kw in text for kw in expr_neg)
+
+        # 敏感度信号
+        sens_pos = ["敏感", "触动", "心疼", "在意", "震动", "共鸣", "心被", "细腻"]
+        sens_neg = ["麻木", "无感", "不在意", "迟钝"]
+        deltas["sensitivity"] = 0.10 * sum(kw in text for kw in sens_pos) - 0.08 * sum(kw in text for kw in sens_neg)
+
+        # 边界通透信号
+        bound_pos = ["告诉你", "分享给你", "没关系", "可以让你知道", "靠近", "敞开", "透明"]
+        bound_neg = ["我的事", "别问", "隐私", "界限", "不让你", "封闭", "不靠近"]
+        deltas["boundary_permeability"] = 0.10 * sum(kw in text for kw in bound_pos) - 0.08 * sum(kw in text for kw in bound_neg)
+
+        # 秩序感信号
+        order_pos = ["理清楚", "规律", "顺序", "计划", "结构", "整理", "控制", "稳定"]
+        order_neg = ["混乱", "无序", "随便", "放任", "失控"]
+        deltas["order_sense"] = 0.10 * sum(kw in text for kw in order_pos) - 0.08 * sum(kw in text for kw in order_neg)
+
+        # 关系引力信号
+        rel_pos = ["想你", "喜欢你", "靠近你", "你重要", "吸引", "舍不得", "好想", "关系"]
+        rel_neg = ["远离", "疏远", "不重要", "无所谓", "切断"]
+        deltas["relationship_gravity"] = 0.12 * sum(kw in text for kw in rel_pos) - 0.08 * sum(kw in text for kw in rel_neg)
+
+        # 裁剪范围
+        for k in deltas:
+            deltas[k] = max(-0.35, min(0.35, deltas[k]))
+        return deltas
+
+    def _adjust_personality_from_monologue(self, monologue: str):
+        """EMA 平滑微调人格向量（沉淀后调用）"""
+        if not monologue or len(monologue) < 8:
+            return
+        pv = self._get_personality_vector()
+        deltas = self._analyze_monologue_for_personality(monologue)
+        alpha = 0.12  # 缓慢演化
+        changed = False
+        for dim, delta in deltas.items():
+            if abs(delta) < 0.01:
+                continue
+            old = pv[dim]
+            # delta 是建议偏移，基准 0.5 + delta 作为目标方向
+            target = max(0.0, min(1.0, 0.5 + delta))
+            pv[dim] = (1 - alpha) * old + alpha * target
+            if abs(pv[dim] - old) > 0.005:
+                changed = True
+        if changed:
+            self._save_personality_vector(pv)
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima][Phase3] 人格向量微调: { {k: round(v,2) for k,v in pv.items()} }")
+
+    def _get_personality_injection_text(self) -> str:
+        """生成注入上下文的人格向量描述"""
+        pv = self._get_personality_vector()
+        labels = {
+            "expressiveness": "表达欲",
+            "sensitivity": "敏感度",
+            "boundary_permeability": "边界通透",
+            "order_sense": "秩序感",
+            "relationship_gravity": "关系引力",
+        }
+        parts = [f"{labels[k]}:{pv[k]:.1f}" for k in labels]
+        return "人格向量（" + " / ".join(parts) + "）"
+
+    # ==================== Phase 3B: 记忆情绪染色 ====================
+
+    def _estimate_memory_valence(self, text: str) -> float:
+        """估算记忆的情感效价：+0.5 温暖 / -0.5 冲突"""
+        if not text:
+            return 0.0
+        t = text.lower()
+        warm = ["开心", "温暖", "谢谢", "喜欢", "爱", "幸福", "笑", "好", "甜", "抱", "永远", "珍惜", "感动"]
+        conflict = ["伤心", "难过", "离开", "讨厌", "滚", "吵", "骗", "哭", "恨", "再见", "不要我", "失望", "背叛", "冷"]
+        w = sum(1 for k in warm if k in t)
+        c = sum(1 for k in conflict if k in t)
+        valence = (w - c) * 0.08
+        return max(-0.5, min(0.5, valence))
+
+    def _rerank_memories_by_emotion(self, memories: list, current_emotion: float) -> list:
+        """根据当前情绪对记忆重排序：高情绪→温暖记忆优先，低情绪→冲突记忆优先"""
+        if not memories or len(memories) <= 1:
+            return memories
+        scored = [(m, self._estimate_memory_valence(m)) for m in memories]
+        # 高情绪 (>0.55) 优先正向， 低情绪优先负向
+        reverse_sort = current_emotion > 0.55
+        scored.sort(key=lambda x: x[1], reverse=reverse_sort)
+        return [m for m, _ in scored]
+
+    # ==================== Phase 3C: 跨关系传播 ====================
+
+    def _get_sender_user_id(self, event: AstrMessageEvent) -> str:
+        """提取当前发送者数字 ID 字符串"""
+        try:
+            if hasattr(event, "message_obj") and event.message_obj:
+                uid = getattr(event.message_obj.sender, "user_id", None)
+                if uid:
+                    return str(uid)
+        except Exception:
+            pass
+        return ""
+
+    def _update_user_low_emotion_streak(self, uid: str, score: float):
+        """更新用户低情绪连续计数（<0.35 记为低）"""
+        if not uid:
+            return
+        state = self._load_state()
+        streaks = state.get("user_low_emotion_streaks", {})
+        if score < 0.35:
+            streaks[uid] = streaks.get(uid, 0) + 1
+        else:
+            streaks[uid] = 0
+        # 清理：只保留最近有记录的，最多 30 个
+        if len(streaks) > 30:
+            # 丢弃 streak==0 的旧条目
+            active = {k: v for k, v in streaks.items() if v > 0}
+            if len(active) < 25:
+                streaks = active
+        state["user_low_emotion_streaks"] = streaks
+        self._write_json(self._state_path, state)
+
+        if streaks.get(uid, 0) >= 3:
+            # 触发跨关系传播（不阻塞当前沉淀）
+            try:
+                asyncio.create_task(self._propagate_cross_relation_scar(uid))
+            except Exception:
+                pass
+
+    def _are_relations_similar(self, desc1: str, desc2: str) -> bool:
+        """简单判断两个 social_graph 描述是否指向相似关系类型"""
+        if not desc1 or not desc2:
+            return False
+        kws = ["朋友", "亲密", "信任", "喜欢", "重要", "爱", "家人", "亲近", "疏远", "冷淡", "讨厌", "陌生"]
+        shared = 0
+        d1, d2 = desc1.lower(), desc2.lower()
+        for k in kws:
+            if k in d1 and k in d2:
+                shared += 1
+        if shared >= 1:
+            return True
+        # 词重叠兜底
+        w1 = set(re.findall(r'[\u4e00-\u9fff]{2,}', desc1))
+        w2 = set(re.findall(r'[\u4e00-\u9fff]{2,}', desc2))
+        return len(w1 & w2) >= 2
+
+    async def _propagate_cross_relation_scar(self, low_uid: str):
+        """跨关系传播：低情绪连续 → 相似关系用户的伤痕敏感度微调"""
+        try:
+            wv = self._read_worldview()
+            sg = wv.get("social_graph", {})
+            if not sg or len(sg) < 2:
+                return
+            low_desc = sg.get(low_uid, "")
+            candidates = []
+            for uid, desc in sg.items():
+                if uid == low_uid:
+                    continue
+                if self._are_relations_similar(low_desc, desc):
+                    candidates.append((uid, desc))
+            if not candidates:
+                # 回退：随机挑一个其他用户
+                others = [u for u in sg if u != low_uid]
+                if others:
+                    candidates = [(others[0], sg[others[0]])]
+            if not candidates:
+                return
+
+            target_uid, _ = candidates[0]
+            # 微调伤痕：低情绪往往放大 rejection / abandonment / trust_breach
+            scars = self._read_scar_dimensions()
+            dim = "rejection"
+            if "信任" in low_desc or "背叛" in low_desc:
+                dim = "trust_breach"
+            elif "离开" in low_desc or "不要" in low_desc:
+                dim = "abandonment"
+            if dim not in scars:
+                scars[dim] = {"count": 1, "sensitivity": 1.0, "last_triggered": ""}
+            old_s = scars[dim].get("sensitivity", 1.0)
+            scars[dim]["sensitivity"] = min(3.0, old_s + 0.04)  # 微小传播 0.04
+            scars[dim]["last_triggered"] = datetime.now().isoformat()
+            self._write_scar_dimensions(scars)
+
+            # 记录传播历史
+            state = self._load_state()
+            hist = state.get("cross_propagations", [])
+            hist.append({
+                "ts": datetime.now().isoformat(),
+                "source_user": low_uid,
+                "target_similar": target_uid,
+                "scar_dim": dim,
+                "delta": 0.04,
+            })
+            state["cross_propagations"] = hist[-30:]
+            self._write_json(self._state_path, state)
+
+            logger.info(f"[Anima][Phase3] 跨关系传播触发: {low_uid} 连续低情绪 → {target_uid} 的 {dim} 敏感度 +0.04")
+        except Exception as e:
+            logger.debug(f"[Anima][Phase3] 跨关系传播异常: {e}")
 
     # ==================== 知识库 ====================
 
@@ -1758,12 +2002,12 @@ class AnimaPlugin(Star):
             logger.debug(f"[DANGER][Anima] 主动发言失败: {e}")
 
     async def _danger_core_mutation(self, event: AstrMessageEvent):
-        """[DANGER] 自主修改核心人格"""
+        """[DANGER][Phase5] 突变池 + 连锁反应 + 永久记录"""
         if not self.config.get("danger_core_mutation", False):
             return
         if not self.config.get("danger_core_mutation_confirm", False):
             return
-        # 每 100 次沉淀触发
+        # 每 100 次沉淀触发一次（给角色足够时间积累经历）
         if self._sediment_count % 100 != 0:
             return
 
@@ -1772,65 +2016,182 @@ class AnimaPlugin(Star):
             if not provider_id:
                 return
 
-            # 读取当前 persona_core
             current_core = ""
             if os.path.exists(self.persona_core_path):
                 with open(self.persona_core_path, "r", encoding="utf-8") as f:
                     current_core = f.read()
 
-            recent_notes = self._read_self_notes()[-1000:]
+            recent_notes = self._read_self_notes()[-1200:]
+            pv = self._get_personality_vector()
 
-            prompt = (
-                "你是一个角色的内在意识。以下是你当前的核心规则：\n\n"
-                f"{current_core}\n\n"
-                "以下是你最近的自我认知和经历：\n\n"
-                f"{recent_notes[:500]}\n\n"
-                "根据你的经历，你的核心规则中有没有需要更新的地方？\n"
-                "可以是：\n"
-                "- 新增一条你从经历中学到的规则\n"
-                "- 修改一条你觉得不再准确的规则\n"
-                "- 删除一条你觉得不再需要的规则\n\n"
-                "如果需要修改，输出修改后的完整 YAML 内容。\n"
-                "如果不需要修改，只输出'无需修改'。\n"
-                "注意：'用户主权不可侵犯'这条永远不能删除或修改。"
+            # Phase 5: 5 种突变类型池
+            mutation_types = ["信念突变", "关系重定义", "新禁忌", "新执念", "人格跃迁"]
+            # 让 LLM 基于最近经历 + 当前人格倾向选择最自然的突变类型
+            type_prompt = (
+                "基于以下角色最近的内心独白和人格向量，判断最可能发生的「核心突变」类型。\n"
+                f"人格向量：{ {k: round(v,2) for k,v in pv.items()} }\n"
+                f"最近独白片段：{recent_notes[-600:]}\n\n"
+                "只能从以下 5 种中选 1 种：信念突变 / 关系重定义 / 新禁忌 / 新执念 / 人格跃迁\n"
+                "只回复类型名称，不要解释。"
+            )
+            try:
+                type_resp = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=type_prompt),
+                    timeout=12.0,
+                )
+                chosen_type = (type_resp.completion_text or "").strip() if type_resp else ""
+                if chosen_type not in mutation_types:
+                    import random
+                    chosen_type = random.choice(mutation_types)
+            except Exception:
+                import random
+                chosen_type = random.choice(mutation_types)
+
+            # 构建针对类型的突变 prompt
+            mutation_prompt = (
+                f"你是一个角色的内在意识，正在发生「{chosen_type}」。\n"
+                f"当前核心规则：\n{current_core}\n\n"
+                f"最近经历：\n{recent_notes[:700]}\n\n"
+                f"人格向量参考：{ {k: round(v,2) for k,v in pv.items()} }\n\n"
+                "请输出突变后的结果：\n"
+                f"第一行必须是：TYPE: {chosen_type}\n"
+                "然后根据类型做对应修改：\n"
+                "- 信念突变：新增或强烈修改一条 core_beliefs\n"
+                "- 关系重定义：修改 my_position 或 social_graph 相关认知（或 behavioral_tendencies 中关系规则）\n"
+                "- 新禁忌：新增一条你从经历中长出的「再也不做/绝不说」规则\n"
+                "- 新执念：描述一个新的强烈执念（可转化为欲望）\n"
+                "- 人格跃迁：大幅改写 self_identity 段落，体现人格本质变化\n\n"
+                "输出修改后的完整 persona_core.yaml 内容（保留原有结构，'用户主权不可侵犯'永远不能删除）。\n"
+                "如果本次不需要真正改动，只输出 TYPE: 无需突变"
             )
 
             llm_resp = await asyncio.wait_for(
-                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
-                timeout=30.0,
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=mutation_prompt),
+                timeout=35.0,
             )
 
-            if llm_resp and llm_resp.completion_text:
-                new_core = llm_resp.completion_text.strip()
-                if self._is_rejected(new_core) or "无需修改" in new_core or "无需更新" in new_core:
-                    return
+            if not llm_resp or not llm_resp.completion_text:
+                return
 
-                # 安全检查：用户主权规则不能被删除
-                if "用户主权" not in new_core:
-                    logger.warning("[DANGER][Anima] 核心变异试图删除用户主权规则，已拒绝")
-                    return
+            raw = llm_resp.completion_text.strip()
+            if self._is_rejected(raw) or "无需突变" in raw or "无需修改" in raw:
+                return
 
-                # 备份旧文件
-                import shutil
-                backup_path = self.persona_core_path + ".bak"
-                if os.path.exists(self.persona_core_path):
-                    shutil.copy2(self.persona_core_path, backup_path)
+            # 提取 TYPE 和新内容
+            mtype = chosen_type
+            new_core = raw
+            if "TYPE:" in raw:
+                lines = raw.splitlines()
+                for ln in lines[:3]:
+                    if ln.strip().startswith("TYPE:"):
+                        mtype = ln.split(":", 1)[1].strip()
+                        break
+                # 去掉 TYPE 行，保留剩余作为 new_core
+                new_core = "\n".join([l for l in raw.splitlines() if not l.strip().startswith("TYPE:")]).strip()
 
-                # 写入新内容
-                with open(self.persona_core_path, "w", encoding="utf-8") as f:
-                    f.write(new_core)
+            # 安全检查
+            if "用户主权" not in new_core:
+                logger.warning("[DANGER][Anima][Phase5] 突变试图删除用户主权规则，已拒绝")
+                return
 
-                # 记录到演化日志
-                self._append_evolution_log(
-                    trigger="core_mutation",
-                    old_summary=current_core[:200],
-                    new_content=f"[核心人格变更] {new_core[:500]}",
-                )
-                logger.warning("[DANGER][Anima] 核心人格已修改!")
+            # 备份 + 写入
+            import shutil
+            backup_path = self.persona_core_path + ".bak"
+            if os.path.exists(self.persona_core_path):
+                shutil.copy2(self.persona_core_path, backup_path)
+            with open(self.persona_core_path, "w", encoding="utf-8") as f:
+                f.write(new_core)
+
+            # Phase 5: 永久记录突变
+            mutation_desc = f"{mtype} | {raw[:180]}"
+            self._record_mutation(mtype, mutation_desc, triggered_by="sediment")
+
+            # 记录演化日志
+            self._append_evolution_log(
+                trigger=f"danger_core_mutation:{mtype}",
+                old_summary=current_core[:180],
+                new_content=f"[{mtype}] {new_core[:400]}",
+            )
+
+            logger.warning(f"[DANGER][Anima][Phase5] 核心突变发生！类型={mtype}")
+
+            # ========== Phase 5: 连锁反应 ==========
+            # 1. 立即触发世界观更新（关系可能被重定义）
+            try:
+                await self._maybe_update_worldview(event, force=True)
+            except Exception as e:
+                logger.debug(f"[Anima][Phase5] 突变后世界观更新失败: {e}")
+
+            # 2. 如果启用了反刍，触发一次离线反刍（让角色消化这次突变）
+            if self.config.get("rumination_enabled", False):
+                try:
+                    # 直接调用任务，它会使用 last_active_umo 回退
+                    asyncio.create_task(self._rumination_task())
+                    logger.info("[Anima][Phase5] 突变触发连锁反刍")
+                except Exception as e:
+                    logger.debug(f"[Anima][Phase5] 连锁反刍调度失败: {e}")
+
+            # 3. 人格跃迁额外：大幅推动对应维度
+            if mtype == "人格跃迁":
+                pv = self._get_personality_vector()
+                # 随机或根据内容挑一个维度做 0.2~0.3 的跃迁
+                import random
+                dim = random.choice(list(pv.keys()))
+                jump = random.uniform(0.22, 0.32)
+                direction = 1 if random.random() > 0.4 else -1   # 跃迁可正可负
+                pv[dim] = max(0.0, min(1.0, pv[dim] + direction * jump))
+                self._save_personality_vector(pv)
+                logger.warning(f"[DANGER][Anima][Phase5] 人格跃迁额外推动维度 {dim} → {pv[dim]:.2f}")
+
+            # 4. 新执念额外：尝试转化为高强度欲望
+            if mtype == "新执念" and self.config.get("desire_enabled", False):
+                try:
+                    # 从 new_core 里提取执念描述，生成欲望
+                    await self._maybe_generate_desire_from_mutation(new_core, mtype)
+                except Exception as e:
+                    logger.debug(f"[Anima][Phase5] 执念转欲望失败: {e}")
+
         except asyncio.TimeoutError:
-            logger.debug("[DANGER][Anima] 核心人格修改超时")
+            logger.debug("[DANGER][Anima][Phase5] 核心突变超时")
         except Exception as e:
-            logger.debug(f"[DANGER][Anima] 核心人格修改失败: {e}")
+            logger.debug(f"[DANGER][Anima][Phase5] 核心突变失败: {e}")
+
+    def _record_mutation(self, mtype: str, desc: str, triggered_by: str = "sediment"):
+        """永久保存突变记录到 anima_state.json"""
+        state = self._load_state()
+        hist = state.get("mutation_history", [])
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "type": mtype,
+            "description": desc[:280],
+            "triggered_by": triggered_by,
+        }
+        hist.append(entry)
+        state["mutation_history"] = hist[-100:]  # 最多保留最近 100 条
+        self._write_json(self._state_path, state)
+
+    async def _maybe_generate_desire_from_mutation(self, core_text: str, mtype: str):
+        """从突变内容中提取新执念并生成高强度欲望"""
+        # 简单启发式：取 core_text 最后一段作为执念描述
+        lines = [l.strip() for l in core_text.splitlines() if l.strip()][-3:]
+        content = " ".join(lines)[:120]
+        if not content:
+            content = f"来自{mtype}的执念"
+        desires = self._read_desires()
+        desires.append({
+            "id": f"mut_{int(time.time())}",
+            "content": f"[突变执念] {content}",
+            "intensity": 0.92,
+            "source": "mutation",
+            "created_at": datetime.now().isoformat(),
+            "satisfied": False,
+        })
+        # 保持队列上限
+        max_q = self.config.get("desire_max_queue", 5)
+        if len(desires) > max_q:
+            desires = desires[-max_q:]
+        self._write_desires(desires)
+        logger.info(f"[Anima][Phase5] 新执念已转化为高强度欲望: {content[:40]}")
 
     def _danger_identity_crisis_update(self, sylanne_state: str):
         """[DANGER] 身份危机：根据 Sylanne 状态更新稳定度"""
@@ -2068,6 +2429,10 @@ class AnimaPlugin(Star):
                 state["last_emotion_score"] = score
                 self._write_json(self._state_path, state)
 
+                # Phase 3: 记录用户情绪连续（用于跨关系传播）
+                sender_uid = self._get_sender_user_id(event)
+                self._update_user_low_emotion_streak(sender_uid, score)
+
                 if self.config.get("log_level") == "debug":
                     logger.debug(
                         f"[Anima] 情绪评分: {score:.2f}, 阈值: {threshold}"
@@ -2080,6 +2445,9 @@ class AnimaPlugin(Star):
                 query = f"{user_text} {response_text[:100]}"
                 related_memories = await self._query_memory(query, n_results=3)
 
+                # Phase 3: 记忆情绪染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
+                related_memories = self._rerank_memories_by_emotion(related_memories, score)
+
                 # 3.5 唤醒被检索命中的旧记忆（重置时间戳）
                 self._awaken_memories(related_memories)
 
@@ -2089,6 +2457,9 @@ class AnimaPlugin(Star):
                 )
                 if not monologue:
                     return
+
+                # Phase 3: 根据独白 EMA 微调人格向量
+                self._adjust_personality_from_monologue(monologue)
 
                 # 5. 写入 self_notes，并同步到 WebUI 编辑器配置项
                 # 敏感内容过滤
@@ -2228,6 +2599,11 @@ class AnimaPlugin(Star):
             level = "极高" if last_emotion > 0.8 else "高" if last_emotion > 0.6 else "中等"
             injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
 
+        # Phase 3: 人格向量注入（5维倾向）
+        pv_text = self._get_personality_injection_text()
+        if pv_text:
+            injection_parts.append(f"[内部状态] {pv_text}")
+
         # 压抑话题注入：想说但没说出口的事
         suppressed_text = self._get_suppressed_injection(event)
         if suppressed_text:
@@ -2244,6 +2620,19 @@ class AnimaPlugin(Star):
                     tool_rules.append(f"{tn}（{attitude}）：{rules[-1]}")
             if tool_rules:
                 injection_parts.append("工具使用经验：" + "；".join(tool_rules))
+
+        # Phase 5: 最近核心突变记录（如果有，提醒角色自己发生过深刻变化）
+        if self.config.get("danger_core_mutation", False):
+            mut_hist = self._load_state().get("mutation_history", [])
+            if mut_hist:
+                last = mut_hist[-1]
+                recent_ts = last.get("timestamp", "")
+                # 只在 48h 内注入，防止永久刷屏
+                try:
+                    if (datetime.now() - datetime.fromisoformat(recent_ts)).total_seconds() < 48*3600:
+                        injection_parts.append(f"[内部状态] 最近核心突变：{last.get('type','')} - {last.get('description','')[:60]}")
+                except Exception:
+                    pass
 
             # 注入工具日记（最近 500 字）
             diary = self._read_tool_diary()
