@@ -37,7 +37,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.6.0",
+    "0.6.1",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(Star):
@@ -160,6 +160,14 @@ class AnimaPlugin(Star):
         # 反馈窗口（按 umo 隔离，避免多群/多用户场景下相互干扰）
         # 结构: {umo: (ts, content)}
         self._outgoing_by_umo: dict = {}
+
+        # v0.6.1: 自主研究节流
+        # - _research_cooldown[reason_key] = ts，同一 reason 5 分钟内只跑一次
+        # - _research_semaphore 限制全局同时只跑 1 个研究 task，防止并发风暴
+        # - _daily_tool_register_count 限制每天动态注册的独立 LLM 工具数量
+        self._research_cooldown: dict = {}
+        self._research_semaphore = asyncio.Semaphore(1)
+        self._daily_tool_register: dict = {"date": "", "count": 0}
 
         # 注：离线反刍定时任务的注册已迁移到 async initialize() 中，
         # 因为 __init__ 是同步阶段，不能安全地 create_task（Python 3.10+ 上
@@ -2133,29 +2141,154 @@ class AnimaPlugin(Star):
         except OSError as e:
             logger.warning(f"[Anima] 追加能力日记失败: {e}")
 
+    def _normalize_capability_signature(self, name: str, description: str = "") -> set:
+        """v0.6.1: 把能力名/描述归一化成关键词集合，用于近似去重。
+
+        策略：
+        1) 抽英文 stem（≥3 字母）
+        2) 中文用滑动窗口抽 2-字与 3-字短语（不能整段当一个 token）
+        3) 同义词归一化：ego/self/我/U+6211 → _self_，anchor/锚 → _anchor_，
+           blade/axe/戉/兵戈/利刃 → _weapon_，方块/block → _block_，
+           重构/reconstruction → _rebuild_，共鸣/resonance → _resonance_
+        4) 去通用停用词
+        命中已有能力的关键词集合 ≥2 个 + 占新签名 ≥40% → 视为同一能力。
+        """
+        if not name:
+            return set()
+        text = (name + " " + description[:200]).lower()
+        # 抽英文词（≥3 字母）
+        en_words = set(re.findall(r'[a-z]{3,}', text))
+        # 中文：滑动窗口抽 2 字和 3 字（避免一整段被当成单个 token）
+        cn_pieces: set = set()
+        cn_chars = re.findall(r'[\u4e00-\u9fff]', text)
+        # 重新拼接成中文字符串再做 ngram，以保证连续性
+        cn_runs = re.findall(r'[\u4e00-\u9fff]+', text)
+        for run in cn_runs:
+            for n in (2, 3):
+                for i in range(len(run) - n + 1):
+                    cn_pieces.add(run[i:i + n])
+        # 同义词归一化（自我语义关键词）
+        synonyms = {
+            "ego": "_self_", "self": "_self_", "selfhood": "_self_",
+            "u6211": "_self_", "myself": "_self_",
+            "我": "_self_", "自我": "_self_",
+            "anchor": "_anchor_",
+            "锚": "_anchor_", "锚点": "_anchor_", "锚定": "_anchor_",
+            "blade": "_weapon_", "axe": "_weapon_", "weapon": "_weapon_", "weapons": "_weapon_",
+            "戉": "_weapon_", "兵戈": "_weapon_", "兵刃": "_weapon_", "利刃": "_weapon_",
+            "凶器": "_weapon_", "刑器": "_weapon_", "大戉": "_weapon_", "刃": "_weapon_",
+            "block": "_block_", "blocks": "_block_", "blockwise": "_block_",
+            "方块": "_block_", "construct": "_block_",
+            "rebuild": "_rebuild_", "reconstruction": "_rebuild_",
+            "重构": "_rebuild_", "重塑": "_rebuild_",
+            "resonance": "_resonance_", "resonate": "_resonance_",
+            "共鸣": "_resonance_", "共振": "_resonance_",
+            "alignment": "_align_", "align": "_align_",
+            "对齐": "_align_", "对准": "_align_",
+            # 行刑/肢解 → 武器属性的通用源词
+            "行刑": "_weapon_", "肢解": "_weapon_",
+        }
+        words = en_words | cn_pieces
+        normalized: set = set()
+        for w in words:
+            mapped = synonyms.get(w)
+            if mapped:
+                normalized.add(mapped)
+            else:
+                # 不在同义词表里的中文 2-3 字短语：保留长度 ≥ 2 的英文 stem 与含意义信号的中文片段
+                if len(w) >= 3 and re.fullmatch(r'[a-z]+', w):
+                    normalized.add(w)
+                # 其余短中文片段不进入签名（避免噪音），只有同义词归一化后的语义槽位算数
+        # 去通用停用词
+        stop = {"the", "and", "for", "with", "this", "that", "into", "from", "其",
+                "一", "了", "的", "和", "我的", "正在"}
+        normalized -= stop
+        return normalized
+
+    def _find_similar_capability(self, capability: dict, caps: list) -> int:
+        """在已有能力列表里找一个语义近似的，返回索引；没找到返回 -1。
+
+        门槛：
+        - 新签名 ≥ 4 个槽位：要求 ≥ 2 个 overlap 且占新签名 ≥ 40%
+        - 新签名 2-3 个槽位（语义稀薄）：要求所有语义槽位都被命中
+        - 新签名 1 个槽位：仅在该槽位是同义词归一化后的特殊键（_self_ / _weapon_ 等以 _ 包裹）时才合并
+        """
+        new_sig = self._normalize_capability_signature(
+            capability.get("name", ""), capability.get("description", "")
+        )
+        if not new_sig:
+            return -1
+        best_idx = -1
+        best_overlap = 0
+        for i, c in enumerate(caps):
+            old_sig = self._normalize_capability_signature(
+                c.get("name", ""), c.get("description", "")
+            )
+            if not old_sig:
+                continue
+            overlap = new_sig & old_sig
+            ov = len(overlap)
+            if ov == 0:
+                continue
+            n = len(new_sig)
+            matched = False
+            if n >= 4 and ov >= 2 and ov >= max(2, int(n * 0.4)):
+                matched = True
+            elif 2 <= n <= 3 and ov == n:
+                matched = True
+            elif n == 1:
+                # 单槽位：必须是归一化语义键（带下划线包裹），且对方也有该键
+                only_key = next(iter(new_sig))
+                if only_key.startswith("_") and only_key.endswith("_") and only_key in old_sig:
+                    matched = True
+            if matched and ov > best_overlap:
+                best_overlap = ov
+                best_idx = i
+        return best_idx
+
     def _create_or_update_capability(self, capability: dict):
         """创建或更新一个个人能力/自创工具。
         受 capability_system_enabled 控制：关闭则不写入。
+
+        v0.6.1: 去重逻辑改为名字精确匹配 + 语义关键词集合近似匹配，
+        防止 LLM 每次起不同名字（中英混搭、user_id 嵌入）导致能力库膨胀。
         """
         if not self.config.get("capability_system_enabled", True):
             logger.debug("[Anima] capability_system_enabled=false，跳过能力创建")
             return None
         caps = self._read_personal_capabilities()
+        cap_list = caps.get("capabilities", [])
+
+        # 第一道：名字精确匹配
         existing = None
-        for i, c in enumerate(caps.get("capabilities", [])):
+        for i, c in enumerate(cap_list):
             if c.get("name") == capability.get("name"):
                 existing = i
                 break
+
+        # 第二道：语义关键词近似匹配（v0.6.1）
+        if existing is None:
+            similar_idx = self._find_similar_capability(capability, cap_list)
+            if similar_idx >= 0:
+                existing = similar_idx
+                merged_name = cap_list[similar_idx].get("name", "")
+                logger.info(
+                    f"[Anima] 检测到语义近似能力，合并到「{merged_name}」"
+                    f"（新名字「{capability.get('name', '')}」被丢弃）"
+                )
+                # 合并时不要覆盖原有的 name，否则会让"主名"反复跳变
+                capability.pop("name", None)
 
         capability["last_updated"] = datetime.now().isoformat()
 
         if existing is not None:
             # 合并更新，保留历史 correction
-            old = caps["capabilities"][existing]
+            old = cap_list[existing]
             old.update({k: v for k, v in capability.items() if k not in ["corrections", "usage_count"]})
             if "corrections" in capability:
                 old.setdefault("corrections", []).extend(capability["corrections"])
-            caps["capabilities"][existing] = old
+            cap_list[existing] = old
+            final_name = old.get("name", "")
         else:
             capability.setdefault("id", f"cap_{int(time.time())}")
             capability.setdefault("created_at", datetime.now().isoformat())
@@ -2167,18 +2300,21 @@ class AnimaPlugin(Star):
                 capability["register_as_independent_tool"] = bool(
                     self.config.get("default_register_as_independent_tool", False)
                 )
-            caps.setdefault("capabilities", []).append(capability)
+            cap_list.append(capability)
+            caps["capabilities"] = cap_list
+            final_name = capability.get("name", "")
 
         self._write_personal_capabilities(caps)
 
-        # Phase 6+ 真正按需动态注册独立工具
-        if capability.get("confidence", 0) >= 0.65:
+        # Phase 6+ 真正按需动态注册独立工具（仅对新增/更新的能力，并受日配额限制）
+        target_cap = cap_list[existing] if existing is not None else capability
+        if target_cap.get("confidence", 0) >= 0.65:
             try:
-                self._dynamically_register_capability_as_tool(capability)
+                self._dynamically_register_capability_as_tool(target_cap)
             except Exception as dyn_e:
                 logger.debug(f"[Anima] 按需动态注册能力工具失败: {dyn_e}")
 
-        return capability.get("name")
+        return final_name
 
     def _get_personal_capabilities_injection(self) -> str:
         """
@@ -2214,18 +2350,40 @@ class AnimaPlugin(Star):
         """
         真正按需动态注册独立工具（更高阶动态）。
         受 dynamic_tool_registration_enabled 控制。
+
+        v0.6.1: 加入每日配额（默认 3 个/天）+ 工具名归一化避免撞名占位符。
+        超过配额时能力照常进 personal_capabilities.json，但不再注册成独立 LLM 工具。
         """
         if not self.config.get("dynamic_tool_registration_enabled", False):
             return
         if not capability.get("register_as_independent_tool", False):
             return
 
+        # ====== v0.6.1：每日配额检查 ======
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._daily_tool_register.get("date") != today:
+            self._daily_tool_register = {"date": today, "count": 0}
+        daily_quota = int(self.config.get("dynamic_tool_daily_quota", 3))
+        if self._daily_tool_register["count"] >= daily_quota:
+            logger.info(
+                f"[Anima][Autonomy] 今日动态工具注册配额已满 "
+                f"({daily_quota} 个)，能力「{capability.get('name','')}」仅入库不注册为独立工具"
+            )
+            return
+
         name = capability.get("name", "unknown_cap")
-        safe_tool_name = "my_" + re.sub(r'[^a-z0-9_]', '_', name.lower())[:40]
+        # v0.6.1: 工具名先做更可读的归一化，避免中文全部变下划线导致撞名
+        # 1) 中文 → 拼音首字母（无 pypinyin 依赖时退回纯数字哈希），保留英文/数字
+        sanitized = re.sub(r'[^a-z0-9_]+', '_', name.lower()).strip('_')
+        if not sanitized or sanitized.replace('_', '') == '':
+            # 完全是中文/特殊符号 → 用名字 hash 兜底
+            sanitized = f"cap_{abs(hash(name)) % 10**8:08d}"
+        safe_tool_name = ("my_" + sanitized)[:48]
 
         # 避免重复注册同名
         tool_mgr = self.context.get_llm_tool_manager()
         if any(t.name == safe_tool_name for t in tool_mgr.func_list):
+            logger.debug(f"[Anima] 工具 {safe_tool_name} 已存在，跳过重复注册")
             return
 
         # 动态创建一个轻量 FunctionTool
@@ -2252,12 +2410,17 @@ class AnimaPlugin(Star):
         tool_instance = DynamicCapabilityTool(_plugin=self, _cap_name=name)
         try:
             self.context.add_llm_tools(tool_instance)
+            # 计入今日配额
+            self._daily_tool_register["count"] += 1
             self._append_evolution_log(
                 trigger="dynamic_per_capability_tool_registered",
                 old_summary="",
-                new_content=f"按需为能力「{name}」注册了独立工具 {safe_tool_name}",
+                new_content=f"按需为能力「{name}」注册了独立工具 {safe_tool_name}（今日 {self._daily_tool_register['count']}/{daily_quota}）",
             )
-            logger.info(f"[Anima][Autonomy] 动态注册独立能力工具: {safe_tool_name}")
+            logger.info(
+                f"[Anima][Autonomy] 动态注册独立能力工具: {safe_tool_name} "
+                f"（今日 {self._daily_tool_register['count']}/{daily_quota}）"
+            )
         except Exception as e:
             logger.warning(f"[Anima] 动态注册独立工具 {safe_tool_name} 失败: {e}")
 
@@ -3070,10 +3233,29 @@ class AnimaPlugin(Star):
         """
         [Phase 6+ 核心] 内部触发的自主研究入口。
         即使 force=True 也尊重 autonomy_enabled 总开关——用户主权优先。
+
+        v0.6.1 新增节流：
+        - 同一 reason_key 5 分钟内最多触发一次（防止 social_graph 里每个 user_id 都触发）
+        - 全局信号量保证同时只跑 1 个研究 task（避免并发风暴）
         """
         # 任何路径都先检查总开关，违反"用户主权"是更严重的错误
         if not self.config.get("autonomy_enabled", True):
             return
+
+        # ====== v0.6.1 节流 1：同 reason 5 分钟冷却 ======
+        # reason_key 取 reason 的前 12 字符 + 类型，去掉里面变化的 user_id 数字尾巴
+        # 这样 "长时间未见 1234567890" 和 "长时间未见 9876543210" 共享同一个 cooldown 键
+        reason_key = re.sub(r'\d+', '#', reason)[:24]
+        now_ts = time.time()
+        last_ts = self._research_cooldown.get(reason_key, 0)
+        if now_ts - last_ts < 300:  # 5 分钟内
+            logger.debug(f"[Anima][Autonomy] 自主研究跳过（同 reason 冷却中）: {reason_key}")
+            return
+        self._research_cooldown[reason_key] = now_ts
+        # 清理过期的 cooldown 条目，避免无限增长
+        if len(self._research_cooldown) > 30:
+            cutoff = now_ts - 1800  # 半小时前的全删
+            self._research_cooldown = {k: v for k, v in self._research_cooldown.items() if v > cutoff}
 
         if force:
             pass  # 通过总开关后，force 模式跳过细分类型开关（用于突变等关键场景）
@@ -3096,6 +3278,17 @@ class AnimaPlugin(Star):
 
             if not self._should_allow_autonomy_trigger(trigger_type):
                 return
+
+        # ====== v0.6.1 节流 2：全局信号量，同时最多 1 个研究 task ======
+        if self._research_semaphore.locked():
+            logger.debug(f"[Anima][Autonomy] 自主研究跳过（已有研究任务在跑）: {reason_key}")
+            return
+
+        async with self._research_semaphore:
+            await self._do_self_directed_research(reason, context_hint)
+
+    async def _do_self_directed_research(self, reason: str, context_hint: str = ""):
+        """实际执行自主研究的核心逻辑（被节流后调用）。"""
 
         # 构造一个“内部欲望”来复用现有研究流程
         fake_desire = {

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.1 - 紧急防爆炸：自主研究节流 + 能力去重 + 动态工具配额
+
+针对 v0.6.0 实测中观察到的"单次对话产出 12+ 条同质能力 + 全部注册成独立 LLM 工具"问题做的紧急修复。建议所有 v0.6.0 用户升级。
+
+### 三处修复
+- **`_initiate_self_directed_research` 节流**：同一 reason（按 reason 关键字归一化、忽略其中的 user_id 数字）5 分钟内只允许触发一次；新增全局 `asyncio.Semaphore(1)` 保证同时只跑 1 个研究任务。修掉了 social_graph 里有几十个 user_id 时同时触发几十个并行研究的灾难。
+- **能力名归一化匹配（去重）**：`_create_or_update_capability` 现在用关键词集合相似度找近似已有能力，命中 ≥2 个特征关键词且占新能力签名 ≥40% 时合并而不是新建。LLM 同义词（ego/self/我、anchor/锚、blade/axe/戉/兵戈）在去重前先归一化，防止"鸣戈守界 / EgoBladeDissector / 戉刃重构"这种本质同一的能力被反复创建。
+- **动态工具注册每日配额**：新增 `dynamic_tool_daily_quota` 配置（默认 3）。超过配额的能力照常入库，但不再注册为独立 LLM 工具——避免 LLM 工具列表无限膨胀拖慢推理。工具名归一化也升级，纯中文名不再生成 `my_________` 这样无意义的下划线串。
+
+### 配置新增
+- `dynamic_tool_daily_quota` (int, default 3)：每日动态注册独立工具的硬上限
+
+### 升级建议
+推荐配置（编辑 AstrBot WebUI → Anima 配置）：
+- `autonomy_research_on_time_absence`: 视场景，群多人时建议 false
+- `dynamic_tool_daily_quota`: 3（保守）或更高
+- 之前已经积累的能力库不会被自动清理；可以等 `_maintain_capabilities_health` 自动合并，或 `/anima_reset` 后从头来
+
 ## v0.6.0 - 完全自主存在：自我创造工具 + 独立研究学习闭环 + 框架兼容性大修
 
 ### 框架兼容性修复（必须升级原因）

@@ -199,6 +199,13 @@
     "hint": "高危。开启后，置信度 ≥0.65 且被打上 register_as_independent_tool 标记的能力会被注册成独立的 LLM 工具，模型可直接按名调用。需配合 default_register_as_independent_tool 或在能力 JSON 中显式标记"
   },
 
+  "dynamic_tool_daily_quota": {
+    "description": "动态注册独立工具的每日配额",
+    "type": "int",
+    "default": 3,
+    "hint": "v0.6.1 防爆炸保护。每天最多新增 N 个独立 LLM 工具；超过此数后能力照常入库但不再注册为独立工具。设为 0 实际等同于关闭动态注册"
+  },
+
   "danger_core_mutation": {
     "description": "🔴 自主修改核心人格（persona_core.yaml）",
     "type": "bool",
