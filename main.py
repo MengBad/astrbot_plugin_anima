@@ -84,8 +84,9 @@ class AnimaPlugin(Star):
         # 存储限流（按用户）
         self._last_store_time: dict = {}
 
-        # 世界观更新计数器
-        self._sediment_count = 0
+        # 世界观更新计数器（持久化）
+        self._state_path = os.path.join(self.data_dir, "anima_state.json")
+        self._sediment_count = self._load_state().get("sediment_count", 0)
 
         # 沉淀锁，防止并发写入
         self._sediment_lock = asyncio.Lock()
@@ -194,6 +195,16 @@ class AnimaPlugin(Star):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except OSError as e:
             logger.warning(f"[Anima] 写入 {path} 失败: {e}")
+
+    def _load_state(self) -> dict:
+        """加载持久化状态"""
+        return self._read_json(self._state_path, default={})
+
+    def _save_state(self):
+        """保存持久化状态"""
+        state = self._load_state()
+        state["sediment_count"] = self._sediment_count
+        self._write_json(self._state_path, state)
 
     # ==================== 知识库 ====================
 
@@ -451,8 +462,7 @@ class AnimaPlugin(Star):
 
             if llm_resp and llm_resp.completion_text:
                 monologue = llm_resp.completion_text.strip()
-                if self._is_rejected(monologue):
-                    logger.warning("[Anima] 独白生成被拒绝，跳过本次沉淀")
+                if not monologue:
                     return None
                 return monologue
             return None
@@ -609,7 +619,7 @@ class AnimaPlugin(Star):
         if not self.config.get("desire_enabled", False):
             return ""
         desires = self._read_desires()
-        active = [d for d in desires if d.get("intensity", 0) > 0.5]
+        active = [d for d in desires if d.get("intensity", 0) > 0.3]
         if not active:
             return ""
         lines = [f"此刻内心隐约想着：{d['content']}" for d in active[:3]]
@@ -1601,7 +1611,7 @@ class AnimaPlugin(Star):
             d for d in desires
             if any(kw in d.get("content", "") for kw in ["想了解", "想知道", "好奇", "想查"])
             and not d.get("satisfied", False)
-            and d.get("intensity", 0) > 0.5
+            and d.get("intensity", 0) > 0.3
         ]
         if not web_desires:
             return
@@ -1780,6 +1790,7 @@ class AnimaPlugin(Star):
 
                 # 8. 沉淀计数 + 世界观更新
                 self._sediment_count += 1
+                self._save_state()
                 logger.debug(f"[Anima] 沉淀计数: {self._sediment_count}")
                 await self._maybe_update_worldview(event)
 
