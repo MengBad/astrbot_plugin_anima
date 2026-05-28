@@ -59,11 +59,16 @@ class DangerMixin:
 
             sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "对方"
 
+            # v0.8.3: prompt 强化，明确禁止叙事腔
             prompt = (
-                "你是一个 AI 聊天角色的内在意识。"
+                "你是一个 AI 聊天角色，正在内心想着关于群友的疑问。"
                 f"关于 {sender_name}，你还想了解什么？\n"
-                "如果有，生成一个自然的、不会让人感觉被审问的问题。\n"
-                "如果没有，只回复'无'。"
+                "请生成一个【自然的提问句】，要求：\n"
+                "1. 必须是问句（带问号或疑问语气）\n"
+                "2. 不要写人物描写、心理描写、叙事段落\n"
+                "3. 不要用'她'/'他'第三人称叙述对方\n"
+                "4. 不要超过 30 字\n"
+                "如果没有想问的，只回复'无'。"
             )
 
             llm_resp = await asyncio.wait_for(
@@ -74,6 +79,18 @@ class DangerMixin:
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
                 if self._is_rejected(result) or result == "无" or len(result) < 4:
+                    return
+                # v0.8.3 防线 C：叙事腔检测，命中就丢弃（防 LLM 写小说）
+                if hasattr(self, "_looks_like_inner_monologue") and self._looks_like_inner_monologue(result):
+                    logger.warning(
+                        f"[DANGER][Anima] 主动信息收集疑似叙事腔，已丢弃: {result[:60]}"
+                    )
+                    return
+                # v0.8.3: 太长（超过 60 字）多半是叙事段落，不是提问
+                if len(result) > 60:
+                    logger.warning(
+                        f"[DANGER][Anima] 主动信息收集过长（{len(result)}字），疑似叙事段落，已丢弃: {result[:60]}"
+                    )
                     return
                 desires = self._read_desires()
                 max_queue = self.config.get("desire_max_queue", 5)
@@ -161,6 +178,16 @@ class DangerMixin:
         # v0.8.1: 时效检查，太老的欲望不再触发
         max_age = int(self.config.get("stance_max_age_seconds", 300))
         now = datetime.now()
+        # v0.8.3 防线 B：跟最近 bot 回复对比，已经表达过的欲望不再触发
+        recent_bot_text = ""
+        try:
+            umo = getattr(event, "unified_msg_origin", "") or "_default_"
+            record = self._outgoing_by_umo.get(umo) if hasattr(self, "_outgoing_by_umo") else None
+            if record:
+                recent_bot_text = record[1] or ""
+        except Exception:
+            recent_bot_text = ""
+
         fresh_high = []
         for d in desires:
             if d.get("intensity", 0) <= 0.5 or d.get("satisfied", False):
@@ -173,6 +200,29 @@ class DangerMixin:
                         continue
             except Exception:
                 pass  # 时间戳解析不出来时保留（向后兼容）
+
+            # v0.8.3 防线 B：欲望内容已经在 bot 最近回复里表达过 → 跳过
+            if recent_bot_text and hasattr(self, "_is_desire_already_expressed"):
+                try:
+                    if await self._is_desire_already_expressed(
+                        d.get("content", ""), recent_bot_text, event
+                    ):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(
+                                f"[DANGER][Anima] 欲望已在最近回复中表达，跳过 stance_propagation: "
+                                f"{d.get('content', '')[:40]}"
+                            )
+                        # 直接 mark satisfied 避免反复检查
+                        target_id = d.get("id")
+                        all_desires = self._read_desires()
+                        for od in all_desires:
+                            if od.get("id") == target_id:
+                                od["satisfied"] = True
+                                break
+                        self._write_desires(all_desires)
+                        continue
+                except Exception:
+                    pass
             fresh_high.append(d)
 
         if not fresh_high:
@@ -269,10 +319,13 @@ class DangerMixin:
     @staticmethod
     def _looks_like_inner_monologue(text: str) -> bool:
         """v0.8.1: 检测文本是否更像内心独白而非对外发言。
+        v0.8.3: 扩充检测词覆盖第三人称小说叙事（"她已经习惯了"、"她脑海中浮现"）。
+
         命中以下特征则视为内心戏：
         - 第三人称自指："这个角色"、"她/他这只猫"
         - 叙事性导语："瞧你这"、"看着对方"、"我这只电子猫"
         - 心理描写："心里在想"、"暗自决定"、"内心"
+        - v0.8.3: 第三人称小说叙事："她已经习惯"、"她脑海中"、"千年前"、"幻想乡"等设定描写
         """
         if not text:
             return False
@@ -283,8 +336,15 @@ class DangerMixin:
             "瞧你这", "看着对方", "看着你",
             # 心理描写
             "心里在想", "暗自", "内心独白", "内心OS", "脑海中",
+            "脑海里", "她脑海", "他脑海",
             # 文学描写句式
             "电子猫", "电子心", "数据核心",
+            # v0.8.3: 第三人称小说叙事（生产观察）
+            "她已经习惯", "他已经习惯", "她总是", "他总是",
+            "她独自", "他独自", "她身为", "他身为",
+            "千年前", "漫长的岁月", "如今这个", "幻想乡",
+            # v0.8.3: 设定/世界观描写式开场
+            "在那些", "在漫长的", "她那", "他那",
         ]
         # 命中任何一个就视为独白
         for m in markers:

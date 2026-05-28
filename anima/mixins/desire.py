@@ -161,7 +161,11 @@ class DesireMixin:
             self._write_desires([d for d in all_desires if not d.get("satisfied")])
 
     async def _maybe_generate_desire(self, event: AstrMessageEvent, sylanne_state: str, response_text: str):
-        """沉淀后判断是否产生新欲望"""
+        """沉淀后判断是否产生新欲望。
+
+        v0.8.3：写入前过滤跟 response_text（bot 刚刚回复）语义相似的欲望，
+        避免主动发言重复 bot 已经说过的话。
+        """
         if not self.config.get("desire_enabled", False):
             return
         logger.debug("[Anima] 尝试生成欲望...")
@@ -200,6 +204,12 @@ class DesireMixin:
                 if self._is_rejected(result):
                     return
                 if result and result != "无" and len(result) > 2:
+                    # v0.8.3 防线 A：跟 bot 刚刚的回复对比，太相似就丢弃
+                    # 因为这种欲望往往是"想问 X" 但 bot 在回复里已经问过 X 了
+                    if await self._is_desire_already_expressed(result, response_text, event):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 欲望已在回复中表达，跳过: {result[:40]}")
+                        return
                     sender_id = ""
                     if hasattr(event, "message_obj") and event.message_obj:
                         sender_id = getattr(event.message_obj.sender, "user_id", "")
@@ -222,6 +232,38 @@ class DesireMixin:
         except Exception as e:
             if self.config.get("log_level") == "debug":
                 logger.debug(f"[Anima] 欲望生成失败: {e}")
+
+    async def _is_desire_already_expressed(self, desire_text: str, response_text: str, event=None) -> bool:
+        """v0.8.3: 判断这个欲望是否已经在 bot 的回复里被表达过。
+
+        策略：embedding 余弦相似度优先（复用 v0.7.0 的 _embed_one / _cosine_similarity），
+        失败时回退到 Jaccard。阈值 0.45 命中即视为重复。
+        """
+        if not desire_text or not response_text:
+            return False
+        threshold = float(self.config.get("desire_dedup_threshold", 0.45))
+        # 优先 embedding（如果配置了 embedding_provider_id）
+        try:
+            if hasattr(self, "_embed_one") and hasattr(self, "_cosine_similarity"):
+                v1 = await self._embed_one(desire_text)
+                v2 = await self._embed_one(response_text)
+                if v1 and v2:
+                    sim = self._cosine_similarity(v1, v2)
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[Anima] 欲望去重 cosine={sim:.3f} vs threshold={threshold}")
+                    return sim >= threshold
+        except Exception:
+            pass
+        # 回退 Jaccard
+        try:
+            tokens_a = _ext_text_token_set(desire_text)
+            tokens_b = _ext_text_token_set(response_text)
+            if not tokens_a or not tokens_b:
+                return False
+            sim = _ext_jaccard(tokens_a, tokens_b)
+            return sim >= threshold
+        except Exception:
+            return False
 
     async def _evaluate_desire_from_monologue(self, monologue: str):
         """从独白/反刍结果中提取潜在欲望"""
