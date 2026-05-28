@@ -81,6 +81,21 @@
     "type": "bool",
     "default": false
   },
+  "worldview_graph_inject_cap": {
+    "description": "世界观更新时注入到 LLM prompt 的 social_graph 条目上限（v0.8.1：防止 prompt 爆炸超时；其余条目仍会保留在 worldview.json 里）",
+    "type": "int",
+    "default": 8
+  },
+  "worldview_update_timeout": {
+    "description": "世界观更新 LLM 调用超时秒数（v0.8.1：默认从 30s 提到 60s）",
+    "type": "int",
+    "default": 60
+  },
+  "stance_max_age_seconds": {
+    "description": "立场自主传播：欲望产生超过此秒数后不再触发主动发言（v0.8.1：避免 12 分钟前的执念突然弹出来变成内心独白泄漏）",
+    "type": "int",
+    "default": 300
+  },
   "time_sense_enabled": {
     "description": "启用时间感",
     "type": "bool",

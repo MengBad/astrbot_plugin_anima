@@ -141,7 +141,16 @@ class DangerMixin:
 
     async def _danger_stance_propagation(self, event: AstrMessageEvent):
         """[DANGER] 立场自主传播：高强度 self 欲望触发主动发言。
+
         v0.8.0：仅触发当前 umo 可见的欲望，避免 A 群产生的执念在 B 群被释放。
+
+        v0.8.1：四道防线避免内心独白泄漏到对外发言：
+        1. 时效检查：欲望产生超过 stance_max_age_seconds（默认 300s）就不再触发，
+           话题已经飘走的执念不该突然弹出来
+        2. Prompt 强化：明确禁止 LLM 加引号、用"角色看着对方"叙事腔
+        3. 引号剥离：剥掉 LLM 仍然加上的成对引号
+        4. 叙事特征过滤：检测"瞧你这"、"以后好"、"这个角色"等第三人称内心戏
+           开头词，命中就丢弃
         """
         if not self.config.get("danger_stance_propagation", False):
             return
@@ -149,23 +158,42 @@ class DangerMixin:
             return
 
         desires = self._read_desires_for_event(event)  # v0.8.0: 按 umo 过滤
-        high_intensity = [
-            d for d in desires
-            if d.get("intensity", 0) > 0.5
-            and not d.get("satisfied", False)
-        ]
-        if not high_intensity:
+        # v0.8.1: 时效检查，太老的欲望不再触发
+        max_age = int(self.config.get("stance_max_age_seconds", 300))
+        now = datetime.now()
+        fresh_high = []
+        for d in desires:
+            if d.get("intensity", 0) <= 0.5 or d.get("satisfied", False):
+                continue
+            created = d.get("created_at", "")
+            try:
+                if created:
+                    age = (now - datetime.fromisoformat(created)).total_seconds()
+                    if age > max_age:
+                        continue
+            except Exception:
+                pass  # 时间戳解析不出来时保留（向后兼容）
+            fresh_high.append(d)
+
+        if not fresh_high:
             return
 
-        desire = high_intensity[0]
+        desire = fresh_high[0]
         try:
             provider_id = await self._get_provider_id(event)
             if not provider_id:
                 return
 
+            # v0.8.1: 强化 prompt，明确禁止内心戏叙事
             prompt = (
-                f"你有一个强烈的想法想表达：{desire.get('content', '')}\n"
-                "用一句自然的话说出来，符合角色人设，不要解释为什么要说。不超过50字。"
+                f"你有一个强烈的想法想直接对群里说出来：{desire.get('content', '')}\n\n"
+                "用一句自然的话直接说出来，就像你正在群聊里发消息一样。\n"
+                "严格要求：\n"
+                "1. 不要加引号（无论中文还是英文引号）\n"
+                "2. 不要用'瞧你这'、'这个角色'等第三人称叙事\n"
+                "3. 不要写动作描述（如'微微一笑'、'看着对方'）\n"
+                "4. 直接是聊天文本，符合角色人设\n"
+                "5. 不超过 50 字"
             )
             llm_resp = await asyncio.wait_for(
                 self.context.llm_generate(
@@ -177,6 +205,17 @@ class DangerMixin:
 
             if llm_resp and llm_resp.completion_text:
                 message = llm_resp.completion_text.strip()
+
+                # v0.8.1 防线 3：剥掉成对的引号
+                message = self._strip_paired_quotes(message)
+
+                # v0.8.1 防线 4：检测内心戏叙事特征，命中则丢弃
+                if self._looks_like_inner_monologue(message):
+                    logger.warning(
+                        f"[DANGER][Anima] 主动发言疑似内心独白，已丢弃: {message[:60]}"
+                    )
+                    return
+
                 if self._is_rejected(message) or self._is_sensitive(message):
                     logger.warning("[DANGER][Anima] 主动发言被过滤")
                     return
@@ -200,6 +239,58 @@ class DangerMixin:
             logger.debug("[DANGER][Anima] 主动发言超时")
         except Exception as e:
             logger.debug(f"[DANGER][Anima] 主动发言失败: {e}")
+
+    @staticmethod
+    def _strip_paired_quotes(text: str) -> str:
+        """v0.8.1: 剥掉成对包裹整句的引号（中文 “”、英文 ""、单引号、书名号 「」）。
+        仅当引号成对包裹整个文本时才剥，避免破坏文本中间的引用。"""
+        if not text or len(text) < 2:
+            return text
+        pairs = [
+            ('"', '"'),  # 英文双引号
+            ("'", "'"),  # 英文单引号
+            ('“', '”'),  # 中文双引号
+            ('‘', '’'),  # 中文单引号
+            ('「', '」'),  # 日式引号
+            ('『', '』'),  # 日式书名号
+        ]
+        # 反复剥（防止 ""xxx"" 这种嵌套）
+        for _ in range(3):
+            stripped = False
+            for left, right in pairs:
+                if text.startswith(left) and text.endswith(right) and len(text) > 1:
+                    text = text[len(left):-len(right)].strip()
+                    stripped = True
+                    break
+            if not stripped:
+                break
+        return text
+
+    @staticmethod
+    def _looks_like_inner_monologue(text: str) -> bool:
+        """v0.8.1: 检测文本是否更像内心独白而非对外发言。
+        命中以下特征则视为内心戏：
+        - 第三人称自指："这个角色"、"她/他这只猫"
+        - 叙事性导语："瞧你这"、"看着对方"、"我这只电子猫"
+        - 心理描写："心里在想"、"暗自决定"、"内心"
+        """
+        if not text:
+            return False
+        markers = [
+            # 第三人称自指
+            "这个角色", "这只猫", "本喵这只", "这串代码", "这串冷冰冰",
+            # 强叙事性导语（开头）
+            "瞧你这", "看着对方", "看着你",
+            # 心理描写
+            "心里在想", "暗自", "内心独白", "内心OS", "脑海中",
+            # 文学描写句式
+            "电子猫", "电子心", "数据核心",
+        ]
+        # 命中任何一个就视为独白
+        for m in markers:
+            if m in text:
+                return True
+        return False
 
     async def _danger_core_mutation(self, event: AstrMessageEvent):
         """[DANGER][Phase5] 突变池 + 连锁反应 + 永久记录"""
