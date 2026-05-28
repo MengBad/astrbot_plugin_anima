@@ -1,0 +1,289 @@
+"""
+DesireMixin —— 模块一 欲望系统
+=======================
+v0.8.0 从 main.py 抽出：# ==================== 模块一：欲望系统 ====================
+
+依赖宿主类（AnimaPlugin）提供 self.* 状态字段（self.config / self.context / self.data_dir / self._io_lock 等）。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import os
+import re
+import time
+from datetime import datetime, timedelta
+from typing import Optional
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.provider import LLMResponse, ProviderRequest
+
+from ..filters import is_rejected as _ext_is_rejected, is_sensitive as _ext_is_sensitive
+from ..similarity import (
+    text_token_set as _ext_text_token_set,
+    jaccard_similarity as _ext_jaccard,
+    cosine_similarity as _ext_cosine,
+)
+from ..forgetting import apply_forgetting as _ext_apply_forgetting
+from ..valence import (
+    estimate_memory_valence as _ext_estimate_valence,
+    rerank_memories_by_emotion as _ext_rerank_memories,
+)
+
+
+class DesireMixin:
+    """模块一 欲望系统 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。
+
+    v0.8.0：所有 desire 加 target_umo 字段，按 unified_msg_origin 隔离，
+    防止 A 群产生的执念被 B 群事件触发释放。
+
+    数据格式（向后兼容）：旧 desire 没有 target_umo 字段，视为"通用兜底"，
+    任何 umo 都可见但优先级低于精确匹配。
+    """
+
+    @staticmethod
+    def _get_event_umo(event) -> str:
+        """安全提取 unified_msg_origin。失败返回空串。"""
+        if event is None:
+            return ""
+        try:
+            return getattr(event, "unified_msg_origin", "") or ""
+        except Exception:
+            return ""
+
+    def _filter_desires_for_umo(self, desires: list, umo: str) -> list:
+        """筛选当前 umo 可见的 desires。
+        - target_umo 完全匹配：可见
+        - target_umo 缺失或为空（旧数据/突变执念）：通用，可见
+        - target_umo 是其他 umo：不可见
+        """
+        if not umo:
+            # 没有 event 时（如反刍流程），返回所有 desires
+            return list(desires)
+        return [
+            d for d in desires
+            if not d.get("target_umo") or d.get("target_umo") == umo
+        ]
+
+    def _read_desires(self) -> list:
+        """读取欲望队列（不做 umo 过滤，原始读）"""
+        return self._read_json(self.desires_path, default=[])
+
+    def _read_desires_for_event(self, event) -> list:
+        """按当前 event umo 过滤后的欲望队列。所有需要"按对话上下文行动"的路径都该用这个。"""
+        umo = self._get_event_umo(event)
+        return self._filter_desires_for_umo(self._read_desires(), umo)
+
+    def _write_desires(self, desires: list):
+        """写入欲望队列"""
+        self._write_json(self.desires_path, desires)
+
+    def _decay_desires(self):
+        """欲望衰减：每次调用 intensity *= 0.95，低于 0.1 的删除"""
+        desires = self._read_desires()
+        if not desires:
+            return
+        updated = []
+        for d in desires:
+            d["intensity"] = d.get("intensity", 0.5) * 0.95
+            if d["intensity"] >= 0.1 and not d.get("satisfied", False):
+                updated.append(d)
+        self._write_desires(updated)
+
+    def _check_desire_satisfaction(self, text: str, event=None):
+        """检查对话内容是否满足某个欲望（语义匹配优先，回退关键词匹配）。
+        v0.8.0：仅匹配当前 umo 可见的欲望，避免跨群误满足。
+        """
+        all_desires = self._read_desires()
+        if not all_desires:
+            return
+        umo = self._get_event_umo(event)
+        changed = False
+        for d in all_desires:
+            if d.get("satisfied"):
+                continue
+            # 仅检查属于当前 umo 或通用（无 target_umo）的欲望
+            d_umo = d.get("target_umo", "")
+            if d_umo and umo and d_umo != umo:
+                continue
+            content = d.get("content", "")
+            keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
+            if any(kw in text for kw in keywords):
+                d["satisfied"] = True
+                changed = True
+                if self.config.get("log_level") == "debug":
+                    logger.debug(f"[Anima] 欲望已满足(关键词): {content[:50]}")
+        if changed:
+            self._write_desires([d for d in all_desires if not d.get("satisfied")])
+
+    async def _check_desire_satisfaction_semantic(self, text: str, event=None):
+        """语义匹配版本的欲望满足检查（需要向量记忆可用）。
+        v0.8.0：按 umo 隔离。
+        """
+        if not self._kb_available:
+            self._check_desire_satisfaction(text, event)
+            return
+        all_desires = self._read_desires()
+        if not all_desires:
+            return
+        umo = self._get_event_umo(event)
+        changed = False
+        for d in all_desires:
+            if d.get("satisfied"):
+                continue
+            d_umo = d.get("target_umo", "")
+            if d_umo and umo and d_umo != umo:
+                continue
+            content = d.get("content", "")
+            try:
+                result = await self.context.kb_manager.retrieve(
+                    query=content,
+                    kb_names=["anima_memory"],
+                    top_m_final=3,
+                )
+                if result and result.get("results"):
+                    for r in result["results"]:
+                        score = r.get("score", 0)
+                        if score > 0.7:
+                            d["satisfied"] = True
+                            changed = True
+                            if self.config.get("log_level") == "debug":
+                                logger.debug(f"[Anima] 欲望已满足(语义 {score:.2f}): {content[:50]}")
+                            break
+            except Exception:
+                keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
+                if any(kw in text for kw in keywords):
+                    d["satisfied"] = True
+                    changed = True
+        if changed:
+            self._write_desires([d for d in all_desires if not d.get("satisfied")])
+
+    async def _maybe_generate_desire(self, event: AstrMessageEvent, sylanne_state: str, response_text: str):
+        """沉淀后判断是否产生新欲望"""
+        if not self.config.get("desire_enabled", False):
+            return
+        logger.debug("[Anima] 尝试生成欲望...")
+        if not sylanne_state:
+            return
+
+        desires = self._read_desires()
+        max_queue = self.config.get("desire_max_queue", 5)
+        if len(desires) >= max_queue:
+            return
+
+        try:
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            prompt = (
+                "根据当前关系状态和对话内容，这个角色此刻有没有产生什么"
+                "想做的事、想知道的事、或想对某人说的话？\n"
+                "如果有，用一句话描述。如果没有，只回复'无'。\n\n"
+                f"关系状态：{sylanne_state[:200]}\n"
+                f"对话回复：{response_text[:200]}\n"
+                f"用户消息：{(event.message_str or '')[:200]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=15.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if self._is_rejected(result):
+                    return
+                if result and result != "无" and len(result) > 2:
+                    sender_id = ""
+                    if hasattr(event, "message_obj") and event.message_obj:
+                        sender_id = getattr(event.message_obj.sender, "user_id", "")
+                    new_desire = {
+                        "id": f"desire_{int(time.time())}",
+                        "content": result,
+                        "source": "relationship",
+                        "intensity": 0.7,
+                        "created_at": datetime.now().isoformat(),
+                        "target_user": sender_id,
+                        "target_umo": self._get_event_umo(event),  # v0.8.0: 跨群隔离
+                        "satisfied": False,
+                    }
+                    desires.append(new_desire)
+                    self._write_desires(desires)
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[Anima] 新欲望: {result[:50]}")
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 欲望生成失败: {e}")
+
+    async def _evaluate_desire_from_monologue(self, monologue: str):
+        """从独白/反刍结果中提取潜在欲望"""
+        desires = self._read_desires()
+        max_queue = self.config.get("desire_max_queue", 5)
+        if len(desires) >= max_queue:
+            return
+
+        try:
+            providers = self.context.get_all_providers()
+            if not providers:
+                return
+            internal = self.config.get("internal_provider_id", "")
+            provider_id = internal if internal else providers[0].meta().id
+
+            prompt = (
+                "以下是一个角色的内心独白。从中提取它此刻想做的事、想知道的事、"
+                "或想对某人说的话。如果有，用一句话描述。如果没有，只回复'无'。\n\n"
+                f"独白：{monologue[:300]}"
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
+                timeout=15.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                result = llm_resp.completion_text.strip()
+                if result and result != "无" and len(result) > 2:
+                    desires.append({
+                        "id": f"desire_{int(time.time())}",
+                        "content": result,
+                        "source": "self",
+                        "intensity": 0.6,
+                        "created_at": datetime.now().isoformat(),
+                        "target_user": "",
+                        "target_umo": "",  # v0.8.0: 独白/反刍产生的欲望是通用的（每个会话都可见）
+                        "satisfied": False,
+                    })
+
+                    # Phase 6+ B: 高强度欲望自动触发自主研究（角色主动想学东西）
+                    if desires[-1]["intensity"] >= 0.75:
+                        asyncio.create_task(self._initiate_self_directed_research(
+                            "高强度欲望驱动",
+                            f"我有一个强烈的欲望：{result[:80]}。我可能需要发展新能力来实现它。",
+                            force=False
+                        ))
+                    self._write_desires(desires)
+                    logger.debug(f"[Anima] 反刍产生欲望: {result[:50]}")
+        except Exception as e:
+            logger.debug(f"[Anima] 反刍欲望提取失败: {e}")
+
+    def _get_active_desires_text(self, event=None) -> str:
+        """获取高强度欲望的注入文本。
+        v0.8.0：仅返回当前 umo 可见的欲望（target_umo 匹配或为空）。
+        当 event=None（如反刍流程）时返回所有 desires。
+        """
+        if not self.config.get("desire_enabled", False):
+            return ""
+        desires = self._read_desires_for_event(event)
+        active = [d for d in desires if d.get("intensity", 0) > 0.3]
+        if not active:
+            return ""
+        lines = [f"此刻内心隐约想着：{d['content']}" for d in active[:3]]
+        return "\n".join(lines)

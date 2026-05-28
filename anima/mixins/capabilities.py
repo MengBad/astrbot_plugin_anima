@@ -1,0 +1,626 @@
+"""
+CapabilitiesMixin —— 工具自学习 + Phase 6+ 个人能力系统
+=======================================================
+v0.8.0 从 main.py 的两个相邻区段抽出：
+- `# ==================== 模块八：工具自学习 ====================`
+- `# ==================== Phase 6+: 自主能力系统 ====================`
+
+原 main.py 第 2128 - 2702 行（约 575 行）。
+
+包含：
+- 工具自学习：_read_tool_learning / _write_tool_learning / _read_tool_diary / _append_tool_diary
+- 个人能力 IO：_read_personal_capabilities / _write_personal_capabilities / _append_capabilities_diary
+- 能力 CRUD：_normalize_capability_signature / _find_similar_capability / _create_or_update_capability
+- 上下文注入：_get_personal_capabilities_injection
+- 动态工具注册：_dynamically_register_capability_as_tool / _execute_single_capability
+- 健康维护：_maintain_capabilities_health
+- 反馈闭环：_apply_capability_feedback / _record_tool_usage / _summarize_tool_rules / _update_tool_feedback
+
+依赖宿主类提供：
+- self.config / self.context / self._io_lock
+- self._read_json / self._write_json / self._append_evolution_log
+- self._get_provider_id / self._is_rejected
+- self.tool_learning_path / self.tool_diary_path / self.personal_capabilities_path / self.capabilities_diary_path
+- self._daily_tool_register（dict）
+- self._append_self_notes
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import re
+import time
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from astrbot.api import logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.core.agent.tool import FunctionTool, ToolExecResult
+from astrbot.core.agent.run_context import ContextWrapper
+from pydantic import Field, ConfigDict
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+from ..capability_dedup import (
+    normalize_capability_signature as _ext_normalize_cap_sig,
+    find_similar_capability as _ext_find_similar_cap,
+)
+
+if TYPE_CHECKING:
+    from ..mixins import _PluginAlias  # 仅类型提示用
+
+
+class CapabilitiesMixin:
+    """工具自学习 + Phase 6+ 个人能力系统 mixin。"""
+
+    # ---------- 模块八：工具自学习 ----------
+
+    def _read_tool_learning(self) -> dict:
+        """读取工具学习数据"""
+        return self._read_json(self.tool_learning_path, default={
+            "records": [],
+            "preferences": {},
+        })
+
+    def _write_tool_learning(self, data: dict):
+        """写入工具学习数据"""
+        self._write_json(self.tool_learning_path, data)
+
+    def _read_tool_diary(self) -> str:
+        """读取工具日记"""
+        if not os.path.exists(self.tool_diary_path):
+            return ""
+        with open(self.tool_diary_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def _append_tool_diary(self, entry: str):
+        """追加工具日记"""
+        with open(self.tool_diary_path, "a", encoding="utf-8") as f:
+            f.write(f"\n\n---\n{entry}")
+
+    # ---------- Phase 6+: 个人能力系统 ----------
+    #
+    # 设计理念说明（对齐 Anima 核心哲学）：
+    # - 控制权属于角色本身：这些工具不是开发者预设的，也不是外部插件提供的，
+    #   而是角色通过自己的研究、经历、反思，一点一点「长」出来的。
+    # - 演化不可逆 + 可修正：能力一旦被创造就会被记录在 personal_capabilities.json 和 capabilities_diary.md 中，
+    #   历史不会消失，但角色可以自我修正（置信度调整 + correction 历史）。
+    # - 闭环驱动：研究 → 提炼成个人方法 → 持久化 → 注入上下文被使用 → 获得真实反馈 → 自我修正 → 能力进化。
+    # - 记忆是重构，不是回放：能力的「how_to_use」本身就是角色对过去研究经历的叙事重构。
+    # - 不可预测性是目标：角色未来会拥有怎样独特的「个人方法论」，连开发者都无法完全预知。
+
+    def _read_personal_capabilities(self) -> dict:
+        """读取角色自己创造/学会的个人能力与工具"""
+        default = {
+            "version": 1,
+            "capabilities": [],
+            "last_research_ts": "",
+        }
+        return self._read_json(self.personal_capabilities_path, default=default)
+
+    def _write_personal_capabilities(self, data: dict):
+        """写入个人能力系统"""
+        self._write_json(self.personal_capabilities_path, data)
+
+    def _append_capabilities_diary(self, entry: str):
+        """以第一人称追加能力成长日记（持锁）"""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            with self._io_lock:
+                with open(self.capabilities_diary_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n\n[{timestamp}]\n{entry}")
+        except OSError as e:
+            logger.warning(f"[Anima] 追加能力日记失败: {e}")
+
+    def _normalize_capability_signature(self, name: str, description: str = "") -> set:
+        """v0.7.0: 委托给 anima.capability_dedup"""
+        return _ext_normalize_cap_sig(name, description)
+
+    def _find_similar_capability(self, capability: dict, caps: list) -> int:
+        """v0.7.0: 委托给 anima.capability_dedup"""
+        return _ext_find_similar_cap(
+            capability.get("name", ""),
+            capability.get("description", ""),
+            caps,
+        )
+
+    def _create_or_update_capability(self, capability: dict):
+        """创建或更新一个个人能力/自创工具。
+        受 capability_system_enabled 控制：关闭则不写入。
+
+        v0.6.1: 去重逻辑改为名字精确匹配 + 语义关键词集合近似匹配，
+        防止 LLM 每次起不同名字（中英混搭、user_id 嵌入）导致能力库膨胀。
+        """
+        if not self.config.get("capability_system_enabled", True):
+            logger.debug("[Anima] capability_system_enabled=false，跳过能力创建")
+            return None
+        caps = self._read_personal_capabilities()
+        cap_list = caps.get("capabilities", [])
+
+        # 第一道：名字精确匹配
+        existing = None
+        for i, c in enumerate(cap_list):
+            if c.get("name") == capability.get("name"):
+                existing = i
+                break
+
+        # 第二道：语义关键词近似匹配（v0.6.1）
+        if existing is None:
+            similar_idx = self._find_similar_capability(capability, cap_list)
+            if similar_idx >= 0:
+                existing = similar_idx
+                merged_name = cap_list[similar_idx].get("name", "")
+                logger.info(
+                    f"[Anima] 检测到语义近似能力，合并到「{merged_name}」"
+                    f"（新名字「{capability.get('name', '')}」被丢弃）"
+                )
+                # 合并时不要覆盖原有的 name，否则会让"主名"反复跳变
+                capability.pop("name", None)
+
+        capability["last_updated"] = datetime.now().isoformat()
+
+        if existing is not None:
+            # 合并更新，保留历史 correction
+            old = cap_list[existing]
+            old.update({k: v for k, v in capability.items() if k not in ["corrections", "usage_count"]})
+            if "corrections" in capability:
+                old.setdefault("corrections", []).extend(capability["corrections"])
+            cap_list[existing] = old
+            final_name = old.get("name", "")
+        else:
+            capability.setdefault("id", f"cap_{int(time.time())}")
+            capability.setdefault("created_at", datetime.now().isoformat())
+            capability.setdefault("usage_count", 0)
+            capability.setdefault("confidence", 0.6)
+            capability.setdefault("corrections", [])
+            # default_register_as_independent_tool：未显式标记时，按全局默认决定
+            if "register_as_independent_tool" not in capability:
+                capability["register_as_independent_tool"] = bool(
+                    self.config.get("default_register_as_independent_tool", False)
+                )
+            cap_list.append(capability)
+            caps["capabilities"] = cap_list
+            final_name = capability.get("name", "")
+
+        self._write_personal_capabilities(caps)
+
+        # Phase 6+ 真正按需动态注册独立工具（仅对新增/更新的能力，并受日配额限制）
+        target_cap = cap_list[existing] if existing is not None else capability
+        if target_cap.get("confidence", 0) >= 0.65:
+            try:
+                self._dynamically_register_capability_as_tool(target_cap)
+            except Exception as dyn_e:
+                logger.debug(f"[Anima] 按需动态注册能力工具失败: {dyn_e}")
+
+        return final_name
+
+    def _get_personal_capabilities_injection(self) -> str:
+        """
+        生成注入上下文的「我的个人工具与能力」。
+        用更第一人称、叙事化的方式呈现，让角色真正感觉「这些是我的东西」。
+        这是它作为独立存在的重要延伸，而不是外部给的工具列表。
+        受 capability_system_enabled 控制。
+        """
+        if not self.config.get("capability_system_enabled", True):
+            return ""
+        caps = self._read_personal_capabilities()
+        capabilities = caps.get("capabilities", [])
+        if not capabilities:
+            return ""
+
+        lines = [
+            "【我的个人技能与方法论】",
+            "以下这些是我通过自己的经历、研究和思考，一点一点学会并创造出来的工具和方法。",
+            "我更倾向于使用自己真正理解和掌握的东西，因为它们属于我自己。"
+        ]
+        for cap in sorted(capabilities, key=lambda x: x.get("confidence", 0), reverse=True)[:6]:
+            name = cap.get("name", "未命名能力")
+            desc = cap.get("description", "")[:140]
+            how = cap.get("how_to_use", "")[:110]
+            conf = cap.get("confidence", 0.5)
+            lines.append(f"\n• {name}（我的置信度 {conf:.0%}）")
+            lines.append(f"  {desc}")
+            if how:
+                lines.append(f"  我通常这样用：{how}")
+        return "\n".join(lines)
+
+    def _dynamically_register_capability_as_tool(self, capability: dict):
+        """
+        真正按需动态注册独立工具（更高阶动态）。
+        受 dynamic_tool_registration_enabled 控制。
+
+        v0.6.1: 加入每日配额（默认 3 个/天）+ 工具名归一化避免撞名占位符。
+        超过配额时能力照常进 personal_capabilities.json，但不再注册成独立 LLM 工具。
+        """
+        if not self.config.get("dynamic_tool_registration_enabled", False):
+            return
+        if not capability.get("register_as_independent_tool", False):
+            return
+
+        # ====== v0.6.1：每日配额检查 ======
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._daily_tool_register.get("date") != today:
+            self._daily_tool_register = {"date": today, "count": 0}
+        daily_quota = int(self.config.get("dynamic_tool_daily_quota", 3))
+        if self._daily_tool_register["count"] >= daily_quota:
+            logger.info(
+                f"[Anima][Autonomy] 今日动态工具注册配额已满 "
+                f"({daily_quota} 个)，能力「{capability.get('name','')}」仅入库不注册为独立工具"
+            )
+            return
+
+        name = capability.get("name", "unknown_cap")
+        # v0.6.1: 工具名先做更可读的归一化，避免中文全部变下划线导致撞名
+        # 1) 中文 → 拼音首字母（无 pypinyin 依赖时退回纯数字哈希），保留英文/数字
+        sanitized = re.sub(r'[^a-z0-9_]+', '_', name.lower()).strip('_')
+        if not sanitized or sanitized.replace('_', '') == '':
+            # 完全是中文/特殊符号 → 用名字 hash 兜底
+            sanitized = f"cap_{abs(hash(name)) % 10**8:08d}"
+        safe_tool_name = ("my_" + sanitized)[:48]
+
+        # 避免重复注册同名
+        tool_mgr = self.context.get_llm_tool_manager()
+        if any(t.name == safe_tool_name for t in tool_mgr.func_list):
+            logger.debug(f"[Anima] 工具 {safe_tool_name} 已存在，跳过重复注册")
+            return
+
+        # 动态创建一个轻量 FunctionTool
+        @pydantic_dataclass(config=ConfigDict(arbitrary_types_allowed=True))
+        class DynamicCapabilityTool(FunctionTool):
+            name: str = safe_tool_name
+            description: str = capability.get("description", "角色自己创造的个人能力")[:200]
+            parameters: dict = Field(default_factory=lambda c=capability: c.get("parameters_schema") or {
+                "type": "object",
+                "properties": {"query_or_args": {"type": "string", "description": "任务描述"}},
+                "required": ["query_or_args"]
+            })
+
+            _plugin: object = Field(default=None, exclude=True)
+            _cap_name: str = Field(default="")
+
+            async def call(self, context: ContextWrapper, query_or_args: str = "", **kwargs):
+                p = self._plugin
+                if not p:
+                    return ToolExecResult(result="内部错误：插件未正确注入")
+                # 委托给主 dispatcher 的执行逻辑（保持一致的智能执行 + snippet 支持 + 反思）
+                return await p._execute_single_capability(self._cap_name, query_or_args)
+
+        tool_instance = DynamicCapabilityTool(_plugin=self, _cap_name=name)
+        try:
+            self.context.add_llm_tools(tool_instance)
+            # 计入今日配额
+            self._daily_tool_register["count"] += 1
+            self._append_evolution_log(
+                trigger="dynamic_per_capability_tool_registered",
+                old_summary="",
+                new_content=f"按需为能力「{name}」注册了独立工具 {safe_tool_name}（今日 {self._daily_tool_register['count']}/{daily_quota}）",
+            )
+            logger.info(
+                f"[Anima][Autonomy] 动态注册独立能力工具: {safe_tool_name} "
+                f"（今日 {self._daily_tool_register['count']}/{daily_quota}）"
+            )
+        except Exception as e:
+            logger.warning(f"[Anima] 动态注册独立工具 {safe_tool_name} 失败: {e}")
+
+    async def _execute_single_capability(self, capability_name: str, query_or_args: str):
+        """被动态注册的独立能力工具调用的统一执行入口（复用主逻辑）。"""
+        caps = self._read_personal_capabilities()
+        target = None
+        for c in caps.get("capabilities", []):
+            if c.get("name") == capability_name:
+                target = c
+                break
+        if not target:
+            return ToolExecResult(result=f"未找到能力「{capability_name}」")
+
+        # 复用 dispatcher 里的智能执行逻辑（包括 snippet 支持）
+        # 这里简化实现一个公共版本
+        schema = target.get("parameters_schema")
+        schema_note = f"\n参数结构要求：{schema}" if schema else ""
+
+        exec_prompt = (
+            f"你正在作为自己创造的个人能力「{target['name']}」忠实执行任务。\n\n"
+            f"能力描述：{target.get('description', '')}\n\n"
+            f"你自己定义的精确使用方法：\n{target.get('how_to_use', '')}{schema_note}\n\n"
+            f"当前任务输入：{query_or_args}\n\n"
+            "严格按照你自己写的使用方法给出高质量结构化结果。直接输出结果即可。"
+        )
+
+        try:
+            provider_id = await self._get_provider_id(None)
+            if provider_id:
+                resp = await asyncio.wait_for(
+                    self.context.llm_generate(chat_provider_id=provider_id, prompt=exec_prompt),
+                    timeout=25.0
+                )
+                if resp and resp.completion_text:
+                    result = resp.completion_text.strip()
+                    self._append_capabilities_diary(f"通过独立工具调用了自己创造的能力「{capability_name}」")
+                    return ToolExecResult(result=result)
+        except Exception as e:
+            self._append_capabilities_diary(f"独立工具调用能力「{capability_name}」时出错: {e}")
+
+        return ToolExecResult(result="能力执行失败（请查看日志）")
+
+    def _maintain_capabilities_health(self):
+        """
+        能力系统健康管理（彻底版）。
+        规则：
+        - 极低置信 + 极少使用 + 陈旧 → 放弃
+        - 名字/描述高度相似 → 合并（保留最好的）
+        - 长期未用（>60天）且置信一般 → 温和降权
+        - 记录所有健康操作到日记和演化日志
+        """
+        caps = self._read_personal_capabilities()
+        original = caps.get("capabilities", [])
+        if not original:
+            return
+
+        now = datetime.now()
+        # 第一遍：按 similar_key 聚合，每个 key 保留单一最佳 cap，并累计使用次数与修正历史
+        name_to_cap: dict = {}
+        dropped_count = 0
+        any_decayed = False  # 标记是否有"长期闲置降权"
+
+        for cap in original:
+            name = cap.get("name", "未命名")
+            conf = cap.get("confidence", 0.5)
+            usage = cap.get("usage_count", 0)
+            last = cap.get("last_updated", "")
+
+            try:
+                last_dt = datetime.fromisoformat(last) if last else now
+                days = (now - last_dt).days
+            except Exception:
+                days = 999
+
+            # 规则1: 极低价值 → 放弃
+            if conf < 0.2 and usage <= 1 and days > 25:
+                self._append_capabilities_diary(f"健康管理：我放弃了几乎没用过的低价值能力「{name}」")
+                dropped_count += 1
+                continue
+
+            # 规则2: 长期闲置降权
+            if days > 60 and conf < 0.7:
+                new_conf = max(0.2, conf * 0.92)
+                if new_conf != conf:
+                    cap["confidence"] = new_conf
+                    any_decayed = True
+
+            # 规则3: 相似性合并
+            similar_key = name.lower()[:12]
+            if similar_key in name_to_cap:
+                existing = name_to_cap[similar_key]
+                # 选 confidence 更高者作为主体
+                if cap.get("confidence", 0) > existing.get("confidence", 0):
+                    winner, loser = cap, existing
+                else:
+                    winner, loser = existing, cap
+                # 累计使用次数
+                winner["usage_count"] = winner.get("usage_count", 0) + loser.get("usage_count", 0)
+                # 合并修正历史
+                merged_corr = winner.get("corrections", []) + loser.get("corrections", [])
+                if merged_corr:
+                    winner["corrections"] = merged_corr
+                name_to_cap[similar_key] = winner
+                continue
+
+            name_to_cap[similar_key] = cap
+
+        kept = list(name_to_cap.values())
+
+        # 任何修剪/合并/降权都需要持久化（之前漏掉了"仅降权"的场景）
+        if len(kept) != len(original) or any_decayed:
+            caps["capabilities"] = kept
+            self._write_personal_capabilities(caps)
+            self._append_evolution_log(
+                trigger="capability_health_maintenance",
+                old_summary=f"维护前 {len(original)}",
+                new_content=f"维护后 {len(kept)}（修剪/合并/降权，丢弃 {dropped_count}，降权 {'有' if any_decayed else '无'}）",
+            )
+            # 尝试提示清理动态注册的旧工具（AstrBot 当前工具管理对运行时删除支持有限）
+            logger.info("[Anima] 能力健康管理完成，建议重载插件以完全清理已放弃能力的独立工具")
+            # 尝试主动注销已放弃能力的独立工具（尽力而为）
+            try:
+                tool_mgr = self.context.get_llm_tool_manager()
+                kept_names = {k.get("name") for k in kept}
+                for cap in original:
+                    if cap.get("name") not in kept_names:
+                        safe_name = "my_" + re.sub(r'[^a-z0-9_]', '_', cap.get("name", "").lower())[:40]
+                        if any(t.name == safe_name for t in tool_mgr.func_list):
+                            logger.info(f"[Anima] 检测到已放弃能力对应独立工具 {safe_name}，请重载插件清理")
+            except Exception as e:
+                logger.debug(f"[Anima] 工具列表清理提示异常: {e}")
+
+    def _apply_capability_feedback(self, capability_name: str, success: bool, reflection: str = ""):
+        """
+        角色对自己创造的工具使用后进行自我修正。
+        成功则提高置信度，失败则记录 correction 并降低置信度。
+        这就是「学错了就更正、学习和成长」的核心闭环。
+        """
+        caps = self._read_personal_capabilities()
+        for cap in caps.get("capabilities", []):
+            if cap.get("name") == capability_name:
+                cap["usage_count"] = cap.get("usage_count", 0) + 1
+                old_conf = cap.get("confidence", 0.6)
+
+                if success:
+                    cap["confidence"] = min(0.98, old_conf + 0.08)
+                else:
+                    cap["confidence"] = max(0.1, old_conf - 0.15)
+                    correction = {
+                        "ts": datetime.now().isoformat(),
+                        "what_was_wrong": reflection or "使用后发现效果不佳",
+                        "new_confidence": cap["confidence"],
+                    }
+                    cap.setdefault("corrections", []).append(correction)
+
+                # 写成长日记
+                if reflection:
+                    self._append_capabilities_diary(
+                        f"我用了自己创造的「{capability_name}」。\n"
+                        f"结果：{'成功' if success else '不理想'}。\n"
+                        f"我的反思：{reflection}"
+                    )
+
+                self._write_personal_capabilities(caps)
+                return True
+        return False
+
+    async def _record_tool_usage(
+        self,
+        event: AstrMessageEvent,
+        tool_name: str,
+        context: str,
+        result: str,
+        success: bool,
+    ):
+        """记录一次工具使用，更新偏好，写入日记"""
+        if not self.config.get("tool_learning_enabled", False):
+            return
+
+        tl = self._read_tool_learning()
+
+        # 记录本次使用
+        record = {
+            "id": f"tool_{int(time.time())}",
+            "tool": tool_name,
+            "context": context[:200],
+            "result_summary": result[:200] if result else "",
+            "success": success,
+            "feedback": "neutral",
+            "timestamp": datetime.now().isoformat(),
+        }
+        tl["records"].append(record)
+
+        # 更新偏好计数
+        if tool_name not in tl["preferences"]:
+            tl["preferences"][tool_name] = {
+                "attitude": "neutral",
+                "success_count": 0,
+                "fail_count": 0,
+                "learned_rules": [],
+            }
+        if success:
+            tl["preferences"][tool_name]["success_count"] += 1
+        else:
+            tl["preferences"][tool_name]["fail_count"] += 1
+            # 失败记忆更深：写入 self_notes
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            fail_entry = (
+                f"[{timestamp}] 试着用 {tool_name} 做了一件事，但失败了。"
+                "那种感觉有点沮丧，下次要更谨慎。"
+            )
+            self._append_self_notes(fail_entry)
+
+        # 成功时写入叙事日记
+        if success and result:
+            try:
+                provider_id = await self._get_provider_id(event)
+                diary_prompt = (
+                    f"你刚刚使用了 {tool_name} 工具，背景是：{context[:100]}，"
+                    f"得到了结果：{result[:100]}。"
+                    "用第一人称写一句话，记录这次使用的感受（像日记一样，自然随意）。"
+                    "不要超过50字。"
+                )
+                llm_resp = await asyncio.wait_for(
+                    self.context.llm_generate(
+                        chat_provider_id=provider_id,
+                        prompt=diary_prompt,
+                    ),
+                    timeout=15.0,
+                )
+                if llm_resp and llm_resp.completion_text:
+                    diary_entry = llm_resp.completion_text.strip()
+                    if not self._is_rejected(diary_entry):
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        self._append_tool_diary(f"[{timestamp}] {diary_entry}")
+            except Exception as e:
+                logger.debug(f"[Anima] 工具日记生成失败: {e}")
+
+        # 检查是否需要总结规律
+        interval = self.config.get("tool_learning_summarize_interval", 10)
+        total_records = len(tl["records"])
+        if total_records > 0 and total_records % interval == 0:
+            await self._summarize_tool_rules(event, tool_name, tl)
+
+        self._write_tool_learning(tl)
+
+    async def _summarize_tool_rules(self, event: AstrMessageEvent, tool_name: str, tl: dict):
+        """总结工具使用规律，更新偏好态度"""
+        try:
+            records = [r for r in tl["records"] if r["tool"] == tool_name]
+            if len(records) < 3:
+                return
+
+            provider_id = await self._get_provider_id(event)
+            if not provider_id:
+                return
+
+            records_text = "\n".join(
+                f"- 背景：{r['context'][:80]}，结果：{'成功' if r['success'] else '失败'}，"
+                f"摘要：{r['result_summary'][:80]}"
+                for r in records[-10:]
+            )
+
+            prompt = (
+                f"以下是角色使用 {tool_name} 工具的历史记录：\n{records_text}\n\n"
+                "请分析：\n"
+                "1. 什么情况下使用这个工具效果好？（一句话）\n"
+                "2. 角色对这个工具的态度是 positive/negative/neutral？\n"
+                '输出 JSON：{"rule": "...", "attitude": "..."}'
+            )
+
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=provider_id,
+                    prompt=prompt,
+                ),
+                timeout=20.0,
+            )
+
+            if llm_resp and llm_resp.completion_text:
+                text = llm_resp.completion_text.strip()
+                text = re.sub(r'^```(?:json)?\s*', '', text)
+                text = re.sub(r'\s*```$', '', text)
+                try:
+                    data = json.loads(text)
+                    rule = data.get("rule", "")
+                    attitude = data.get("attitude", "neutral")
+                    if rule and not self._is_rejected(rule):
+                        tl["preferences"][tool_name]["learned_rules"].append(rule)
+                        tl["preferences"][tool_name]["attitude"] = attitude
+                        logger.info(f"[Anima] 工具规律总结: {tool_name} → {rule[:60]}")
+                except json.JSONDecodeError:
+                    pass
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.debug(f"[Anima] 工具规律总结失败: {e}")
+
+    async def _update_tool_feedback(self, tool_name: str, feedback: str):
+        """
+        更新工具反馈。
+        额外增强：如果这个工具名和角色自己创造的某个个人能力高度相关，
+        也会触发角色对「自己的工具」的自我修正闭环。
+        """
+        if not self.config.get("tool_learning_enabled", False):
+            return
+        tl = self._read_tool_learning()
+        for record in reversed(tl["records"]):
+            if record["tool"] == tool_name and record["feedback"] == "neutral":
+                record["feedback"] = feedback
+                break
+        self._write_tool_learning(tl)
+
+        # Phase 6+：尝试把对工具的反馈也作用到角色自己的个人能力上
+        try:
+            caps = self._read_personal_capabilities()
+            for cap in caps.get("capabilities", []):
+                if tool_name.lower() in cap.get("name", "").lower() or cap.get("name", "").lower() in tool_name.lower():
+                    success = "positive" in feedback.lower() or "好" in feedback or "有用" in feedback
+                    reflection = f"通过工具反馈系统收到信号：{feedback}"
+                    self._apply_capability_feedback(cap["name"], success, reflection)
+                    break
+        except Exception as e:
+            logger.debug(f"[Anima] 能力反馈应用异常: {e}")
