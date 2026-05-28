@@ -96,6 +96,11 @@
     "type": "int",
     "default": 300
   },
+  "desire_dedup_threshold": {
+    "description": "欲望去重相似度阈值（v0.8.3）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.4-0.5",
+    "type": "float",
+    "default": 0.45
+  },
   "time_sense_enabled": {
     "description": "启用时间感",
     "type": "bool",
