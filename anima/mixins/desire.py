@@ -277,13 +277,15 @@ class DesireMixin:
         - 上下文为空或 topic 为空时返回 True（不拦），避免冷启动误伤
 
         阈值分路（v0.8.4）：
-        - cosine 路径用 topic_relevance_threshold（默认 0.20）—— 语义模型分数高
+        - cosine 路径用 topic_relevance_threshold（默认 0.40）—— 语义模型分数高
+          v0.8.4 hotfix: 生产观察 "ASMR音声" vs "笨蛋+bot回复" 算出 0.366，
+          0.20 太松拦不住，提到 0.40
         - Jaccard fallback 用 topic_relevance_threshold_jaccard（默认 0.05）
           —— 中文 ngram 让 Jaccard 分母被撑得很大，0.20 会误伤正常对话；
           0.05 在生产观察样本上能区分"完全无关"和"弱相关"
 
         生产观察案例：群里只聊过"@bot 笨蛋"三次，bot 突然问"这部作品是 ASMR 还是音声呀？"
-        → topic vs context 的语义相似度极低，应被拦下。
+        → topic vs context 的 cosine=0.366，应被拦下。
         """
         if not topic_text:
             return True
@@ -297,7 +299,7 @@ class DesireMixin:
                 v2 = await self._embed_one(context_text)
                 if v1 and v2:
                     sim = self._cosine_similarity(v1, v2)
-                    threshold = float(self.config.get("topic_relevance_threshold", 0.20))
+                    threshold = float(self.config.get("topic_relevance_threshold", 0.40))
                     if self.config.get("log_level") == "debug":
                         logger.debug(
                             f"[Anima] 话题关联性 cosine={sim:.3f} vs threshold={threshold}"

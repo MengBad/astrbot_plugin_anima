@@ -102,9 +102,9 @@
     "default": 0.50
   },
   "topic_relevance_threshold": {
-    "description": "话题关联性阈值（v0.8.4，cosine 路径）：主动发言话题与最近对话上下文的余弦相似度 < 此值时视为幻觉话题，丢弃。值越高越严，0 等于关闭。建议 0.15-0.25",
+    "description": "话题关联性阈值（v0.8.4，cosine 路径）：主动发言话题与最近对话上下文的余弦相似度 < 此值时视为幻觉话题，丢弃。生产观察 ASMR 幻觉 cosine=0.366，需 ≥0.40 才能拦住。值越高越严，0 等于关闭。建议 0.35-0.45",
     "type": "float",
-    "default": 0.20
+    "default": 0.40
   },
   "topic_relevance_threshold_jaccard": {
     "description": "话题关联性阈值（v0.8.4，Jaccard fallback 路径）：未配置 embedding_provider_id 时走此阈值。中文 ngram 让 Jaccard 普遍偏低，建议 0.03-0.10",
