@@ -65,8 +65,17 @@ class StorageMixin:
             return False
 
     async def _store_memory(self, text: str, event: Optional[AstrMessageEvent] = None):
-        """将文本存入知识库"""
+        """将文本存入知识库。
+
+        v0.8.2 防线 1：拒答内容（"I can't discuss that" / "对此我无法" 等）不入库，
+        避免历史拒答被检索回来 prime 模型继续拒答（自我强化循环）。
+        """
         if not await self._ensure_kb():
+            return
+        # v0.8.2: 拒答短语过滤 —— 命中就跳过，不污染知识库
+        if self._is_rejected(text):
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 跳过拒答内容入库: {text[:50]}")
             return
         # 按用户限流
         interval = self.config.get("memory_store_interval", 30)
@@ -101,20 +110,35 @@ class StorageMixin:
             logger.warning(f"[Anima] 向量存储失败: {e}")
 
     async def _query_memory(self, query: str, n_results: int = 3) -> list:
-        """从知识库检索相关记忆"""
+        """从知识库检索相关记忆。
+
+        v0.8.2 防线 2：返回前过滤掉历史已经污染的拒答条目（兼容已有数据）。
+        因为 v0.8.2 之前知识库里可能已经存了 N 条 "I can't discuss that"，
+        即使 _store_memory 不再写新拒答了，旧的还会被检索回来。
+        """
         if not await self._ensure_kb():
             return []
         try:
+            # 多取一些再过滤（防止过滤掉太多导致返回不够）
+            over_fetch = max(n_results * 3, 10)
             result = await self.context.kb_manager.retrieve(
                 query=query,
                 kb_names=["anima_memory"],
-                top_m_final=n_results,
+                top_m_final=over_fetch,
             )
             if result and result.get("results"):
-                return [
-                    r["content"] for r in result["results"]
-                    if not self._is_sensitive(r.get("content", ""))
-                ]
+                filtered = []
+                for r in result["results"]:
+                    content = r.get("content", "")
+                    # 防线 2：过滤拒答 + 敏感内容
+                    if self._is_rejected(content):
+                        continue
+                    if self._is_sensitive(content):
+                        continue
+                    filtered.append(content)
+                    if len(filtered) >= n_results:
+                        break
+                return filtered
             return []
         except Exception as e:
             logger.warning(f"[Anima] 向量检索失败: {e}")

@@ -69,7 +69,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.8.1",
+    "0.8.2",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -618,6 +618,7 @@ class AnimaPlugin(
         # v0.7.2: 注入向量记忆（让 anima_memory 知识库里的对话历史真正在对话时可用）
         # 之前 _query_memory 只在沉淀阶段被调用，结果只用来生成内心独白写进 self_notes，
         # 模型在回答用户时根本看不到具体的对话历史。这是"不记得发过的东西"的根因。
+        # v0.8.2: 三道防线避免历史拒答自我强化（store/query/inject 都过滤）
         if self.config.get("memory_inject_in_context", True):
             try:
                 user_text = (event.message_str or "").strip()
@@ -625,6 +626,9 @@ class AnimaPlugin(
                 if user_text and len(user_text) >= 4:
                     n_mem = int(self.config.get("memory_inject_top_k", 3))
                     related = await self._query_memory(user_text, n_results=n_mem)
+                    if related:
+                        # v0.8.2 防线 3：注入前再过滤一次拒答内容（兜底）
+                        related = [m for m in related if not self._is_rejected(m)]
                     if related:
                         # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
                         last_emotion = float(self._load_state().get("last_emotion_score", 0.5))
@@ -973,6 +977,59 @@ class AnimaPlugin(
         with open(export_path, "w", encoding="utf-8") as f:
             f.write(pretty)
         yield event.plain_result(f"[Anima] 能力树已导出（含统计）：{export_path}\n\n统计: {stats}\n\n前 600 字预览：\n{pretty[:600]}...")
+
+    @filter.command("anima_scan_rejects")
+    async def cmd_anima_scan_rejects(self, event: AstrMessageEvent):
+        """v0.8.2 管理员：扫描知识库里有多少条拒答污染记忆（不删除，只统计）。
+        适用于 v0.8.2 升级后查看历史污染规模。
+        """
+        if not self._kb_available:
+            await self._ensure_kb()
+        if not self._kb_available:
+            yield event.plain_result("[Anima] 知识库未启用或不可用。")
+            return
+
+        try:
+            # 用一些典型的拒答短语去检索，看命中多少
+            probe_queries = [
+                "I can't discuss that",
+                "对此我无法",
+                "无法被讨论",
+                "无需再用言语",
+                "目前已无需",
+            ]
+            seen = set()
+            samples = []
+            for q in probe_queries:
+                try:
+                    result = await self.context.kb_manager.retrieve(
+                        query=q,
+                        kb_names=["anima_memory"],
+                        top_m_final=20,
+                    )
+                    if result and result.get("results"):
+                        for r in result["results"]:
+                            content = r.get("content", "")
+                            if not content or content in seen:
+                                continue
+                            if self._is_rejected(content):
+                                seen.add(content)
+                                if len(samples) < 5:
+                                    samples.append(content[:120])
+                except Exception:
+                    continue
+
+            sample_text = "\n".join(f"  - {s}" for s in samples) if samples else "  （无样本）"
+            yield event.plain_result(
+                f"[Anima] 知识库拒答污染扫描：\n"
+                f"用 {len(probe_queries)} 个典型拒答短语探测，去重后命中 {len(seen)} 条疑似污染记忆。\n"
+                f"前 5 条样本：\n{sample_text}\n\n"
+                f"v0.8.2 已对 store/query/inject 三层做拒答过滤，新增不会再污染。\n"
+                f"旧污染会被检索层自动跳过（_query_memory 命中 _is_rejected 就过滤）。\n"
+                f"如需彻底清理，建议在 AstrBot WebUI > 知识库管理 里用关键词删除相关条目。"
+            )
+        except Exception as e:
+            yield event.plain_result(f"[Anima] 扫描失败: {e}")
 
     # ==================== Phase 6+: 让个人能力真正“可被模型调用”（可执行化） ====================
     #
