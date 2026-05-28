@@ -244,6 +244,34 @@ class DangerMixin:
             return
 
         desire = fresh_high[0]
+
+        # v0.8.4 防线 D（出口）：欲望内容跟当前对话上下文不相关 → 跳过
+        # 即使欲望已经在队列里了，发言出口也要拦住幻觉话题
+        try:
+            if hasattr(self, "_is_topic_relevant_to_context") and hasattr(self, "_build_recent_context_text"):
+                context_text = self._build_recent_context_text(event)
+                if context_text:
+                    relevant = await self._is_topic_relevant_to_context(
+                        desire.get("content", ""), context_text
+                    )
+                    if not relevant:
+                        logger.warning(
+                            f"[DANGER][Anima] stance_propagation 欲望跟当前对话无关，跳过: "
+                            f"{desire.get('content', '')[:60]}"
+                        )
+                        # mark satisfied 避免反复触发
+                        target_id = desire.get("id")
+                        all_desires = self._read_desires()
+                        for od in all_desires:
+                            if od.get("id") == target_id:
+                                od["satisfied"] = True
+                                break
+                        self._write_desires(all_desires)
+                        return
+        except Exception as exc:
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[DANGER][Anima] stance_propagation 话题关联性检查异常: {exc}")
+
         try:
             provider_id = await self._get_provider_id(event)
             if not provider_id:
