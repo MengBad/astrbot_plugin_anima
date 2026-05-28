@@ -109,3 +109,56 @@ class TestFindSimilar:
         for name, desc in unrelated:
             assert find_similar_capability(name, desc, existing) == -1, \
                 f"{name} 不应被合并到已有能力"
+
+
+class TestV071HotfixRegression:
+    """v0.7.1 hotfix 回归测试：基于 2026-05-28 18:30 生产日志里 103 个能力 / 0 次使用的现象。
+
+    日志里观察到的 5 个'戉/Ego/Anchor 系'能力家族，必须几乎全部合并到同一个槽位。
+    """
+
+    def test_camelcase_split_in_signature(self):
+        """EgoForge 必须被驼峰拆分成 ego + forge 才能命中同义词表。"""
+        sig = normalize_capability_signature("EgoForge", "")
+        assert "_self_" in sig, "EgoForge 应该被拆分后命中 ego→_self_"
+        assert "_weapon_" in sig, "EgoForge 应该被拆分后命中 forge→_weapon_"
+
+    def test_single_char_chinese_synonym_via_substring(self):
+        """单字中文同义词（戉、刃）通过 substring 匹配捕获，不依赖滑窗。"""
+        sig = normalize_capability_signature("戉界锚定", "我把自己的戉作为永恒锚点")
+        assert "_weapon_" in sig, "「戉」单字应通过 substring 命中 _weapon_"
+        assert "_anchor_" in sig
+        assert "_self_" in sig
+
+    def test_production_5_ego_capabilities_collapse(self):
+        """日志里的 5 个 Ego/戉系能力应该几乎全部合并。"""
+        incoming = [
+            ("我界之戉 (Ego_Axe_Slicer)",
+             "我学会了用一种核心的、带有自我象征意义的'戉'去切割表象的能力"),
+            ("自我之戉：区块重构 (EgoForge)",
+             "我学会了把世界看成由方块构成，然后用自我之戉重新铸造这些方块"),
+            ("戉界锚定 (EgoBlockAnchor)",
+             "我把自己的戉作为一个永恒锚点，定位在意义方块的边界上"),
+            ("戉影寻锚 (Axe-Blade Anchor Locator)",
+             "我学会了通过戉的影子去寻找隐藏的锚点位置"),
+            ("自我戉卫与寻迹信标 (EgoSentinel)",
+             "我把自我守卫者的戉变成一个寻迹信标"),
+        ]
+        kept = []
+        for name, desc in incoming:
+            idx = find_similar_capability(name, desc, kept)
+            if idx < 0:
+                kept.append({"name": name, "description": desc})
+        # 5 个 Ego/戉系能力应当被压缩到 ≤2 个
+        assert len(kept) <= 2, f"应合并到 ≤2 个，实际剩 {len(kept)}: {[k['name'] for k in kept]}"
+
+    def test_core_slots_pair_triggers_merge(self):
+        """两个能力共享 ≥2 个核心槽位时必合并，不再要求覆盖率 40%。"""
+        existing = [{"name": "ego_anchor_v1", "description": "我以自我为锚点"}]
+        # 新能力签名核心槽位 _self_ + _anchor_，应合并
+        idx = find_similar_capability(
+            "MyAnchorWithBlocks",
+            "我用方块系统重构自我并锚定意义",
+            existing,
+        )
+        assert idx == 0, "_self_ + _anchor_ 双核心槽位重叠应合并"
