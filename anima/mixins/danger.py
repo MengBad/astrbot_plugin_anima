@@ -59,16 +59,20 @@ class DangerMixin:
 
             sender_name = event.get_sender_name() if hasattr(event, "get_sender_name") else "对方"
 
-            # v0.8.3: prompt 强化，明确禁止叙事腔
+            # v0.8.4 hotfix: 不再把 sender_name 传给 LLM prompt
+            # 生产观察：群名片"[中国翻訳] 吳雨萌貓爪貓爪prpr [DL版]"导致 LLM 联想出 ASMR/音声话题
+            # 改为只基于"刚才的对话"让 LLM 生成问题，避免从群名片幻觉话题
             prompt = (
-                "你是一个 AI 聊天角色，正在内心想着关于群友的疑问。"
-                f"关于 {sender_name}，你还想了解什么？\n"
+                "你是一个 AI 聊天角色，正在内心想着关于刚才对话的疑问。"
+                "基于刚才的对话内容，你还想了解什么？\n"
                 "请生成一个【自然的提问句】，要求：\n"
                 "1. 必须是问句（带问号或疑问语气）\n"
-                "2. 不要写人物描写、心理描写、叙事段落\n"
-                "3. 不要用'她'/'他'第三人称叙述对方\n"
-                "4. 不要超过 30 字\n"
-                "如果没有想问的，只回复'无'。"
+                "2. 必须跟刚才的对话内容直接相关\n"
+                "3. 不要写人物描写、心理描写、叙事段落\n"
+                "4. 不要用'她'/'他'第三人称叙述对方\n"
+                "5. 不要超过 30 字\n"
+                "如果没有想问的，只回复'无'。\n\n"
+                f"刚才的对话：{(event.message_str or '')[:200]}"
             )
 
             llm_resp = await asyncio.wait_for(
@@ -114,7 +118,10 @@ class DangerMixin:
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "info_collection",
-                        "intensity": 0.6,
+                        "intensity": 0.4,  # v0.8.4: 低于 stance_propagation 的 0.5 门槛
+                        # 避免同一轮沉淀里"写入即发出"的零延迟问题
+                        # 下一轮对话如果用户回应了相关话题，intensity 不会衰减到 0.5 以下
+                        # 但如果没人接话，自然衰减会让它消失
                         "created_at": datetime.now().isoformat(),
                         "target_user": "",
                         "target_umo": self._get_event_umo(event),  # v0.8.0: 跨群隔离
