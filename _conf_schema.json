@@ -51,6 +51,16 @@
     "type": "int",
     "default": 30
   },
+  "memory_inject_in_context": {
+    "description": "对话时把向量记忆注入到上下文（v0.7.2：让模型看见 anima_memory 知识库里的历史对话）",
+    "type": "bool",
+    "default": true
+  },
+  "memory_inject_top_k": {
+    "description": "对话时注入多少条相关记忆（建议 2-5）",
+    "type": "int",
+    "default": 3
+  },
   "reject_phrases": {
     "description": "独白过滤词列表",
     "type": "list",

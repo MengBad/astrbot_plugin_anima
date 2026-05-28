@@ -53,7 +53,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.7.1",
+    "0.7.2",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(Star):
@@ -3818,6 +3818,30 @@ class AnimaPlugin(Star):
             if diary:
                 diary_snippet = diary[-500:] if len(diary) > 500 else diary
                 injection_parts.append(f"[工具日记]\n{diary_snippet}")
+
+        # v0.7.2: 注入向量记忆（让 anima_memory 知识库里的对话历史真正在对话时可用）
+        # 之前 _query_memory 只在沉淀阶段被调用，结果只用来生成内心独白写进 self_notes，
+        # 模型在回答用户时根本看不到具体的对话历史。这是"不记得发过的东西"的根因。
+        if self.config.get("memory_inject_in_context", True):
+            try:
+                user_text = (event.message_str or "").strip()
+                # 太短的消息（比如 "嗯"、"OK"）跳过，没意义且容易误命中
+                if user_text and len(user_text) >= 4:
+                    n_mem = int(self.config.get("memory_inject_top_k", 3))
+                    related = await self._query_memory(user_text, n_results=n_mem)
+                    if related:
+                        # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
+                        last_emotion = float(self._load_state().get("last_emotion_score", 0.5))
+                        related = self._rerank_memories_by_emotion(related, last_emotion)
+                        # 每条裁到 200 字，避免上下文爆炸
+                        mem_lines = "\n".join(f"- {m[:200]}" for m in related[:n_mem] if m)
+                        if mem_lines:
+                            injection_parts.append(
+                                "[相关记忆片段（来自我自己经历过的对话）]\n" + mem_lines
+                            )
+            except Exception as e:
+                if self.config.get("log_level") == "debug":
+                    logger.debug(f"[Anima] 向量记忆注入失败: {e}")
 
         injection = (
             "<anima_self_awareness>\n"
