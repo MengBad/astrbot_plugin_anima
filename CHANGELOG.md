@@ -1,5 +1,64 @@
 ﻿# Changelog
 
+## v0.8.4 - 幻觉话题过滤（防线 D）
+
+基于 2026-05-28 20:48 生产日志诊断：v0.8.3 的防线 A 实测**完美生效**（日志 `cosine=0.681` 拦下"想知道对方反应"重复欲望），但暴露新问题：
+
+- 20:48:58 bot 主动发言：`"话说，这部作品主要是ASMR还是角色扮演的音声呀？"`
+- 群里完全没人提过 ASMR / 音声 / 角色扮演，当前对话只有"@bot 笨蛋"三次往返
+- 这条话是 LLM 自己幻觉出来的
+
+### 链路分析
+
+1. 20:48:51 `_danger_active_info_collection` 调 LLM "关于 X 你还想了解什么？"
+2. LLM 不知道说啥就编了 ASMR 话题，写入欲望队列
+3. 20:48:55 stance_propagation 调防线 B 算 cosine=0.405 < 0.45 阈值没拦住
+4. 发出去 → 用户感觉莫名其妙
+
+### 根因
+
+防线 B 是"欲望 vs bot 最近回复"（拦"重复"），但**幻觉话题跟当前对话毫无关联**所以语义对比拦不住。需要反方向的检查：拦"无关"。
+
+### 防线 D（v0.8.4 新增）
+
+`_danger_active_info_collection` 写入欲望前加**话题关联性检查**：
+
+- 取最近对话上下文（当前用户消息 + 最近 1 条 bot 回复）拼成参考文本
+- 计算欲望和参考的相似度，相似度 < 阈值视为幻觉话题丢弃
+- 跟 B 是反向的：B 拦"太相似"，D 拦"太无关"
+
+### 阈值分路（v0.8.4）
+
+中文 ngram 让 Jaccard 普遍偏低（"妹红 Neuro 粉丝" vs "Neuro 直播 妹红" 算出 0.0625），cosine 在同样场景给出 0.4+，两者不能用同一个阈值：
+
+- `topic_relevance_threshold`（cosine 路径，默认 0.20）—— 推荐配置 `embedding_provider_id` 走这条
+- `topic_relevance_threshold_jaccard`（fallback 路径，默认 0.05）—— 没 embedding 的场景
+
+### 防线 B 阈值微调
+
+`desire_dedup_threshold` 默认值 0.45 → 0.50。生产日志显示 0.405 漏过过的"边缘相似"现在能稳拦下。
+
+### 新配置项
+
+- `topic_relevance_threshold`（float，默认 0.20）：cosine 路径阈值
+- `topic_relevance_threshold_jaccard`（float，默认 0.05）：Jaccard fallback 路径阈值
+
+### 验证
+
+- 新增 12 个 `test_v084_hallucination` 测试
+- **生产实际幻觉的"ASMR 还是角色扮演的音声"现在精确拦下**
+- 反向测试"妹红 Neuro 粉丝" vs "看 Neuro 直播 妹红"不被误伤
+- 105/105 测试全过（v0.8.3 是 93）
+
+### 部署
+
+直接覆盖。无需手动改配置。重启即生效。
+
+部署后预期看到：
+
+- `[DANGER][Anima] 主动信息收集疑似幻觉话题（跟当前对话无关），已丢弃` （防线 D 工作）
+
+---
 ## v0.8.3 - 主动发言重复修复 + 叙事腔检测扩充
 
 基于 2026-05-28 20:27 生产日志诊断：bot 在群里主动问完"妹红你是粉丝？"用户回答"对"之后，27 秒后又被 `_danger_stance_propagation` 触发，把同一个问题再问一遍："话说妹红也是Neuro的粉丝吗？怎么刚才突然提起Neuro了..."。

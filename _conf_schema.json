@@ -97,9 +97,19 @@
     "default": 300
   },
   "desire_dedup_threshold": {
-    "description": "欲望去重相似度阈值（v0.8.3）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.4-0.5",
+    "description": "欲望去重相似度阈值（v0.8.3 引入，v0.8.4 默认 0.45→0.50）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.45-0.55",
     "type": "float",
-    "default": 0.45
+    "default": 0.50
+  },
+  "topic_relevance_threshold": {
+    "description": "话题关联性阈值（v0.8.4，cosine 路径）：主动发言话题与最近对话上下文的余弦相似度 < 此值时视为幻觉话题，丢弃。值越高越严，0 等于关闭。建议 0.15-0.25",
+    "type": "float",
+    "default": 0.20
+  },
+  "topic_relevance_threshold_jaccard": {
+    "description": "话题关联性阈值（v0.8.4，Jaccard fallback 路径）：未配置 embedding_provider_id 时走此阈值。中文 ngram 让 Jaccard 普遍偏低，建议 0.03-0.10",
+    "type": "float",
+    "default": 0.05
   },
   "time_sense_enabled": {
     "description": "启用时间感",

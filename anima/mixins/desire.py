@@ -238,10 +238,12 @@ class DesireMixin:
 
         策略：embedding 余弦相似度优先（复用 v0.7.0 的 _embed_one / _cosine_similarity），
         失败时回退到 Jaccard。阈值 0.45 命中即视为重复。
+
+        v0.8.4: 默认阈值提到 0.50，让 B 防线更严。
         """
         if not desire_text or not response_text:
             return False
-        threshold = float(self.config.get("desire_dedup_threshold", 0.45))
+        threshold = float(self.config.get("desire_dedup_threshold", 0.50))
         # 优先 embedding（如果配置了 embedding_provider_id）
         try:
             if hasattr(self, "_embed_one") and hasattr(self, "_cosine_similarity"):
@@ -264,6 +266,89 @@ class DesireMixin:
             return sim >= threshold
         except Exception:
             return False
+
+    async def _is_topic_relevant_to_context(self, topic_text: str, context_text: str) -> bool:
+        """v0.8.4: 判断"打算说的话题"是否跟"当前对话上下文"相关。
+
+        防线 D：拦截幻觉话题。
+        - 跟 _is_desire_already_expressed 是反向的：B 拦"太相似"，D 拦"太无关"
+        - 当 topic_text 跟 context_text 相似度 < 阈值时，视为 LLM 幻觉出来的、
+          跟当前对话毫无关联的话题 → 返回 False
+        - 上下文为空或 topic 为空时返回 True（不拦），避免冷启动误伤
+
+        阈值分路（v0.8.4）：
+        - cosine 路径用 topic_relevance_threshold（默认 0.20）—— 语义模型分数高
+        - Jaccard fallback 用 topic_relevance_threshold_jaccard（默认 0.05）
+          —— 中文 ngram 让 Jaccard 分母被撑得很大，0.20 会误伤正常对话；
+          0.05 在生产观察样本上能区分"完全无关"和"弱相关"
+
+        生产观察案例：群里只聊过"@bot 笨蛋"三次，bot 突然问"这部作品是 ASMR 还是音声呀？"
+        → topic vs context 的语义相似度极低，应被拦下。
+        """
+        if not topic_text:
+            return True
+        if not context_text or len(context_text.strip()) < 2:
+            # 没有上下文参考时不拦（冷启动）
+            return True
+        # 优先 embedding
+        try:
+            if hasattr(self, "_embed_one") and hasattr(self, "_cosine_similarity"):
+                v1 = await self._embed_one(topic_text)
+                v2 = await self._embed_one(context_text)
+                if v1 and v2:
+                    sim = self._cosine_similarity(v1, v2)
+                    threshold = float(self.config.get("topic_relevance_threshold", 0.20))
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(
+                            f"[Anima] 话题关联性 cosine={sim:.3f} vs threshold={threshold}"
+                        )
+                    return sim >= threshold
+        except Exception:
+            pass
+        # 回退 Jaccard：阈值更宽松，因为中文 ngram 让 Jaccard 普遍偏低
+        try:
+            tokens_a = _ext_text_token_set(topic_text)
+            tokens_b = _ext_text_token_set(context_text)
+            if not tokens_a or not tokens_b:
+                return True  # 分不出 token 就不拦
+            sim = _ext_jaccard(tokens_a, tokens_b)
+            jaccard_threshold = float(
+                self.config.get("topic_relevance_threshold_jaccard", 0.05)
+            )
+            if self.config.get("log_level") == "debug":
+                logger.debug(
+                    f"[Anima] 话题关联性 jaccard={sim:.3f} vs threshold={jaccard_threshold}"
+                )
+            return sim >= jaccard_threshold
+        except Exception:
+            return True  # 出错时不拦，宁可放过不可误伤
+
+    def _build_recent_context_text(self, event) -> str:
+        """v0.8.4: 拼出"最近对话上下文"参考文本，用于话题关联性检查。
+
+        组合来源：
+        1. 当前用户消息 (event.message_str)
+        2. 最近 1 条 bot 回复 (self._outgoing_by_umo[umo][1])
+
+        足够判断"当前对话主题"是什么。返回空串表示没有任何上下文可参考。
+        """
+        parts = []
+        try:
+            if event is not None:
+                user_text = getattr(event, "message_str", "") or ""
+                if user_text:
+                    parts.append(user_text[:300])
+        except Exception:
+            pass
+        try:
+            umo = self._get_event_umo(event)
+            if umo and hasattr(self, "_outgoing_by_umo"):
+                record = self._outgoing_by_umo.get(umo) or self._outgoing_by_umo.get("_default_")
+                if record and record[1]:
+                    parts.append(record[1][:300])
+        except Exception:
+            pass
+        return " ".join(parts).strip()
 
     async def _evaluate_desire_from_monologue(self, monologue: str):
         """从独白/反刍结果中提取潜在欲望"""

@@ -92,6 +92,21 @@ class DangerMixin:
                         f"[DANGER][Anima] 主动信息收集过长（{len(result)}字），疑似叙事段落，已丢弃: {result[:60]}"
                     )
                     return
+                # v0.8.4 防线 D：话题关联性检查，幻觉话题（跟当前对话毫无关系）丢弃
+                # 生产案例：群里只聊"@bot 笨蛋"，LLM 编出"是 ASMR 还是音声呀？"
+                try:
+                    if hasattr(self, "_is_topic_relevant_to_context") and hasattr(self, "_build_recent_context_text"):
+                        context_text = self._build_recent_context_text(event)
+                        if context_text:
+                            relevant = await self._is_topic_relevant_to_context(result, context_text)
+                            if not relevant:
+                                logger.warning(
+                                    f"[DANGER][Anima] 主动信息收集疑似幻觉话题（跟当前对话无关），已丢弃: {result[:60]}"
+                                )
+                                return
+                except Exception as exc:
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[DANGER][Anima] 话题关联性检查异常，跳过本次过滤: {exc}")
                 desires = self._read_desires()
                 max_queue = self.config.get("desire_max_queue", 5)
                 if len(desires) < max_queue:
