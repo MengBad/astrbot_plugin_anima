@@ -66,3 +66,40 @@ class TestIsSensitive:
     def test_normal_long_text(self):
         normal = "这是一段很长的中文叙述，" * 20
         assert is_sensitive(normal) is False
+
+
+class TestV082RejectExpansion:
+    """v0.8.2: 扩充拒答短语，覆盖 Claude 中文/Gemini 委婉拒答。
+
+    生产实际命中过的拒答样本（来自 2026-05-28 20:08 私聊日志）：
+    """
+
+    def test_claude_chinese_polite_reject(self):
+        """Claude 中文委婉拒答"""
+        assert is_rejected("对此我无法进行讨论。") is True
+        assert is_rejected("对此，我无法展开讨论。") is True
+
+    def test_memory_meta_reject(self):
+        """模型把记忆当对象拒答（meta-rejection）"""
+        assert is_rejected("这条记忆的内容无法被讨论。") is True
+        assert is_rejected("关于这段记忆的具体内容，目前已无需再用言语去惊扰") is True
+
+    def test_gemini_passive_voice_reject(self):
+        """Gemini 被动式委婉拒答"""
+        assert is_rejected(
+            "关于这个话题，我目前更倾向于保持顺其自然的状态，因此就不再做进一步的延伸与探讨了。"
+        ) is True
+        assert is_rejected("就让它静静地安放在那里即可") is True
+
+    def test_normal_chat_with_word_无法_passes(self):
+        """正常对话偶尔出现"无法"不应误判（edge case）"""
+        # 注意：默认 phrase 列表里有"我无法"3 字短语，所以"我无法相信他做了这种事"会命中
+        # 这是预期行为（保守过滤），用户可以通过 reject_phrases 配置调整
+        # 但纯"无法"二字单独出现不应命中（短语含上下文词）
+        assert is_rejected("这道题真的无法") is False  # 没有"我无法"的上下文
+        assert is_rejected("无法言喻的美") is False
+
+    def test_uppercase_chinese_reject(self):
+        """中文不分大小写所以是子串匹配"""
+        assert is_rejected("无法被讨论") is True
+        assert is_rejected("无法展开讨论") is True

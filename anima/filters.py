@@ -8,12 +8,31 @@ from typing import Iterable, Optional
 
 
 DEFAULT_REJECT_PHRASES = [
+    # 英文经典拒答
     "I can't discuss",
     "I cannot",
-    "我无法",
-    "我不能",
     "I'm not able",
     "I don't think I should",
+    "I won't be able",
+    "I'm unable to",
+    # 中文经典拒答
+    "我无法",
+    "我不能",
+    "我没办法",
+    # v0.8.2: Claude/Gemini 中文委婉拒答模板（生产观察）
+    "对此我无法",
+    "对此，我无法",
+    "无法被讨论",
+    "无法展开讨论",
+    "无法进行讨论",
+    "无法再用言语",
+    "无需再用言语",
+    "无需再做进一步",
+    "更倾向于保持顺其自然",
+    "目前已无需",
+    "让它静静地安放",
+    "这条记忆的内容",
+    "这段记忆的具体内容",
 ]
 
 
