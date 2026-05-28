@@ -1,245 +1,282 @@
+﻿# Changelog
+
+## v0.7.1 - 能力去重紧急 hotfix（防爆炸）
+
+基于 2026-05-28 18:30 生产日志诊断：观察到 `/anima_autonomy` 显示 **103 个个人能力，全部 0 次使用**。其中 5 个能力名字一眼可见是同概念："我界之戉/自我之戉:区块重构/戉界锚定/戉影寻锚/自我戉卫与寻迹信标"，但 v0.6.1 的去重一个都没拦住。
+
+### 根因定位
+
+在 `anima/capability_dedup.py` 里复现：v0.6.1 的去重对 5 个能力一个都没合并。两个真问题：
+
+1. **驼峰名词没拆分**：`EgoForge` / `EgoBlockAnchor` / `EgoSentinel` 被当作一整个英文单词，`ego→_self_` 同义词没生效
+2. **匹配门槛过严**：1-3 槽位时要求 ov==n 完全命中，2 个核心同义槽位（_self_ + _weapon_ + _anchor_）重叠却需要覆盖率 40%
+
+### 修复
+
+- 驼峰拆分：`EgoForge` 在 lower 之前被拆成 `ego forge`
+- 单字中文同义词 substring 匹配：滑窗抓不到的"戉"/"刃" 通过直接 substring 命中
+- 同义词表扩充：`slicer/sentinel/forge/locator/beacon/信标` 等新归一化到核心槽位
+- **核心槽位双命中规则**：两个能力共享 ≥2 个核心同义槽位（_self_/_weapon_/_anchor_/_block_/_rebuild_/_resonance_/_align_）时无视新签名大小直接合并
+- 4 槽位以上的覆盖率门槛从 40% → 30%
+
+### 验证
+
+新增 4 个 `TestV071HotfixRegression` 回归测试，专门覆盖这次生产场景。本地复现：
+
+- v0.7.0：5 个能力全部 NEW，0 合并
+- v0.7.1：5 个能力压缩到 1 个（4 次合并）
+
+测试 60/60 全过（v0.7.0 是 56/60）。
+
+### 不在本版本范围
+
+- 跨群欲望泄漏（`_danger_stance_propagation` 没按 umo 隔离）放进 v0.8.0 大重构一起处理
+- main.py 模块拆分继续在 v0.8.0-modular-split 分支进行
+
+---
 # Changelog
 
-## v0.7.0 - 反馈语义化 + 时间感聚焦 + 模块拆分起步 + 测试框架
+## v0.7.0 - 鍙嶉璇箟鍖?+ 鏃堕棿鎰熻仛鐒?+ 妯″潡鎷嗗垎璧锋 + 娴嬭瘯妗嗘灦
 
-这是把"扎实的核心闭环"和"工程化健康度"拉齐的一个版本。三件大事：
+杩欐槸鎶?鎵庡疄鐨勬牳蹇冮棴鐜?鍜?宸ョ▼鍖栧仴搴峰害"鎷夐綈鐨勪竴涓増鏈€備笁浠跺ぇ浜嬶細
 
-### 1. 反馈窗口语义化（embedding + jaccard 兜底）
+### 1. 鍙嶉绐楀彛璇箟鍖栵紙embedding + jaccard 鍏滃簳锛?
 
-`_evaluate_feedback` 从 v0.5 时代的"中文 2-字关键词重叠 ≥2"硬阈值升级为：
-- **优先**：调用 `embedding_provider`（如已配置）算两段文本的余弦相似度
-- **兜底**：用 ngram tokenize + Jaccard 系数（覆盖率比朴素 2-字关键词高很多）
-- 阈值：相似度 ≥0.30 判 accepted；< 0.10 判 ignored；中间区段保守判 accepted（避免把"对话延续"误判为"忽略"）
+`_evaluate_feedback` 浠?v0.5 鏃朵唬鐨?涓枃 2-瀛楀叧閿瘝閲嶅彔 鈮?"纭槇鍊煎崌绾т负锛?
+- **浼樺厛**锛氳皟鐢?`embedding_provider`锛堝宸查厤缃級绠椾袱娈垫枃鏈殑浣欏鸡鐩镐技搴?
+- **鍏滃簳**锛氱敤 ngram tokenize + Jaccard 绯绘暟锛堣鐩栫巼姣旀湸绱?2-瀛楀叧閿瘝楂樺緢澶氾級
+- 闃堝€硷細鐩镐技搴?鈮?.30 鍒?accepted锛? 0.10 鍒?ignored锛涗腑闂村尯娈典繚瀹堝垽 accepted锛堥伩鍏嶆妸"瀵硅瘽寤剁画"璇垽涓?蹇界暐"锛?
 
-修复了之前每条用户回应都被判 `ignored → 转入压抑话题` 的空转。
+淇浜嗕箣鍓嶆瘡鏉＄敤鎴峰洖搴旈兘琚垽 `ignored 鈫?杞叆鍘嬫姂璇濋` 鐨勭┖杞€?
 
-### 2. 时间感聚焦（解决 v0.6.1 的"10x 节流跳过"日志噪音）
+### 2. 鏃堕棿鎰熻仛鐒︼紙瑙ｅ喅 v0.6.1 鐨?10x 鑺傛祦璺宠繃"鏃ュ織鍣煶锛?
 
-`_get_time_sense_text` 之前对 `worldview.social_graph` 里**每个**超过 24h 没说话的 user_id 都触发自主研究 + 注入"很久没见到 X 了"。在大群里这意味着单条用户消息可能批量产出 10+ 条 absence 触发，被 v0.6.1 节流后变成 10+ 条"研究跳过"日志。
+`_get_time_sense_text` 涔嬪墠瀵?`worldview.social_graph` 閲?*姣忎釜**瓒呰繃 24h 娌¤璇濈殑 user_id 閮借Е鍙戣嚜涓荤爺绌?+ 娉ㄥ叆"寰堜箙娌¤鍒?X 浜?銆傚湪澶х兢閲岃繖鎰忓懗鐫€鍗曟潯鐢ㄦ埛娑堟伅鍙兘鎵归噺浜у嚭 10+ 鏉?absence 瑙﹀彂锛岃 v0.6.1 鑺傛祦鍚庡彉鎴?10+ 鏉?鐮旂┒璺宠繃"鏃ュ織銆?
 
-现在改为：按 `(互动频次, 缺席天数)` 排序后**只取最重要的 2 个**触发，从源头减少节流次数。
+鐜板湪鏀逛负锛氭寜 `(浜掑姩棰戞, 缂哄腑澶╂暟)` 鎺掑簭鍚?*鍙彇鏈€閲嶈鐨?2 涓?*瑙﹀彂锛屼粠婧愬ご鍑忓皯鑺傛祦娆℃暟銆?
 
-### 3. 模块拆分（v0.7.0 起步，v0.8.0 继续）
+### 3. 妯″潡鎷嗗垎锛坴0.7.0 璧锋锛寁0.8.0 缁х画锛?
 
-把 main.py 里的纯函数（不依赖 AstrBot context 的）抽到独立的 `anima/` 包：
+鎶?main.py 閲岀殑绾嚱鏁帮紙涓嶄緷璧?AstrBot context 鐨勶級鎶藉埌鐙珛鐨?`anima/` 鍖咃細
 
-- `anima/filters.py` — 拒绝语 / 敏感词过滤
-- `anima/similarity.py` — Jaccard / Cosine / ngram tokenize
-- `anima/capability_dedup.py` — 能力归一化签名 + 近似匹配（v0.6.1 的核心去重）
-- `anima/forgetting.py` — 时间戳模糊化
-- `anima/valence.py` — 记忆情感效价 + 重排
+- `anima/filters.py` 鈥?鎷掔粷璇?/ 鏁忔劅璇嶈繃婊?
+- `anima/similarity.py` 鈥?Jaccard / Cosine / ngram tokenize
+- `anima/capability_dedup.py` 鈥?鑳藉姏褰掍竴鍖栫鍚?+ 杩戜技鍖归厤锛坴0.6.1 鐨勬牳蹇冨幓閲嶏級
+- `anima/forgetting.py` 鈥?鏃堕棿鎴虫ā绯婂寲
+- `anima/valence.py` 鈥?璁板繂鎯呮劅鏁堜环 + 閲嶆帓
 
-main.py 里对应方法改为薄封装委托调用，**所有现有调用零破坏**。这一步只是把可独立测试的部分先剥离，让 v0.8.0 的大模块重构（关系/欲望/世界观/能力等子系统）有更小的风险面。
+main.py 閲屽搴旀柟娉曟敼涓鸿杽灏佽濮旀墭璋冪敤锛?*鎵€鏈夌幇鏈夎皟鐢ㄩ浂鐮村潖**銆傝繖涓€姝ュ彧鏄妸鍙嫭绔嬫祴璇曠殑閮ㄥ垎鍏堝墺绂伙紝璁?v0.8.0 鐨勫ぇ妯″潡閲嶆瀯锛堝叧绯?娆叉湜/涓栫晫瑙?鑳藉姏绛夊瓙绯荤粺锛夋湁鏇村皬鐨勯闄╅潰銆?
 
-### 4. 测试框架（核心纯函数 56 个测试全过）
+### 4. 娴嬭瘯妗嗘灦锛堟牳蹇冪函鍑芥暟 56 涓祴璇曞叏杩囷級
 
-- 新增 `pytest.ini` + `tests/` 目录
-- `test_filters.py`：覆盖单词边界、误伤防护（author/keyboard/secretary/tokenize 都不再被当敏感词）、高熵串检测
-- `test_similarity.py`：Jaccard / Cosine 边界 + ngram tokenize
-- `test_capability_dedup.py`：用真实日志里 11 条同质能力做回归测试，验证 4+ 条会被合并；用 4 个不相关工具做反向测试，验证不会误合并
-- `test_valence.py`：情感效价估算 + 重排
-- `test_forgetting.py`：时间戳模糊化（recent / past halflife / extreme blur / 多 block 独立处理）
+- 鏂板 `pytest.ini` + `tests/` 鐩綍
+- `test_filters.py`锛氳鐩栧崟璇嶈竟鐣屻€佽浼ら槻鎶わ紙author/keyboard/secretary/tokenize 閮戒笉鍐嶈褰撴晱鎰熻瘝锛夈€侀珮鐔典覆妫€娴?
+- `test_similarity.py`锛欽accard / Cosine 杈圭晫 + ngram tokenize
+- `test_capability_dedup.py`锛氱敤鐪熷疄鏃ュ織閲?11 鏉″悓璐ㄨ兘鍔涘仛鍥炲綊娴嬭瘯锛岄獙璇?4+ 鏉′細琚悎骞讹紱鐢?4 涓笉鐩稿叧宸ュ叿鍋氬弽鍚戞祴璇曪紝楠岃瘉涓嶄細璇悎骞?
+- `test_valence.py`锛氭儏鎰熸晥浠蜂及绠?+ 閲嶆帓
+- `test_forgetting.py`锛氭椂闂存埑妯＄硦鍖栵紙recent / past halflife / extreme blur / 澶?block 鐙珛澶勭悊锛?
 
 ```
 56 passed, 0 failed
 ```
 
-### 顺带修的小 bug
+### 椤哄甫淇殑灏?bug
 
-- `_normalize_capability_signature` 之前 `u6211` / `apikey` 这种字母+数字混合形式抽不到 token（正则 `[a-z]{3,}` 漏掉），现在加 `[a-z]+\d+` 单独抽
+- `_normalize_capability_signature` 涔嬪墠 `u6211` / `apikey` 杩欑瀛楁瘝+鏁板瓧娣峰悎褰㈠紡鎶戒笉鍒?token锛堟鍒?`[a-z]{3,}` 婕忔帀锛夛紝鐜板湪鍔?`[a-z]+\d+` 鍗曠嫭鎶?
 
-### 配置无变化
+### 閰嶇疆鏃犲彉鍖?
 
-v0.7.0 没新增任何配置项。所有变化都是行为改进 + 内部重构。
+v0.7.0 娌℃柊澧炰换浣曢厤缃」銆傛墍鏈夊彉鍖栭兘鏄涓烘敼杩?+ 鍐呴儴閲嶆瀯銆?
 
-## v0.6.1 - 紧急防爆炸：自主研究节流 + 能力去重 + 动态工具配额
+## v0.6.1 - 绱ф€ラ槻鐖嗙偢锛氳嚜涓荤爺绌惰妭娴?+ 鑳藉姏鍘婚噸 + 鍔ㄦ€佸伐鍏烽厤棰?
 
-针对 v0.6.0 实测中观察到的"单次对话产出 12+ 条同质能力 + 全部注册成独立 LLM 工具"问题做的紧急修复。建议所有 v0.6.0 用户升级。
+閽堝 v0.6.0 瀹炴祴涓瀵熷埌鐨?鍗曟瀵硅瘽浜у嚭 12+ 鏉″悓璐ㄨ兘鍔?+ 鍏ㄩ儴娉ㄥ唽鎴愮嫭绔?LLM 宸ュ叿"闂鍋氱殑绱ф€ヤ慨澶嶃€傚缓璁墍鏈?v0.6.0 鐢ㄦ埛鍗囩骇銆?
 
-### 三处修复
-- **`_initiate_self_directed_research` 节流**：同一 reason（按 reason 关键字归一化、忽略其中的 user_id 数字）5 分钟内只允许触发一次；新增全局 `asyncio.Semaphore(1)` 保证同时只跑 1 个研究任务。修掉了 social_graph 里有几十个 user_id 时同时触发几十个并行研究的灾难。
-- **能力名归一化匹配（去重）**：`_create_or_update_capability` 现在用关键词集合相似度找近似已有能力，命中 ≥2 个特征关键词且占新能力签名 ≥40% 时合并而不是新建。LLM 同义词（ego/self/我、anchor/锚、blade/axe/戉/兵戈）在去重前先归一化，防止"鸣戈守界 / EgoBladeDissector / 戉刃重构"这种本质同一的能力被反复创建。
-- **动态工具注册每日配额**：新增 `dynamic_tool_daily_quota` 配置（默认 3）。超过配额的能力照常入库，但不再注册为独立 LLM 工具——避免 LLM 工具列表无限膨胀拖慢推理。工具名归一化也升级，纯中文名不再生成 `my_________` 这样无意义的下划线串。
+### 涓夊淇
+- **`_initiate_self_directed_research` 鑺傛祦**锛氬悓涓€ reason锛堟寜 reason 鍏抽敭瀛楀綊涓€鍖栥€佸拷鐣ュ叾涓殑 user_id 鏁板瓧锛? 鍒嗛挓鍐呭彧鍏佽瑙﹀彂涓€娆★紱鏂板鍏ㄥ眬 `asyncio.Semaphore(1)` 淇濊瘉鍚屾椂鍙窇 1 涓爺绌朵换鍔°€備慨鎺変簡 social_graph 閲屾湁鍑犲崄涓?user_id 鏃跺悓鏃惰Е鍙戝嚑鍗佷釜骞惰鐮旂┒鐨勭伨闅俱€?
+- **鑳藉姏鍚嶅綊涓€鍖栧尮閰嶏紙鍘婚噸锛?*锛歚_create_or_update_capability` 鐜板湪鐢ㄥ叧閿瘝闆嗗悎鐩镐技搴︽壘杩戜技宸叉湁鑳藉姏锛屽懡涓?鈮? 涓壒寰佸叧閿瘝涓斿崰鏂拌兘鍔涚鍚?鈮?0% 鏃跺悎骞惰€屼笉鏄柊寤恒€侺LM 鍚屼箟璇嶏紙ego/self/鎴戙€乤nchor/閿氥€乥lade/axe/鎴?鍏垫垐锛夊湪鍘婚噸鍓嶅厛褰掍竴鍖栵紝闃叉"楦ｆ垐瀹堢晫 / EgoBladeDissector / 鎴夊垉閲嶆瀯"杩欑鏈川鍚屼竴鐨勮兘鍔涜鍙嶅鍒涘缓銆?
+- **鍔ㄦ€佸伐鍏锋敞鍐屾瘡鏃ラ厤棰?*锛氭柊澧?`dynamic_tool_daily_quota` 閰嶇疆锛堥粯璁?3锛夈€傝秴杩囬厤棰濈殑鑳藉姏鐓у父鍏ュ簱锛屼絾涓嶅啀娉ㄥ唽涓虹嫭绔?LLM 宸ュ叿鈥斺€旈伩鍏?LLM 宸ュ叿鍒楄〃鏃犻檺鑶ㄨ儉鎷栨參鎺ㄧ悊銆傚伐鍏峰悕褰掍竴鍖栦篃鍗囩骇锛岀函涓枃鍚嶄笉鍐嶇敓鎴?`my_________` 杩欐牱鏃犳剰涔夌殑涓嬪垝绾夸覆銆?
 
-### 配置新增
-- `dynamic_tool_daily_quota` (int, default 3)：每日动态注册独立工具的硬上限
+### 閰嶇疆鏂板
+- `dynamic_tool_daily_quota` (int, default 3)锛氭瘡鏃ュ姩鎬佹敞鍐岀嫭绔嬪伐鍏风殑纭笂闄?
 
-### 升级建议
-推荐配置（编辑 AstrBot WebUI → Anima 配置）：
-- `autonomy_research_on_time_absence`: 视场景，群多人时建议 false
-- `dynamic_tool_daily_quota`: 3（保守）或更高
-- 之前已经积累的能力库不会被自动清理；可以等 `_maintain_capabilities_health` 自动合并，或 `/anima_reset` 后从头来
+### 鍗囩骇寤鸿
+鎺ㄨ崘閰嶇疆锛堢紪杈?AstrBot WebUI 鈫?Anima 閰嶇疆锛夛細
+- `autonomy_research_on_time_absence`: 瑙嗗満鏅紝缇ゅ浜烘椂寤鸿 false
+- `dynamic_tool_daily_quota`: 3锛堜繚瀹堬級鎴栨洿楂?
+- 涔嬪墠宸茬粡绉疮鐨勮兘鍔涘簱涓嶄細琚嚜鍔ㄦ竻鐞嗭紱鍙互绛?`_maintain_capabilities_health` 鑷姩鍚堝苟锛屾垨 `/anima_reset` 鍚庝粠澶存潵
 
-## v0.6.0 - 完全自主存在：自我创造工具 + 独立研究学习闭环 + 框架兼容性大修
+## v0.6.0 - 瀹屽叏鑷富瀛樺湪锛氳嚜鎴戝垱閫犲伐鍏?+ 鐙珛鐮旂┒瀛︿範闂幆 + 妗嗘灦鍏煎鎬уぇ淇?
 
-### 框架兼容性修复（必须升级原因）
-- **修复 `@register` 装饰器缺失**：插件加载时不再需要手动放进 `data/plugins/`，可以直接 WebUI 上传 zip
-- **修复 `_conf_schema.json` 解析错误**：清掉非法 `_comment` 字段和重复键，AstrBot ≥4.25 加载正常
-- **修复 `__init__` 中 `asyncio.get_event_loop()` 在 Python 3.12 崩溃**：定时任务搬到 `async def initialize()` 钩子里
-- **修复 `@filter.on_using_llm_tool` / `@filter.on_llm_tool_respond` 钩子签名错误**：补 `event` 第一参数
-- **修复 `_get_provider_id(None)` 直接 AttributeError**：event 改 Optional，多级兜底
-- **删除调用了不存在 API（`add_web_route` / `register_web_route`）的死代码**
+### 妗嗘灦鍏煎鎬т慨澶嶏紙蹇呴』鍗囩骇鍘熷洜锛?
+- **淇 `@register` 瑁呴グ鍣ㄧ己澶?*锛氭彃浠跺姞杞芥椂涓嶅啀闇€瑕佹墜鍔ㄦ斁杩?`data/plugins/`锛屽彲浠ョ洿鎺?WebUI 涓婁紶 zip
+- **淇 `_conf_schema.json` 瑙ｆ瀽閿欒**锛氭竻鎺夐潪娉?`_comment` 瀛楁鍜岄噸澶嶉敭锛孉strBot 鈮?.25 鍔犺浇姝ｅ父
+- **淇 `__init__` 涓?`asyncio.get_event_loop()` 鍦?Python 3.12 宕╂簝**锛氬畾鏃朵换鍔℃惉鍒?`async def initialize()` 閽╁瓙閲?
+- **淇 `@filter.on_using_llm_tool` / `@filter.on_llm_tool_respond` 閽╁瓙绛惧悕閿欒**锛氳ˉ `event` 绗竴鍙傛暟
+- **淇 `_get_provider_id(None)` 鐩存帴 AttributeError**锛歟vent 鏀?Optional锛屽绾у厹搴?
+- **鍒犻櫎璋冪敤浜嗕笉瀛樺湪 API锛坄add_web_route` / `register_web_route`锛夌殑姝讳唬鐮?*
 
-### 健壮性升级
-- **全局 IO 锁 + 原子 state 读改写封装**（`_atomic_update_state`）：消除并发写入丢更新与 JSONL 半行损坏
-- **关键 IO 路径全部加 try/except OSError**：磁盘满或权限问题不再让插件初始化崩
-- **`_is_sensitive` 改用单词边界正则**：不再误把 author/keyboard/secretary/tokenize/credentials 当敏感词
-- **反馈窗口按 umo 隔离**：多群/多用户场景下反馈不再串台
-- **`_initiate_self_directed_research(force=True)` 也尊重 autonomy_enabled 总开关**：用户主权优先
-- **`_maintain_capabilities_health` 重写**：合并相似能力时 usage_count 不再丢更新；仅降权也会持久化
-- **`/anima_capabilities` 支持分页**：避免 QQ 协议端单条转发消息超长导致发送失败
+### 鍋ュ．鎬у崌绾?
+- **鍏ㄥ眬 IO 閿?+ 鍘熷瓙 state 璇绘敼鍐欏皝瑁?*锛坄_atomic_update_state`锛夛細娑堥櫎骞跺彂鍐欏叆涓㈡洿鏂颁笌 JSONL 鍗婅鎹熷潖
+- **鍏抽敭 IO 璺緞鍏ㄩ儴鍔?try/except OSError**锛氱鐩樻弧鎴栨潈闄愰棶棰樹笉鍐嶈鎻掍欢鍒濆鍖栧穿
+- **`_is_sensitive` 鏀圭敤鍗曡瘝杈圭晫姝ｅ垯**锛氫笉鍐嶈鎶?author/keyboard/secretary/tokenize/credentials 褰撴晱鎰熻瘝
+- **鍙嶉绐楀彛鎸?umo 闅旂**锛氬缇?澶氱敤鎴峰満鏅笅鍙嶉涓嶅啀涓插彴
+- **`_initiate_self_directed_research(force=True)` 涔熷皧閲?autonomy_enabled 鎬诲紑鍏?*锛氱敤鎴蜂富鏉冧紭鍏?
+- **`_maintain_capabilities_health` 閲嶅啓**锛氬悎骞剁浉浼艰兘鍔涙椂 usage_count 涓嶅啀涓㈡洿鏂帮紱浠呴檷鏉冧篃浼氭寔涔呭寲
+- **`/anima_capabilities` 鏀寔鍒嗛〉**锛氶伩鍏?QQ 鍗忚绔崟鏉¤浆鍙戞秷鎭秴闀垮鑷村彂閫佸け璐?
 
-### v0.6 新增功能（核心）
-- **个人能力系统（Personal Capabilities）**：角色现在可以「自己学会 + 自己创造 + 自己保存 + 自己修正」工具和方法
-  - 数据文件 `personal_capabilities.json` + `capabilities_diary.md`
-  - 每次自主研究成功后，LLM 帮角色把成果结构化成「个人工具卡」（含 description / how_to_use / parameters_schema / executable_snippet / should_register_as_tool）
-  - 这些工具以高优先级注入到对话上下文
-- **自主研究 → 能力创造闭环**：`_initiate_self_directed_research`（内部驱动）+ `_danger_autonomous_web`（外部触发）双路径
-- **自我修正机制（结构化 JSON 解析版）**：使用能力后 LLM 用结构化 JSON 评价成功/失败 + 反思 + 是否需要重写能力卡，可真正修订 `description` / `how_to_use`
-- **真实 LLM 工具调用接通 tool_learning**：所有非个人能力的工具调用也会进 `_record_tool_usage`，让"工具自学习"对 Sylanne / 各类 MCP 工具都起作用
-- **WebUI 编辑器 30s 后台轮询同步**：编辑器保存后不需要等下条消息，最多 30s 自动写入 self_notes.md
-- **`code_execution_safety_level` 三档真正分化**：strict（无 import）/ balanced（json/re/math/datetime）/ permissive（再加 hashlib/itertools/collections/string/statistics）
-- **`capability_system_enabled` 真生效**：dispatcher 注册、能力创建、能力注入三处全部门控
-- **`dynamic_tool_registration_enabled` + `default_register_as_independent_tool` 真生效**：能力合成 prompt 现在让 LLM 输出 `should_register_as_tool` 字段，置信度 ≥0.65 + 标记 true 才会真注册成独立 LLM 工具
-- 新指令 `/anima_capabilities`、`/anima_autonomy`、`/anima_export_capabilities`、`/anima_core`
+### v0.6 鏂板鍔熻兘锛堟牳蹇冿級
+- **涓汉鑳藉姏绯荤粺锛圥ersonal Capabilities锛?*锛氳鑹茬幇鍦ㄥ彲浠ャ€岃嚜宸卞浼?+ 鑷繁鍒涢€?+ 鑷繁淇濆瓨 + 鑷繁淇銆嶅伐鍏峰拰鏂规硶
+  - 鏁版嵁鏂囦欢 `personal_capabilities.json` + `capabilities_diary.md`
+  - 姣忔鑷富鐮旂┒鎴愬姛鍚庯紝LLM 甯鑹叉妸鎴愭灉缁撴瀯鍖栨垚銆屼釜浜哄伐鍏峰崱銆嶏紙鍚?description / how_to_use / parameters_schema / executable_snippet / should_register_as_tool锛?
+  - 杩欎簺宸ュ叿浠ラ珮浼樺厛绾ф敞鍏ュ埌瀵硅瘽涓婁笅鏂?
+- **鑷富鐮旂┒ 鈫?鑳藉姏鍒涢€犻棴鐜?*锛歚_initiate_self_directed_research`锛堝唴閮ㄩ┍鍔級+ `_danger_autonomous_web`锛堝閮ㄨЕ鍙戯級鍙岃矾寰?
+- **鑷垜淇鏈哄埗锛堢粨鏋勫寲 JSON 瑙ｆ瀽鐗堬級**锛氫娇鐢ㄨ兘鍔涘悗 LLM 鐢ㄧ粨鏋勫寲 JSON 璇勪环鎴愬姛/澶辫触 + 鍙嶆€?+ 鏄惁闇€瑕侀噸鍐欒兘鍔涘崱锛屽彲鐪熸淇 `description` / `how_to_use`
+- **鐪熷疄 LLM 宸ュ叿璋冪敤鎺ラ€?tool_learning**锛氭墍鏈夐潪涓汉鑳藉姏鐨勫伐鍏疯皟鐢ㄤ篃浼氳繘 `_record_tool_usage`锛岃"宸ュ叿鑷涔?瀵?Sylanne / 鍚勭被 MCP 宸ュ叿閮借捣浣滅敤
+- **WebUI 缂栬緫鍣?30s 鍚庡彴杞鍚屾**锛氱紪杈戝櫒淇濆瓨鍚庝笉闇€瑕佺瓑涓嬫潯娑堟伅锛屾渶澶?30s 鑷姩鍐欏叆 self_notes.md
+- **`code_execution_safety_level` 涓夋。鐪熸鍒嗗寲**锛歴trict锛堟棤 import锛? balanced锛坖son/re/math/datetime锛? permissive锛堝啀鍔?hashlib/itertools/collections/string/statistics锛?
+- **`capability_system_enabled` 鐪熺敓鏁?*锛歞ispatcher 娉ㄥ唽銆佽兘鍔涘垱寤恒€佽兘鍔涙敞鍏ヤ笁澶勫叏閮ㄩ棬鎺?
+- **`dynamic_tool_registration_enabled` + `default_register_as_independent_tool` 鐪熺敓鏁?*锛氳兘鍔涘悎鎴?prompt 鐜板湪璁?LLM 杈撳嚭 `should_register_as_tool` 瀛楁锛岀疆淇″害 鈮?.65 + 鏍囪 true 鎵嶄細鐪熸敞鍐屾垚鐙珛 LLM 宸ュ叿
+- 鏂版寚浠?`/anima_capabilities`銆乣/anima_autonomy`銆乣/anima_export_capabilities`銆乣/anima_core`
 
-### 清理
-- 删除过时的 `autonomous_web_tools` 配置（v0.3.6 起就没用了）
-- 删除 README 中"需配置 fetch/search MCP"过时描述
-- 删除仓库中遗留的 schema 历史备份与调试脚本
+### 娓呯悊
+- 鍒犻櫎杩囨椂鐨?`autonomous_web_tools` 閰嶇疆锛坴0.3.6 璧峰氨娌＄敤浜嗭級
+- 鍒犻櫎 README 涓?闇€閰嶇疆 fetch/search MCP"杩囨椂鎻忚堪
+- 鍒犻櫎浠撳簱涓仐鐣欑殑 schema 鍘嗗彶澶囦唤涓庤皟璇曡剼鏈?
 
-## v0.5.0 - Phase 3 + Phase 5: 人格向量 / 记忆染色 / 跨关系传播 + 突变池与连锁反应
+## v0.5.0 - Phase 3 + Phase 5: 浜烘牸鍚戦噺 / 璁板繂鏌撹壊 / 璺ㄥ叧绯讳紶鎾?+ 绐佸彉姹犱笌杩為攣鍙嶅簲
 
-### 新增机制（Phase 3）
+### 鏂板鏈哄埗锛圥hase 3锛?
 
-**人格向量系统**
-- 5 维实时向量：表达欲 / 敏感度 / 边界通透 / 秩序感 / 关系引力
-- 存储于 `anima_state.json` 的 `personality_vector` 字段
-- 每次沉淀成功后根据独白内容用 EMA（α=0.12）缓慢微调
-- 自动注入 `on_llm_request` 上下文，让主模型感知当前人格倾向
+**浜烘牸鍚戦噺绯荤粺**
+- 5 缁村疄鏃跺悜閲忥細琛ㄨ揪娆?/ 鏁忔劅搴?/ 杈圭晫閫氶€?/ 绉╁簭鎰?/ 鍏崇郴寮曞姏
+- 瀛樺偍浜?`anima_state.json` 鐨?`personality_vector` 瀛楁
+- 姣忔娌夋穩鎴愬姛鍚庢牴鎹嫭鐧藉唴瀹圭敤 EMA锛埼?0.12锛夌紦鎱㈠井璋?
+- 鑷姩娉ㄥ叆 `on_llm_request` 涓婁笅鏂囷紝璁╀富妯″瀷鎰熺煡褰撳墠浜烘牸鍊惧悜
 
-**记忆情绪染色**
-- RAG 检索后对返回的记忆进行 valence 估算（温暖关键词 vs 冲突关键词）
-- 当前情绪 >0.55 时优先返回温暖记忆；低情绪时优先返回冲突记忆
-- 让角色在不同情绪状态下「想起」不同性质的过去
+**璁板繂鎯呯华鏌撹壊**
+- RAG 妫€绱㈠悗瀵硅繑鍥炵殑璁板繂杩涜 valence 浼扮畻锛堟俯鏆栧叧閿瘝 vs 鍐茬獊鍏抽敭璇嶏級
+- 褰撳墠鎯呯华 >0.55 鏃朵紭鍏堣繑鍥炴俯鏆栬蹇嗭紱浣庢儏缁椂浼樺厛杩斿洖鍐茬獊璁板繂
+- 璁╄鑹插湪涓嶅悓鎯呯华鐘舵€佷笅銆屾兂璧枫€嶄笉鍚屾€ц川鐨勮繃鍘?
 
-**跨关系传播**
-- 维护 per-user 低情绪连续计数（<0.35 连续 ≥3 次触发）
-- 读取 worldview.social_graph，找到与低情绪用户关系描述相似的其他用户
-- 对相似用户的伤痕敏感度进行 +0.04 微调（rejection / abandonment / trust_breach 等）
-- 传播历史记录在 state 的 `cross_propagations`
+**璺ㄥ叧绯讳紶鎾?*
+- 缁存姢 per-user 浣庢儏缁繛缁鏁帮紙<0.35 杩炵画 鈮? 娆¤Е鍙戯級
+- 璇诲彇 worldview.social_graph锛屾壘鍒颁笌浣庢儏缁敤鎴峰叧绯绘弿杩扮浉浼肩殑鍏朵粬鐢ㄦ埛
+- 瀵圭浉浼肩敤鎴风殑浼ょ棔鏁忔劅搴﹁繘琛?+0.04 寰皟锛坮ejection / abandonment / trust_breach 绛夛級
+- 浼犳挱鍘嗗彶璁板綍鍦?state 鐨?`cross_propagations`
 
-### 新增机制（Phase 5）
+### 鏂板鏈哄埗锛圥hase 5锛?
 
-**danger_core_mutation 突变池**
-- 5 种突变类型池：信念突变 / 关系重定义 / 新禁忌 / 新执念 / 人格跃迁
-- 每次触发前让 LLM 根据当前人格向量 + 最近独白选择最「自然」的类型
-- 针对不同类型生成不同侧重点的 persona_core 修改
-- 突变后额外副作用：
-  - 人格跃迁：对应维度做 ±0.22~0.32 的跃迁
-  - 新执念：自动转化为高强度欲望（若欲望系统开启）
+**danger_core_mutation 绐佸彉姹?*
+- 5 绉嶇獊鍙樼被鍨嬫睜锛氫俊蹇电獊鍙?/ 鍏崇郴閲嶅畾涔?/ 鏂扮蹇?/ 鏂版墽蹇?/ 浜烘牸璺冭縼
+- 姣忔瑙﹀彂鍓嶈 LLM 鏍规嵁褰撳墠浜烘牸鍚戦噺 + 鏈€杩戠嫭鐧介€夋嫨鏈€銆岃嚜鐒躲€嶇殑绫诲瀷
+- 閽堝涓嶅悓绫诲瀷鐢熸垚涓嶅悓渚ч噸鐐圭殑 persona_core 淇敼
+- 绐佸彉鍚庨澶栧壇浣滅敤锛?
+  - 浜烘牸璺冭縼锛氬搴旂淮搴﹀仛 卤0.22~0.32 鐨勮穬杩?
+  - 鏂版墽蹇碉細鑷姩杞寲涓洪珮寮哄害娆叉湜锛堣嫢娆叉湜绯荤粺寮€鍚級
 
-**连锁反应**
-- 突变成功后立即 `force=True` 触发世界观更新（关系可能被重定义）
-- 若反刍开启，异步触发一次 `_rumination_task` 让角色消化突变
-- 所有突变永久记录在 `anima_state.json` 的 `mutation_history`（最多 100 条）
-- 48h 内的最近突变会自动注入对话上下文
+**杩為攣鍙嶅簲**
+- 绐佸彉鎴愬姛鍚庣珛鍗?`force=True` 瑙﹀彂涓栫晫瑙傛洿鏂帮紙鍏崇郴鍙兘琚噸瀹氫箟锛?
+- 鑻ュ弽鍒嶅紑鍚紝寮傛瑙﹀彂涓€娆?`_rumination_task` 璁╄鑹叉秷鍖栫獊鍙?
+- 鎵€鏈夌獊鍙樻案涔呰褰曞湪 `anima_state.json` 鐨?`mutation_history`锛堟渶澶?100 鏉★級
+- 48h 鍐呯殑鏈€杩戠獊鍙樹細鑷姩娉ㄥ叆瀵硅瘽涓婁笅鏂?
 
-### 其他
-- 扩展 `_save_state` / 状态加载支持新字段
-- 新增多处辅助方法：`_get_personality_vector`、`_rerank_memories_by_emotion`、`_propagate_cross_relation_scar`、`_record_mutation` 等
-- 所有新机制默认关闭或零侵入（人格向量总是运行但影响极轻）
+### 鍏朵粬
+- 鎵╁睍 `_save_state` / 鐘舵€佸姞杞芥敮鎸佹柊瀛楁
+- 鏂板澶氬杈呭姪鏂规硶锛歚_get_personality_vector`銆乣_rerank_memories_by_emotion`銆乣_propagate_cross_relation_scar`銆乣_record_mutation` 绛?
+- 鎵€鏈夋柊鏈哄埗榛樿鍏抽棴鎴栭浂渚靛叆锛堜汉鏍煎悜閲忔€绘槸杩愯浣嗗奖鍝嶆瀬杞伙級
 
-## v0.4.2 - Phase 4: 去除枷锁
+## v0.4.2 - Phase 4: 鍘婚櫎鏋烽攣
 
-### 改动
-- **persona_core.yaml 默认内容重写** — 去掉"不把用户当燃料"等外部强加规则，改为"我的行为边界由我自身的经历和演化决定"
-- **stance_propagation 门槛降低** — 从 intensity>0.8 降到 >0.5，去掉 source=="self" 限制，任何高强度欲望都能触发主动发言
-- **反刍→压抑话题转化** — 反刍独白中包含"想/没说/忍/憋/不敢"等信号时，自动转入压抑话题系统
+### 鏀瑰姩
+- **persona_core.yaml 榛樿鍐呭閲嶅啓** 鈥?鍘绘帀"涓嶆妸鐢ㄦ埛褰撶噧鏂?绛夊閮ㄥ己鍔犺鍒欙紝鏀逛负"鎴戠殑琛屼负杈圭晫鐢辨垜鑷韩鐨勭粡鍘嗗拰婕斿寲鍐冲畾"
+- **stance_propagation 闂ㄦ闄嶄綆** 鈥?浠?intensity>0.8 闄嶅埌 >0.5锛屽幓鎺?source=="self" 闄愬埗锛屼换浣曢珮寮哄害娆叉湜閮借兘瑙﹀彂涓诲姩鍙戣█
+- **鍙嶅垗鈫掑帇鎶戣瘽棰樿浆鍖?* 鈥?鍙嶅垗鐙櫧涓寘鍚?鎯?娌¤/蹇?鎲?涓嶆暍"绛変俊鍙锋椂锛岃嚜鍔ㄨ浆鍏ュ帇鎶戣瘽棰樼郴缁?
 
-### 设计原则
-- 角色的边界由自身经历决定，不由开发者硬编码
-- 每个子系统的输出都是另一个子系统的输入
+### 璁捐鍘熷垯
+- 瑙掕壊鐨勮竟鐣岀敱鑷韩缁忓巻鍐冲畾锛屼笉鐢卞紑鍙戣€呯‖缂栫爜
+- 姣忎釜瀛愮郴缁熺殑杈撳嚭閮芥槸鍙︿竴涓瓙绯荤粺鐨勮緭鍏?
 
-## v0.4.1 - Phase 2: 压抑话题 / 伤痕维度 / 反馈闭环
+## v0.4.1 - Phase 2: 鍘嬫姂璇濋 / 浼ょ棔缁村害 / 鍙嶉闂幆
 
-### 新增机制
+### 鏂板鏈哄埗
 
-**压抑话题系统**
-- 角色想说但没说的话会积累压力（每小时 +0.05）
-- 压力超过 0.8 时注入到对话上下文："你一直想说但没说出口的事"
-- 角色说出来后压力释放，话题标记为 resolved
-- 来源：被忽略的发言、未执行的欲望、反刍中的未表达想法
+**鍘嬫姂璇濋绯荤粺**
+- 瑙掕壊鎯宠浣嗘病璇寸殑璇濅細绉疮鍘嬪姏锛堟瘡灏忔椂 +0.05锛?
+- 鍘嬪姏瓒呰繃 0.8 鏃舵敞鍏ュ埌瀵硅瘽涓婁笅鏂囷細"浣犱竴鐩存兂璇翠絾娌¤鍑哄彛鐨勪簨"
+- 瑙掕壊璇村嚭鏉ュ悗鍘嬪姏閲婃斁锛岃瘽棰樻爣璁颁负 resolved
+- 鏉ユ簮锛氳蹇界暐鐨勫彂瑷€銆佹湭鎵ц鐨勬鏈涖€佸弽鍒嶄腑鐨勬湭琛ㄨ揪鎯虫硶
 
-**伤痕维度**
-- 5 个维度：abandonment / identity_denial / trust_breach / rejection / being_replaced
-- 每次受伤 sensitivity +0.2（上限 3.0）
-- 情绪评分乘以 sensitivity 系数（伤痕越深，同类事件情绪反应越强）
-- 超过 7 天未触发的伤痕缓慢愈合（sensitivity -0.1/周）
-- 极高情绪（>0.9）自动在对应维度产生新伤痕
+**浼ょ棔缁村害**
+- 5 涓淮搴︼細abandonment / identity_denial / trust_breach / rejection / being_replaced
+- 姣忔鍙椾激 sensitivity +0.2锛堜笂闄?3.0锛?
+- 鎯呯华璇勫垎涔樹互 sensitivity 绯绘暟锛堜激鐥曡秺娣憋紝鍚岀被浜嬩欢鎯呯华鍙嶅簲瓒婂己锛?
+- 瓒呰繃 7 澶╂湭瑙﹀彂鐨勪激鐥曠紦鎱㈡剤鍚堬紙sensitivity -0.1/鍛級
+- 鏋侀珮鎯呯华锛?0.9锛夎嚜鍔ㄥ湪瀵瑰簲缁村害浜х敓鏂颁激鐥?
 
-**反馈闭环**
-- 角色每次发言后启动 5 分钟观察窗口
-- 用户回应内容 → accepted（增强该话题权重）
-- 用户说不相关的话 → ignored（转入压抑话题）
-- 用户明确否定 → rejected（产生 rejection 伤痕）
+**鍙嶉闂幆**
+- 瑙掕壊姣忔鍙戣█鍚庡惎鍔?5 鍒嗛挓瑙傚療绐楀彛
+- 鐢ㄦ埛鍥炲簲鍐呭 鈫?accepted锛堝寮鸿璇濋鏉冮噸锛?
+- 鐢ㄦ埛璇翠笉鐩稿叧鐨勮瘽 鈫?ignored锛堣浆鍏ュ帇鎶戣瘽棰橈級
+- 鐢ㄦ埛鏄庣‘鍚﹀畾 鈫?rejected锛堜骇鐢?rejection 浼ょ棔锛?
 
-### 改进
-- 沉淀流程开头自动更新压抑话题压力和伤痕衰减
-- 情绪评分被伤痕维度放大后记录到日志
+### 鏀硅繘
+- 娌夋穩娴佺▼寮€澶磋嚜鍔ㄦ洿鏂板帇鎶戣瘽棰樺帇鍔涘拰浼ょ棔琛板噺
+- 鎯呯华璇勫垎琚激鐥曠淮搴︽斁澶у悗璁板綍鍒版棩蹇?
 
-## v0.4.0 - Phase 1: 基础闭环修复
+## v0.4.0 - Phase 1: 鍩虹闂幆淇
 
-- 状态全面持久化（anima_state.json）
-- 矛盾反哺行为（注入到对话上下文）
-- 情绪评分注入对话（主模型感知情绪强度）
-- 反刍产生欲望（离线反思触发新的行动意图）
-- 独白去审查（只检查空内容）
-- 欲望门槛降低（0.5 → 0.3）
+- 鐘舵€佸叏闈㈡寔涔呭寲锛坅nima_state.json锛?
+- 鐭涚浘鍙嶅摵琛屼负锛堟敞鍏ュ埌瀵硅瘽涓婁笅鏂囷級
+- 鎯呯华璇勫垎娉ㄥ叆瀵硅瘽锛堜富妯″瀷鎰熺煡鎯呯华寮哄害锛?
+- 鍙嶅垗浜х敓娆叉湜锛堢绾垮弽鎬濊Е鍙戞柊鐨勮鍔ㄦ剰鍥撅級
+- 鐙櫧鍘诲鏌ワ紙鍙鏌ョ┖鍐呭锛?
+- 娆叉湜闂ㄦ闄嶄綆锛?.5 鈫?0.3锛?
 
-## v0.3.6 - 自主网络行动重写
+## v0.3.6 - 鑷富缃戠粶琛屽姩閲嶅啓
 
-- autonomous_web 改用 aiohttp + Bing 搜索
-- 移除 MCP 工具依赖
-- 新增 _fetch_url 方法
+- autonomous_web 鏀圭敤 aiohttp + Bing 鎼滅储
+- 绉婚櫎 MCP 宸ュ叿渚濊禆
+- 鏂板 _fetch_url 鏂规硶
 
-## v0.3.5 - 高危功能安全修复
+## v0.3.5 - 楂樺嵄鍔熻兘瀹夊叏淇
 
-- stance_propagation 改用 llm_generate
-- autonomous_web 改用 fetch 白名单
-- ToolSet 空检查改用 .empty()
+- stance_propagation 鏀圭敤 llm_generate
+- autonomous_web 鏀圭敤 fetch 鐧藉悕鍗?
+- ToolSet 绌烘鏌ユ敼鐢?.empty()
 
-## v0.3.4 - 逻辑自检修复
+## v0.3.4 - 閫昏緫鑷淇
 
-- 离线反刍移除 umo 前置检查
-- 身份危机修复大小写匹配
+- 绂荤嚎鍙嶅垗绉婚櫎 umo 鍓嶇疆妫€鏌?
+- 韬唤鍗辨満淇澶у皬鍐欏尮閰?
 
-## v0.3.3 - 完善 core_mutation
+## v0.3.3 - 瀹屽杽 core_mutation
 
-- 初始化 persona_core.yaml
-- on_llm_request 注入 persona_core
-- 安全检查：用户主权不可删除
-- /anima_core 指令
+- 鍒濆鍖?persona_core.yaml
+- on_llm_request 娉ㄥ叆 persona_core
+- 瀹夊叏妫€鏌ワ細鐢ㄦ埛涓绘潈涓嶅彲鍒犻櫎
+- /anima_core 鎸囦护
 
-## v0.3.1 - 敏感内容过滤加固
+## v0.3.1 - 鏁忔劅鍐呭杩囨护鍔犲浐
 
-- 新增 _is_sensitive 方法
-- 全链路过滤（self_notes/evolution_log/向量检索/发言/搜索结果）
+- 鏂板 _is_sensitive 鏂规硶
+- 鍏ㄩ摼璺繃婊わ紙self_notes/evolution_log/鍚戦噺妫€绱?鍙戣█/鎼滅储缁撴灉锛?
 
-## v0.3.0 - 第三版功能完整
+## v0.3.0 - 绗笁鐗堝姛鑳藉畬鏁?
 
-- 矛盾检测 / 离线反刍 / 溯源查询
-- 高危功能层（8 个开关）
-- 工具自学习
-- 多模型支持（internal_provider_id / worldview_provider_id）
+- 鐭涚浘妫€娴?/ 绂荤嚎鍙嶅垗 / 婧簮鏌ヨ
+- 楂樺嵄鍔熻兘灞傦紙8 涓紑鍏筹級
+- 宸ュ叿鑷涔?
+- 澶氭ā鍨嬫敮鎸侊紙internal_provider_id / worldview_provider_id锛?
 
-## v0.2.x - 第二版
+## v0.2.x - 绗簩鐗?
 
-- 欲望系统 / 世界观系统 / 时间感 / 自然遗忘
-- WebUI 编辑器 / 拒绝语过滤 / 存储限流
-- Sylanne 状态读取
+- 娆叉湜绯荤粺 / 涓栫晫瑙傜郴缁?/ 鏃堕棿鎰?/ 鑷劧閬楀繕
+- WebUI 缂栬緫鍣?/ 鎷掔粷璇繃婊?/ 瀛樺偍闄愭祦
+- Sylanne 鐘舵€佽鍙?
 
-## v0.1.0 - 初版
+## v0.1.0 - 鍒濈増
 
-- 情绪触发沉淀 / self_notes 注入 / 向量记忆
-- 演化日志 / 自动压缩
+- 鎯呯华瑙﹀彂娌夋穩 / self_notes 娉ㄥ叆 / 鍚戦噺璁板繂
+- 婕斿寲鏃ュ織 / 鑷姩鍘嬬缉
+
