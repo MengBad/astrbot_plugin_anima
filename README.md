@@ -10,7 +10,7 @@
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.25-blue)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.5-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
+[![Version](https://img.shields.io/badge/version-0.8.6-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
 
 </div>
 

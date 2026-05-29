@@ -11,6 +11,7 @@ import asyncio
 import json
 import math
 import os
+import random
 import re
 import time
 from datetime import datetime, timedelta
@@ -64,6 +65,55 @@ class StorageMixin:
             self._kb_available = False
             return False
 
+    @staticmethod
+    def _is_db_locked_error(exc: Exception) -> bool:
+        """判断异常是否为 SQLite 'database is locked' 瞬时锁。
+
+        v0.8.6：kb.db 被 AstrBot LTM / Sylanne / Anima 多方并发读写，
+        高并发下 SQLite 单写锁会抛 OperationalError('database is locked')。
+        这是毫秒级瞬时锁，退避重试基本能过。其它异常不在此列。
+        """
+        return "database is locked" in str(exc).lower()
+
+    async def _kb_call_with_retry(self, coro_factory, op_name: str, max_retries: int = 3):
+        """对 kb 调用做 'database is locked' 退避重试的通用包装。
+
+        v0.8.6：kb.db 是多插件共享的 SQLite，高并发瞬时写锁会让单次调用失败。
+        命中锁错误时按 50ms / 150ms / 300ms（带 jitter）递增退避重试，
+        既保证 Anima 自己读写不因偶发锁失败，又错开并发写入时间点，
+        间接降低框架层 'database is locked' 被当回复发出的概率。
+
+        - coro_factory: 一个 0 参可调用对象，每次重试都重新调用它生成新的协程
+          （协程不能复用，必须每次重新构造）。
+        - op_name: 用于日志的操作名（如 "记忆存储" / "记忆检索"）。
+        - 非锁异常立即抛出，由调用方原有的 try/except 处理（保持行为不变）。
+        """
+        # 退避梯度（秒）：命中第 i 次锁后等待 backoffs[i] 再重试
+        backoffs = [0.05, 0.15, 0.3]
+        attempt = 0
+        while True:
+            try:
+                return await coro_factory()
+            except Exception as e:
+                if not self._is_db_locked_error(e):
+                    raise  # 非锁错误，交给调用方原有处理
+                if attempt >= max_retries:
+                    logger.warning(
+                        f"[Anima] {op_name}遇到 database is locked，"
+                        f"已重试 {max_retries} 次仍失败: {e}"
+                    )
+                    raise
+                base = backoffs[min(attempt, len(backoffs) - 1)]
+                # 加 jitter 错开多方并发的重试时间点，避免重试风暴再次撞锁
+                delay = base + random.uniform(0, base)
+                if self.config.get("log_level") == "debug":
+                    logger.debug(
+                        f"[Anima] {op_name}遇到 database is locked，"
+                        f"第 {attempt + 1} 次退避 {delay:.3f}s 后重试"
+                    )
+                await asyncio.sleep(delay)
+                attempt += 1
+
     async def _store_memory(self, text: str, event: Optional[AstrMessageEvent] = None, role: str = "in"):
         """将文本存入知识库。
 
@@ -109,11 +159,14 @@ class StorageMixin:
                 # 加时间戳，让 bot 知道这条记忆是什么时候的
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
                 text_with_time = f"[{timestamp}] {text}"
-                await kb.upload_document(
-                    file_name=f"memory_{int(time.time())}",
-                    file_content=None,
-                    file_type="txt",
-                    pre_chunked_text=[text_with_time],
+                await self._kb_call_with_retry(
+                    lambda: kb.upload_document(
+                        file_name=f"memory_{int(time.time())}",
+                        file_content=None,
+                        file_type="txt",
+                        pre_chunked_text=[text_with_time],
+                    ),
+                    op_name="记忆存储",
                 )
                 if self.config.get("log_level") == "debug":
                     logger.debug(f"[Anima] 存储记忆: {text_with_time[:50]}...")
@@ -132,10 +185,13 @@ class StorageMixin:
         try:
             # 多取一些再过滤（防止过滤掉太多导致返回不够）
             over_fetch = max(n_results * 3, 10)
-            result = await self.context.kb_manager.retrieve(
-                query=query,
-                kb_names=["anima_memory"],
-                top_m_final=over_fetch,
+            result = await self._kb_call_with_retry(
+                lambda: self.context.kb_manager.retrieve(
+                    query=query,
+                    kb_names=["anima_memory"],
+                    top_m_final=over_fetch,
+                ),
+                op_name="记忆检索",
             )
             if result and result.get("results"):
                 filtered = []

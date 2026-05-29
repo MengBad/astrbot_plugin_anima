@@ -1,5 +1,51 @@
 ﻿# Changelog
 
+## v0.8.6 - database is locked 退避重试
+
+基于生产日志诊断：bot 把 `(sqlite3.OperationalError) database is locked` 当成 LLM 回复发到了群里（用户贴图证实）。
+
+### 现象
+
+`02:03:51 [Core][ERRO][agent_sub_stages.internal:417]: database is locked`，且这段错误文本被 AstrBot 框架当回复发出去了。注意是 `[Core][ERRO]`（框架层）而非 `[Plug]`（插件层）——**不是 Anima 直接发的**，是框架捕获到知识库异常后把错误信息当结果发了。
+
+### 根因
+
+`kb.db` 是一个 SQLite 文件，被多方并发读写：
+
+- Anima 每轮对话做多次知识库检索（`Dense retrieval` 刷屏）+ 2 次写入（用户消息 + bot 回复）
+- AstrBot 自带的 LTM（长期记忆）
+- Sylanne 等其它插件
+
+SQLite 同一时刻只允许一个写者（单写锁）。高并发下写操作撞锁，抛 `OperationalError('database is locked')`。这是**毫秒级的瞬时锁**，等一下重试基本就能过。
+
+### Anima 侧缓解（本版本）
+
+`_store_memory` 的 `upload_document` 和 `_query_memory` 的 `retrieve` 加 `database is locked` 退避重试：
+
+- 新增 `_kb_call_with_retry` 通用包装：命中锁错误按 50ms / 150ms / 300ms（带 jitter）递增退避，最多重试 3 次
+- 非锁异常立即抛出，交给调用方原有 try/except 处理（行为不变）
+- jitter 错开多方并发的重试时间点，避免重试风暴再次撞锁
+
+效果：
+
+- Anima 自己的读写不再因偶发瞬时锁失败（记忆该存的存、该查的查）
+- 错开写入时间点，间接降低框架层 `database is locked` 被当回复发出的概率
+
+### 这是治标，治本在框架侧
+
+Anima 只是 `kb.db` 的并发压力源之一，不能根治框架级的 SQLite 并发瓶颈。彻底解决需要 AstrBot 把 `kb.db` 切到 **WAL 模式**（`PRAGMA journal_mode=WAL`），允许读写并发。那属于框架配置，不在插件可控范围。
+
+### 验证
+
+- 新增 9 个 `test_v086_db_retry` 测试（锁检测 3 + 存储重试 3 + 检索重试 3）
+- 覆盖：瞬时锁恢复、重试耗尽降级、非锁异常不重试
+- 128/128 测试全过（v0.8.5 是 119）
+
+### 部署
+
+直接覆盖重启。无需手动改配置。部署后偶发的 `database is locked` 会被 Anima 自动退避重试，记忆读写更稳。
+
+---
 ## v0.8.5 - 注入过滤 + 记忆存储修复 + 查缺补漏
 
 基于 v0.8.4 部署后用户用 `/anima_scan_rejects` 扫描知识库 + 全项目代码排查，修了 4 个问题。
