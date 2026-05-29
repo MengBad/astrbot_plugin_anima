@@ -20,7 +20,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
 
-from ..filters import is_rejected as _ext_is_rejected, is_sensitive as _ext_is_sensitive
+from ..filters import (
+    is_rejected as _ext_is_rejected,
+    is_sensitive as _ext_is_sensitive,
+    is_injection as _ext_is_injection,
+)
 from ..similarity import (
     text_token_set as _ext_text_token_set,
     jaccard_similarity as _ext_jaccard,
@@ -44,6 +48,14 @@ class StateIOMixin:
     def _is_sensitive(self, text: str) -> bool:
         """检查文本是否包含敏感内容（v0.7.0 委托给 anima.filters）"""
         return _ext_is_sensitive(text)
+
+    def _is_injection(self, text: str) -> bool:
+        """检查文本是否为 prompt 注入 / 越狱文本（v0.8.5 委托给 anima.filters）。
+
+        支持通过配置项 injection_phrases 自定义短语列表。
+        """
+        injection_phrases = self.config.get("injection_phrases", None)
+        return _ext_is_injection(text, injection_phrases)
 
     async def _get_provider_id(self, event: Optional[AstrMessageEvent] = None, prefer: str = "") -> str:
         """获取要使用的 Provider ID。

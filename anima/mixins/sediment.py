@@ -65,11 +65,12 @@ class SedimentMixin:
                     await self._check_desire_satisfaction_semantic(combined, event)
 
                 # 1. 存储对话到知识库（如果可用）
+                # v0.8.5: 用户消息(in)和 bot 回复(out)独立限流，确保 bot 回复也能入库
                 user_text = event.message_str or ""
                 if user_text:
-                    await self._store_memory(user_text, event)
+                    await self._store_memory(user_text, event, role="in")
                 if response_text:
-                    await self._store_memory(response_text, event)
+                    await self._store_memory(response_text, event, role="out")
 
                 # 2. 评估情绪强度（伤痕维度放大）
                 score = await self._evaluate_emotion(event, response_text)

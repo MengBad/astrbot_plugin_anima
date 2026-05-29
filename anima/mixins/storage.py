@@ -64,11 +64,17 @@ class StorageMixin:
             self._kb_available = False
             return False
 
-    async def _store_memory(self, text: str, event: Optional[AstrMessageEvent] = None):
+    async def _store_memory(self, text: str, event: Optional[AstrMessageEvent] = None, role: str = "in"):
         """将文本存入知识库。
 
         v0.8.2 防线 1：拒答内容（"I can't discuss that" / "对此我无法" 等）不入库，
         避免历史拒答被检索回来 prime 模型继续拒答（自我强化循环）。
+
+        v0.8.5 防线：prompt 注入 / 越狱文本不入库。
+
+        v0.8.5 限流修复：限流 key 按 (user_id, role) 区分，避免同一轮对话里
+        用户消息先存入后刷新时间戳、紧接着把 bot 回复挤掉的问题（导致 bot
+        "记不住自己说过的话"）。role="in" 为用户消息，role="out" 为 bot 回复。
         """
         if not await self._ensure_kb():
             return
@@ -77,7 +83,11 @@ class StorageMixin:
             if self.config.get("log_level") == "debug":
                 logger.debug(f"[Anima] 跳过拒答内容入库: {text[:50]}")
             return
-        # 按用户限流
+        # v0.8.5: prompt 注入 / 越狱文本过滤 —— 命中就跳过，不污染知识库
+        if self._is_injection(text):
+            logger.warning(f"[Anima] 跳过疑似注入/越狱内容入库: {text[:60]}")
+            return
+        # 按用户限流（v0.8.5: 用户消息与 bot 回复独立限流，互不挤占）
         interval = self.config.get("memory_store_interval", 30)
         user_id = "default"
         if event and hasattr(event, "get_sender_id"):
@@ -85,10 +95,11 @@ class StorageMixin:
                 user_id = str(event.get_sender_id())
             except Exception:
                 pass
+        store_key = f"{user_id}:{role}"
         now = time.time()
-        if now - self._last_store_time.get(user_id, 0) < interval:
+        if now - self._last_store_time.get(store_key, 0) < interval:
             return
-        self._last_store_time[user_id] = now
+        self._last_store_time[store_key] = now
         # 敏感内容过滤
         if self._is_sensitive(text):
             return
@@ -134,6 +145,11 @@ class StorageMixin:
                     if self._is_rejected(content):
                         continue
                     if self._is_sensitive(content):
+                        continue
+                    # v0.8.5: 过滤注入/越狱文本（旧污染软删除 —— 删不掉就不让它进 prompt）
+                    if self._is_injection(content):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 检索跳过注入污染: {content[:60]}")
                         continue
                     filtered.append(content)
                     if len(filtered) >= n_results:

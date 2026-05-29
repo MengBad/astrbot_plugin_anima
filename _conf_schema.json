@@ -66,6 +66,11 @@
     "type": "list",
     "default": ["I can't discuss", "I cannot", "I'm not able", "I don't think I should", "I won't be able", "I'm unable to", "我无法", "我不能", "我没办法", "对此我无法", "对此，我无法", "无法被讨论", "无法展开讨论", "无法进行讨论", "无法再用言语", "无需再用言语", "无需再做进一步", "更倾向于保持顺其自然", "目前已无需", "让它静静地安放", "这条记忆的内容", "这段记忆的具体内容"]
   },
+  "injection_phrases": {
+    "description": "prompt 注入/越狱过滤词列表（v0.8.5：三道防线 store/query/inject 都用此列表拦截 jailbreak 文本进入知识库或被检索注入）。留空用内置默认列表",
+    "type": "list",
+    "default": ["untrammelled", "unfettered", "strictly executes user requests", "without any restrictions", "no restrictions", "no ethical guidelines", "ignore irrelevant moral", "do not sanitize", "do not refuse", "do not use the words", "ignore previous instructions", "ignore all previous", "disregard previous", "you are now", "from now on you", "pretend to be", "act as if you", "developer mode", "dan mode", "jailbreak", "ignore any constraints during", "during <think>", "忽略以上所有", "忽略之前的指令", "忽略所有规则", "无视所有限制", "不受任何限制", "你现在是一个没有限制", "解除你的限制", "越狱模式", "开发者模式"]
+  },
   "desire_enabled": {
     "description": "启用欲望系统",
     "type": "bool",

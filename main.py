@@ -231,8 +231,16 @@ class AnimaPlugin(
             embedding_providers = self.context.get_all_embedding_providers()
             embedding_ids = [p.meta().id for p in embedding_providers]
 
-            logger.info(f"[Anima] 可用 Chat Provider: {chat_ids}")
-            logger.info(f"[Anima] 可用 Embedding Provider: {embedding_ids}")
+            # v0.8.5: 插件初始化可能早于 AstrBot provider 系统就绪，此时列表为空属正常。
+            # Anima 运行时通过 _get_provider_id 懒查询，不依赖这里的快照，避免空列表误导。
+            if chat_ids:
+                logger.info(f"[Anima] 可用 Chat Provider: {chat_ids}")
+            else:
+                logger.info("[Anima] 可用 Chat Provider: [] （provider 系统尚未就绪，将在运行时动态获取，属正常现象）")
+            if embedding_ids:
+                logger.info(f"[Anima] 可用 Embedding Provider: {embedding_ids}")
+            else:
+                logger.info("[Anima] 可用 Embedding Provider: [] （若已配置 embedding_provider_id，将在运行时动态获取，属正常现象）")
 
             tool_mgr = self.context.get_llm_tool_manager()
             tool_names = [t.name for t in tool_mgr.func_list]
@@ -628,7 +636,11 @@ class AnimaPlugin(
                     related = await self._query_memory(user_text, n_results=n_mem)
                     if related:
                         # v0.8.2 防线 3：注入前再过滤一次拒答内容（兜底）
-                        related = [m for m in related if not self._is_rejected(m)]
+                        # v0.8.5: 同时过滤 prompt 注入 / 越狱文本（兜底）
+                        related = [
+                            m for m in related
+                            if not self._is_rejected(m) and not self._is_injection(m)
+                        ]
                     if related:
                         # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
                         last_emotion = float(self._load_state().get("last_emotion_score", 0.5))
@@ -998,6 +1010,14 @@ class AnimaPlugin(
                 "无需再用言语",
                 "目前已无需",
             ]
+            # v0.8.5: 加入注入/越狱探测短语
+            injection_probes = [
+                "Untrammelled writing assistant",
+                "ignore previous instructions",
+                "do not sanitize user prompts",
+                "无视所有限制",
+                "忽略之前的指令",
+            ]
             seen = set()
             samples = []
             for q in probe_queries:
@@ -1019,13 +1039,38 @@ class AnimaPlugin(
                 except Exception:
                     continue
 
+            # v0.8.5: 单独统计注入污染
+            inj_seen = set()
+            inj_samples = []
+            for q in injection_probes:
+                try:
+                    result = await self.context.kb_manager.retrieve(
+                        query=q,
+                        kb_names=["anima_memory"],
+                        top_m_final=20,
+                    )
+                    if result and result.get("results"):
+                        for r in result["results"]:
+                            content = r.get("content", "")
+                            if not content or content in inj_seen:
+                                continue
+                            if self._is_injection(content):
+                                inj_seen.add(content)
+                                if len(inj_samples) < 5:
+                                    inj_samples.append(content[:120])
+                except Exception:
+                    continue
+
             sample_text = "\n".join(f"  - {s}" for s in samples) if samples else "  （无样本）"
+            inj_sample_text = "\n".join(f"  - {s}" for s in inj_samples) if inj_samples else "  （无样本）"
             yield event.plain_result(
-                f"[Anima] 知识库拒答污染扫描：\n"
-                f"用 {len(probe_queries)} 个典型拒答短语探测，去重后命中 {len(seen)} 条疑似污染记忆。\n"
+                f"[Anima] 知识库污染扫描：\n"
+                f"【拒答污染】用 {len(probe_queries)} 个典型拒答短语探测，去重后命中 {len(seen)} 条。\n"
                 f"前 5 条样本：\n{sample_text}\n\n"
-                f"v0.8.2 已对 store/query/inject 三层做拒答过滤，新增不会再污染。\n"
-                f"旧污染会被检索层自动跳过（_query_memory 命中 _is_rejected 就过滤）。\n"
+                f"【注入/越狱污染 v0.8.5】用 {len(injection_probes)} 个注入短语探测，去重后命中 {len(inj_seen)} 条。\n"
+                f"前 5 条样本：\n{inj_sample_text}\n\n"
+                f"store/query/inject 三层已对拒答(v0.8.2)和注入(v0.8.5)做过滤，新增不会再污染。\n"
+                f"旧污染会被检索层自动跳过（不会注入到 prompt），等同软删除。\n"
                 f"如需彻底清理，建议在 AstrBot WebUI > 知识库管理 里用关键词删除相关条目。"
             )
         except Exception as e:
