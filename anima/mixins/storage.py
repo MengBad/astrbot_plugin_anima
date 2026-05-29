@@ -122,6 +122,8 @@ class StorageMixin:
 
         v0.8.5 防线：prompt 注入 / 越狱文本不入库。
 
+        v0.8.7 防线：框架/运行时错误文本不入库；存入前剥掉 Markdown 反引号。
+
         v0.8.5 限流修复：限流 key 按 (user_id, role) 区分，避免同一轮对话里
         用户消息先存入后刷新时间戳、紧接着把 bot 回复挤掉的问题（导致 bot
         "记不住自己说过的话"）。role="in" 为用户消息，role="out" 为 bot 回复。
@@ -136,6 +138,13 @@ class StorageMixin:
         # v0.8.5: prompt 注入 / 越狱文本过滤 —— 命中就跳过，不污染知识库
         if self._is_injection(text):
             logger.warning(f"[Anima] 跳过疑似注入/越狱内容入库: {text[:60]}")
+            return
+        # v0.8.7: 框架/运行时错误文本过滤 —— 命中就跳过
+        # （框架会把 "Error occurred during AI execution..." / traceback /
+        #  "database is locked" 当成 bot 回复，Anima 不能把它当记忆存进去，
+        #  否则下次检索被当成"我说过的话"注入 prompt 污染上下文）
+        if self._is_error_artifact(text):
+            logger.warning(f"[Anima] 跳过框架错误文本入库: {text[:60]}")
             return
         # 按用户限流（v0.8.5: 用户消息与 bot 回复独立限流，互不挤占）
         interval = self.config.get("memory_store_interval", 30)
@@ -157,8 +166,10 @@ class StorageMixin:
             kb = await self.context.kb_manager.get_kb_by_name("anima_memory")
             if kb:
                 # 加时间戳，让 bot 知道这条记忆是什么时候的
+                # v0.8.7: 剥掉反引号/代码块，避免格式污染 + 自我强化模仿
+                clean_text = self._strip_markdown(text)
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                text_with_time = f"[{timestamp}] {text}"
+                text_with_time = f"[{timestamp}] {clean_text}"
                 await self._kb_call_with_retry(
                     lambda: kb.upload_document(
                         file_name=f"memory_{int(time.time())}",
@@ -207,6 +218,14 @@ class StorageMixin:
                         if self.config.get("log_level") == "debug":
                             logger.debug(f"[Anima] 检索跳过注入污染: {content[:60]}")
                         continue
+                    # v0.8.7: 过滤框架错误文本（旧污染软删除）
+                    if self._is_error_artifact(content):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 检索跳过错误文本污染: {content[:60]}")
+                        continue
+                    # v0.8.7: 剥掉反引号/代码块（清掉旧污染记忆里的 markdown 标记，
+                    #         避免带反引号的历史发言被注入后让模型继续模仿）
+                    content = self._strip_markdown(content)
                     filtered.append(content)
                     if len(filtered) >= n_results:
                         break

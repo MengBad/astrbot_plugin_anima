@@ -127,6 +127,55 @@ def is_injection(text: str, injection_phrases: Optional[Iterable[str]] = None) -
     return any(p.lower() in text_lower for p in phrases)
 
 
+def strip_markdown_artifacts(text: str) -> str:
+    """剥离会污染纯文本输出 / 记忆的 Markdown 代码标记（v0.8.7）。
+
+    主要针对模型把颜文字 / 内容用反引号或代码块包起来的情况，例如：
+        本喵又不是安兔兔 ```(¬_¬)```
+    QQ 不渲染 Markdown，反引号会原样显示出来很蠢；更糟的是这种带反引号的
+    回复被存进向量记忆后，会作为"我自己说过的话"被检索注入回 prompt，
+    让模型继续模仿，形成格式自我强化循环（和拒答循环同机理）。
+
+    策略：剥掉所有反引号（``` 和 `），保留被包裹的内容。对纯对话记忆来说
+    反引号没有保留价值，且这正是污染源。
+    """
+    if not text:
+        return text
+    return text.replace("`", "")
+
+
+# v0.8.7: 框架 / 运行时错误文本特征短语。
+# AstrBot 在工具调用崩溃、SQLite 锁等场景下，会把错误信息当成 LLM 回复
+# 记录进 LTM，Anima 也会跟着把它存进向量记忆，下次检索就被当成"我说过的话"
+# 注入 prompt，污染上下文（和拒答 / 注入循环同机理）。这类文本不该入库。
+DEFAULT_ERROR_ARTIFACT_PHRASES = [
+    "error occurred during ai execution",
+    "error type:",
+    "error message:",
+    "traceback (most recent call last)",
+    "database is locked",
+    "list index out of range",
+    "sequence item",
+    "expecting value: line 1 column 1",
+    "saving chunk state error",
+    "解析参数失败",
+]
+
+
+def is_error_artifact(text: str, error_phrases: Optional[Iterable[str]] = None) -> bool:
+    """检查文本是否为框架 / 运行时错误文本（v0.8.7）。
+
+    用于拦截 "Error occurred during AI execution..." / Python traceback /
+    "database is locked" 等被框架当成 bot 回复记录下来的错误文本进入记忆。
+    英文不区分大小写子串匹配；中文子串匹配。
+    """
+    if not text:
+        return False
+    phrases = list(error_phrases) if error_phrases else DEFAULT_ERROR_ARTIFACT_PHRASES
+    text_lower = text.lower()
+    return any(p.lower() in text_lower for p in phrases)
+
+
 # 中文敏感关键词（子串匹配）
 _CN_SENSITIVE = ('密钥', '秘钥', '口令', '凭证')
 

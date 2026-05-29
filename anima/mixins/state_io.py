@@ -24,6 +24,8 @@ from ..filters import (
     is_rejected as _ext_is_rejected,
     is_sensitive as _ext_is_sensitive,
     is_injection as _ext_is_injection,
+    is_error_artifact as _ext_is_error_artifact,
+    strip_markdown_artifacts as _ext_strip_markdown,
 )
 from ..similarity import (
     text_token_set as _ext_text_token_set,
@@ -56,6 +58,25 @@ class StateIOMixin:
         """
         injection_phrases = self.config.get("injection_phrases", None)
         return _ext_is_injection(text, injection_phrases)
+
+    def _is_error_artifact(self, text: str) -> bool:
+        """检查文本是否为框架 / 运行时错误文本（v0.8.7 委托给 anima.filters）。
+
+        拦截 "Error occurred during AI execution..." / traceback /
+        "database is locked" 等被框架当成 bot 回复记录下来的错误文本，
+        避免它们进入向量记忆并被检索注入污染上下文。
+        支持通过配置项 error_artifact_phrases 自定义短语列表。
+        """
+        error_phrases = self.config.get("error_artifact_phrases", None)
+        return _ext_is_error_artifact(text, error_phrases)
+
+    def _strip_markdown(self, text: str) -> str:
+        """剥离 Markdown 代码标记（反引号 / 代码块），用于纯文本记忆（v0.8.7）。
+
+        防止模型用反引号包颜文字（QQ 不渲染会原样显示），且阻断带反引号的
+        回复被存入记忆后检索注入、让模型继续模仿的格式自我强化循环。
+        """
+        return _ext_strip_markdown(text)
 
     async def _get_provider_id(self, event: Optional[AstrMessageEvent] = None, prefer: str = "") -> str:
         """获取要使用的 Provider ID。

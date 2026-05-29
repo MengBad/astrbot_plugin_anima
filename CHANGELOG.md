@@ -1,5 +1,51 @@
 ﻿# Changelog
 
+## v0.8.7 - Markdown 反引号剥离 + 框架错误文本过滤
+
+基于生产实测两个问题，跟之前的拒答循环 / 注入污染同一类机理（被存进记忆 → 检索注入 → 模型模仿 → 加剧），一起处理。
+
+### 1. 颜文字被反引号包裹，QQ 原样显示
+
+bot 回复 `跑分？本喵又不是安兔兔 ` + 三反引号 + `(¬_¬)` + 三反引号。模型把颜文字当代码块包了起来，但 QQ 不渲染 Markdown，反引号原样吐到群里很蠢。
+
+更糟的是：这种带反引号的回复被存进向量记忆后，会作为"我自己说过的话"被检索注入回 prompt，让模型继续模仿，形成**格式自我强化循环**。Sylanne 的聊天记录注入里也能看到 `[You/...]: ... ```(￣へ￣)``` `，是模型模仿的主源。
+
+修复（`strip_markdown_artifacts`）：
+
+- **store**：记忆存入前剥掉所有反引号，保留被包裹的内容
+- **query**：检索旧记忆时也剥反引号（清掉历史污染里的 Markdown 标记，避免被注入后继续模仿）
+
+注：persona 提示词里也应同步明确"禁止用反引号/代码块包内容"，那是服务器上的角色配置，不在本仓库。
+
+### 2. 框架错误文本被当 bot 回复存进记忆
+
+一次工具调用崩溃链：模型吐了畸形 tool call（函数名 None），框架 `", ".join(tool_names)` 抛 `TypeError: sequence item 1: expected str instance, NoneType found`，然后把 `Error occurred during AI execution. Error Type: TypeError...` 当成 bot 回复记录进 LTM，**Anima 跟着把这段错误文本存进了向量记忆**。下次检索就被当成"我说过的话"注入 prompt 污染上下文。
+
+崩溃本身是框架 + 模型的 tool loop bug（不归 Anima），但 Anima 不该把错误文本当记忆存。新增 `is_error_artifact()` 检测 + 三层防线（store/query/inject），跟 v0.8.2/v0.8.5 同一套机制：
+
+- **store**：错误文本不入库
+- **query**：检索时跳过已存在的错误文本（旧污染软删除）
+- **inject**：注入前兜底过滤
+
+检测覆盖：`Error occurred during AI execution` / `Error Type:` / `Error Message:` / `Traceback (most recent call last)` / `database is locked` / `list index out of range` / `sequence item` / `Expecting value: line 1 column 1` / `Saving chunk state error` / 中文`解析参数失败`。
+
+### 新配置项
+
+- `error_artifact_phrases`（list）：框架错误文本过滤词，留空用内置默认列表
+
+### 验证
+
+- 新增 15 个 `test_v087_markdown_error` 测试（反引号剥离 4 + 错误文本检测 7 + 存储/检索接入 4）
+- 143/143 测试全过（v0.8.6 是 128）
+
+### 部署
+
+直接覆盖重启。无需手动改配置。部署后：
+
+- 反引号不再出现在回复和记忆里，旧污染记忆检索时也会被清掉
+- 框架错误文本不再被存成记忆，旧的错误污染检索时自动跳过
+
+---
 ## v0.8.6 - database is locked 退避重试
 
 基于生产日志诊断：bot 把 `(sqlite3.OperationalError) database is locked` 当成 LLM 回复发到了群里（用户贴图证实）。

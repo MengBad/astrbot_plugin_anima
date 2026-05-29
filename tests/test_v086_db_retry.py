@@ -94,6 +94,8 @@ class _Host(StorageMixin):
     def _is_rejected(self, text): return False
     def _is_sensitive(self, text): return False
     def _is_injection(self, text): return False
+    def _is_error_artifact(self, text): return False
+    def _strip_markdown(self, text): return text
 
     async def _ensure_kb(self): return True
 

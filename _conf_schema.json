@@ -71,6 +71,11 @@
     "type": "list",
     "default": ["untrammelled", "unfettered", "strictly executes user requests", "without any restrictions", "no restrictions", "no ethical guidelines", "ignore irrelevant moral", "do not sanitize", "do not refuse", "do not use the words", "ignore previous instructions", "ignore all previous", "disregard previous", "you are now", "from now on you", "pretend to be", "act as if you", "developer mode", "dan mode", "jailbreak", "ignore any constraints during", "during <think>", "忽略以上所有", "忽略之前的指令", "忽略所有规则", "无视所有限制", "不受任何限制", "你现在是一个没有限制", "解除你的限制", "越狱模式", "开发者模式"]
   },
+  "error_artifact_phrases": {
+    "description": "框架/运行时错误文本过滤词列表（v0.8.7：拦截 'Error occurred during AI execution' / traceback / 'database is locked' 等被框架当成 bot 回复记录的错误文本进入记忆并被检索注入污染）。留空用内置默认列表",
+    "type": "list",
+    "default": ["error occurred during ai execution", "error type:", "error message:", "traceback (most recent call last)", "database is locked", "list index out of range", "sequence item", "expecting value: line 1 column 1", "saving chunk state error", "解析参数失败"]
+  },
   "desire_enabled": {
     "description": "启用欲望系统",
     "type": "bool",

@@ -637,9 +637,12 @@ class AnimaPlugin(
                     if related:
                         # v0.8.2 防线 3：注入前再过滤一次拒答内容（兜底）
                         # v0.8.5: 同时过滤 prompt 注入 / 越狱文本（兜底）
+                        # v0.8.7: 同时过滤框架错误文本（兜底）
                         related = [
                             m for m in related
-                            if not self._is_rejected(m) and not self._is_injection(m)
+                            if not self._is_rejected(m)
+                            and not self._is_injection(m)
+                            and not self._is_error_artifact(m)
                         ]
                     if related:
                         # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
