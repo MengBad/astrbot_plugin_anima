@@ -74,6 +74,7 @@ class SedimentMixin:
 
                 # 2. 评估情绪强度（伤痕维度放大）
                 score = await self._evaluate_emotion(event, response_text)
+                self._stat_bump("llm.emotion")
                 scar_mult = self._get_scar_multiplier(user_text + " " + response_text)
                 if scar_mult > 1.0:
                     score = min(1.0, score * scar_mult)
@@ -111,7 +112,10 @@ class SedimentMixin:
                     )
 
                 if score < threshold:
+                    self._stat_bump("sediment.skip_low")
                     return
+
+                self._stat_bump("sediment.run")
 
                 # 3. 检索相关记忆（如果知识库可用）
                 query = f"{user_text} {response_text[:100]}"
@@ -134,7 +138,13 @@ class SedimentMixin:
                 self._adjust_personality_from_monologue(monologue)
 
                 # Phase 6+: 人格向量有明显变化时，触发内部能力反思/研究（更激进主动性）
-                if abs(sum(self._get_personality_vector().values()) - 2.5) > 0.8:  # 简化漂移检测
+                # v0.9.0: 修复漂移检测。旧逻辑 abs(sum(values)-2.5)>0.8 用"各维度之和
+                #         偏离基线 2.5"判断，多个维度反向变化会相互抵消（一个 +0.4 一个
+                #         -0.4，sum 仍 2.5，判定无漂移），形同失效。改为各维度相对基线
+                #         0.5 的绝对偏移之和，任意方向的变化都能累计。
+                pv = self._get_personality_vector()
+                drift = sum(abs(v - 0.5) for v in pv.values())
+                if drift > 0.8:
                     asyncio.create_task(self._initiate_self_directed_research(
                         "人格倾向明显变化", "我的性格在改变，我需要新的方法来应对世界", force=False
                     ))

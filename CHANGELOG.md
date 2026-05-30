@@ -1,5 +1,57 @@
 ﻿# Changelog
 
+## v0.9.0 - 欲望双类型隔离 + 运行统计仪表盘 + 技术债治理
+
+演化路线 B 的第一站（方向三"内部调用合并"留待 v0.9.1 独立验证）。这版做三件事：从数据模型根治主动发言泄漏、让运行状态可观测、修两个遗留技术债。
+
+### 1. 欲望双类型隔离（方向一，根治顽疾）
+
+主动发言泄漏内心独白这个问题，v0.8.1/0.8.3/0.8.4/0.8.9 一直在"出口"打补丁（引号剥离、叙事腔检测、话题相关性），但根因是**独白（对内）和发言（对外）共用一条 desire 链路**：沉淀生成深情独白 → 提取成 desire → stance_propagation 润色成对外发言。只要独白是深情的，链路末端就会漏深情发言。
+
+v0.9.0 从数据模型上隔离 —— 每条 desire 加 `kind` 字段：
+
+- **inward**（`self` 独白提取 / `mutation` 突变执念 / `capability_gap_rumination` 想学的东西）：只注入 prompt 上下文供模型感知，**永远不会进入 `_danger_stance_propagation`**，从源头杜绝泄漏。
+- **outward**（`info_collection` 针对当前对话的提问 / `relationship` 想问/想对某人说 / `memory_infection` 想让对方记住）：才允许触发主动发言。
+
+`_danger_stance_propagation` 现在只取 outward 欲望。旧数据无 `kind` 字段时按 `source` 推断（`_desire_is_outward`），完全向后兼容；未知 source 保守归 inward（不外发）。
+
+这是结构性根治：不再靠"检测词库追着泄漏句补"，inward 欲望在数据层就进不了发言出口。
+
+### 2. 运行统计仪表盘（方向二，可观测性）
+
+新增 `StatsMixin` + `/anima_stats` 命令。不用再导出几千行 debug 日志判断各子系统在干什么、token 烧在哪。按天滚动的内存计数器（懒持久化到 anima_state.json，重载不丢、跨天归零、自身零 token），埋点覆盖：
+
+- 内部 LLM 调用次数（按用途：emotion / monologue / relation / worldview / stance / info_collection）
+- 沉淀触发次数 / 情绪未达阈值跳过次数
+- 新增 inward / outward 欲望数
+- 主动发言实际发出数 / 被各防线拦截数（monologue / irrelevant）
+- 记忆存储 in / out 次数
+
+`/anima_stats` 一次性打印，直接服务于 token 成本判断和防线触发观察。
+
+### 3. 技术债治理（方向四）
+
+- **人格漂移检测修复**：旧逻辑 `abs(sum(values)-2.5)>0.8` 用"各维度之和偏离基线"判断漂移，多个维度反向变化会相互抵消（一个 +0.4 一个 -0.4，sum 仍 2.5，判定无漂移），形同失效。改为各维度相对基线 0.5 的**绝对偏移之和**，任意方向变化都能累计。
+
+### 验证
+
+- 新增 16 个测试（desire 双类型分类/隔离 12 + 统计仪表盘 ...）
+- 169/169 测试全过（v0.8.9 是 153）
+- stub 合成 AnimaPlugin 类成功（154 方法），`_stat_bump` / `_render_stats` / `_desire_is_outward` / `cmd_anima_stats` 全部就位
+
+### 部署
+
+直接覆盖重启。无需手动改配置。部署后：
+
+- 内心独白类欲望（inward）从数据层就不会变成主动发言
+- `/anima_stats` 可看今日各子系统运行统计与 token 消耗分布
+- 旧 desires.json 无 kind 字段的条目自动按 source 推断，平滑过渡
+
+### 下一步（v0.9.1）
+
+方向三：把情绪评分 + 关系推断 + 欲望提取三次独立 LLM 调用合并成一次结构化输出，token 砍约 2/3。单独发版以便用 `/anima_stats` 数据量化合并前后的 token 变化。
+
+---
 ## v0.8.9 - 内心独白泄漏成主动发言（三层加固）
 
 基于 2026-05-30 11:25 生产日志诊断：群里在聊"自动交易/风控"技术话题，Anima 却主动发出一句深情独白：
