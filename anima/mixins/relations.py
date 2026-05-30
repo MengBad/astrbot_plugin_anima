@@ -47,7 +47,7 @@ class RelationsMixin:
             logger.debug(f"[Anima] 获取 sender uid 失败: {e}")
         return ""
 
-    def _update_user_low_emotion_streak(self, uid: str, score: float):
+    def _update_user_low_emotion_streak(self, uid: str, score: float, umo: str = ""):
         """更新用户低情绪连续计数（< 阈值记为低）。原子读-改-写。
         v0.9.6：阈值与触发门槛改为可配，修复"日常闲聊每轮触发跨关系传播"的性能黑洞。
         此前硬编码 score<0.35（闲聊本就 0.0-0.25 全中）+ 连续 3 次，过于频繁。"""
@@ -78,7 +78,7 @@ class RelationsMixin:
         if triggered_propagate["v"]:
             # 触发跨关系传播（不阻塞当前沉淀）
             try:
-                asyncio.create_task(self._propagate_cross_relation_scar(uid))
+                asyncio.create_task(self._propagate_cross_relation_scar(uid, umo))
             except Exception as e:
                 logger.debug(f"[Anima] 触发跨关系传播失败: {e}")
 
@@ -99,10 +99,11 @@ class RelationsMixin:
         w2 = set(re.findall(r'[\u4e00-\u9fff]{2,}', desc2))
         return len(w1 & w2) >= 2
 
-    async def _propagate_cross_relation_scar(self, low_uid: str):
-        """跨关系传播：低情绪连续 → 相似关系用户的伤痕敏感度微调"""
+    async def _propagate_cross_relation_scar(self, low_uid: str, umo: str = ""):
+        """跨关系传播：低情绪连续 → 相似关系用户的伤痕敏感度微调。
+        v0.9.8：worldview 按 umo 隔离（umo 为空时回退最近活跃会话）。"""
         try:
-            wv = self._read_worldview()
+            wv = self._read_worldview(umo)
             sg = wv.get("social_graph", {})
             if not sg or len(sg) < 2:
                 return

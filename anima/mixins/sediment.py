@@ -119,7 +119,7 @@ class SedimentMixin:
 
                 # Phase 3: 记录用户情绪连续（用于跨关系传播）
                 sender_uid = self._get_sender_user_id(event)
-                self._update_user_low_emotion_streak(sender_uid, score)
+                self._update_user_low_emotion_streak(sender_uid, score, self._get_event_umo(event))
 
                 if self.config.get("log_level") == "debug":
                     logger.debug(
@@ -221,7 +221,7 @@ class SedimentMixin:
                 # v0.9.2: 合并路径下关系推断已并入单次调用，走统一下游写入；
                 #         不再发起 _danger_relationship_inference 的 LLM 调用。
                 if merge_on:
-                    self._apply_relationships_from_map(merged_relationships)
+                    self._apply_relationships_from_map(merged_relationships, self._get_event_umo(event))
                 else:
                     await self._danger_relationship_inference(event, response_text)
                 await self._danger_stance_propagation(event)

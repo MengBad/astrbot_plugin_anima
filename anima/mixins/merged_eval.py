@@ -198,9 +198,10 @@ class MergedEvalMixin:
 
     # ── 下游统一写入（新旧路径共用） ──────────────────────────────────────────
 
-    def _apply_relationships_from_map(self, relations: object) -> None:
+    def _apply_relationships_from_map(self, relations: object, umo: str = "") -> None:
         """把关系映射写入 worldview.relationships（含 _is_rejected 过滤与 cap 30）。
-        relations 非 dict 或为空时静默跳过；任何情形不抛异常。"""
+        relations 非 dict 或为空时静默跳过；任何情形不抛异常。
+        v0.9.8：worldview 按 umo 隔离，写入对应会话。"""
         try:
             if not isinstance(relations, dict) or not relations:
                 return
@@ -211,7 +212,7 @@ class MergedEvalMixin:
                 rel_text = str(relations)
             if self._is_rejected(rel_text):
                 return
-            wv = self._read_worldview()
+            wv = self._read_worldview(umo)
             if "relationships" not in wv or not isinstance(wv.get("relationships"), dict):
                 wv["relationships"] = {}
             wv["relationships"].update(relations)
@@ -219,7 +220,7 @@ class MergedEvalMixin:
                 wv["relationships"] = dict(
                     list(wv["relationships"].items())[-_MAX_RELATIONSHIPS:]
                 )
-            self._write_worldview(wv)
+            self._write_worldview(wv, umo)
             logger.debug(f"[Anima] 关系写入（合并路径）: {list(relations.keys())}")
         except Exception as e:
             logger.debug(f"[Anima] 关系写入异常: {e}")

@@ -102,11 +102,11 @@ class Host(MergedEvalMixin):
     async def _is_desire_already_expressed(self, desire_text, response_text, event=None):
         return self._already_expressed
 
-    def _read_worldview(self):
+    def _read_worldview(self, umo=""):
         import copy
         return copy.deepcopy(self._worldview)
 
-    def _write_worldview(self, data):
+    def _write_worldview(self, data, umo=""):
         self._worldview = data
 
     def _read_desires(self):

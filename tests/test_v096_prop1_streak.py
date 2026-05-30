@@ -34,7 +34,7 @@ class Host(RelationsMixin):
 
     # 覆盖为同步 no-op，避免 create_task 在无 loop 时告警；
     # 触发与否通过 state 计数 + streak_threshold 推断
-    def _propagate_cross_relation_scar(self, uid):  # type: ignore[override]
+    def _propagate_cross_relation_scar(self, uid, umo=""):  # type: ignore[override]
         self.propagated.append(uid)
 
 

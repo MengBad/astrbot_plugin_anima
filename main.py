@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.7",
+    "0.9.8",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -534,9 +534,11 @@ class AnimaPlugin(
             return
 
         # v0.9.7: 人设 prompt 注入 system prompt（最高权重，独立于下方用户消息块）
+        # v0.9.8: 注入前做轻量校验（注入文本检测 + 超长警告，一次性日志防刷屏）
         try:
             persona_prompt = (self.config.get("persona_prompt", "") or "").strip()
             if persona_prompt:
+                self._validate_persona_prompt_once(persona_prompt)
                 existing_sys = getattr(req, "system_prompt", "") or ""
                 # 幂等：已包含则不重复叠加（防框架重试/多次进 hook）
                 req.system_prompt = self._compose_system_prompt(persona_prompt, existing_sys)
@@ -857,7 +859,7 @@ class AnimaPlugin(
         if not self.config.get("worldview_enabled", False):
             yield event.plain_result("[Anima] 世界观系统未启用。")
             return
-        wv = self._read_worldview()
+        wv = self._read_worldview(self._get_event_umo(event))
         if not wv:
             yield event.plain_result("[Anima] 尚未形成世界观。")
             return

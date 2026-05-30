@@ -36,25 +36,28 @@ from ..valence import (
 class TimeSenseMixin:
     """模块三 时间感 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
-    def _read_time_sense(self) -> dict:
-        """读取时间感数据"""
-        return self._read_json(self.time_sense_path, default={
-            "last_interaction": {},
-            "interaction_frequency": {},
-            "session_start": None,
-            "total_messages_today": 0,
-        })
+    def _read_time_sense(self, umo: str = "") -> dict:
+        """读取时间感数据。v0.9.8：按 umo 会话隔离（不存在则回退全局文件）。"""
+        return self._read_session_json(
+            umo, "time_sense.json", self.time_sense_path,
+            default=lambda: {
+                "last_interaction": {},
+                "interaction_frequency": {},
+                "session_start": None,
+                "total_messages_today": 0,
+            },
+        )
 
-    def _write_time_sense(self, data: dict):
-        """写入时间感数据"""
-        self._write_json(self.time_sense_path, data)
+    def _write_time_sense(self, data: dict, umo: str = ""):
+        """写入时间感数据。v0.9.8：只写该 umo 的会话文件。"""
+        self._write_session_json(umo, "time_sense.json", data)
 
     def _update_time_sense(self, event: AstrMessageEvent):
         """每条消息进来时更新时间感"""
         if not self.config.get("time_sense_enabled", False):
             return
 
-        ts = self._read_time_sense()
+        ts = self._read_time_sense(self._get_event_umo(event))
         now = datetime.now()
         now_str = now.isoformat()
 
@@ -100,7 +103,7 @@ class TimeSenseMixin:
 
         ts["total_messages_today"] = ts.get("total_messages_today", 0) + 1
 
-        self._write_time_sense(ts)
+        self._write_time_sense(ts, self._get_event_umo(event))
 
     def _get_time_sense_text(self, event: AstrMessageEvent) -> str:
         """获取时间感注入文本。
@@ -115,7 +118,7 @@ class TimeSenseMixin:
         if not self.config.get("time_sense_enabled", False):
             return ""
 
-        ts = self._read_time_sense()
+        ts = self._read_time_sense(self._get_event_umo(event))
         now = datetime.now()
         parts = []
 

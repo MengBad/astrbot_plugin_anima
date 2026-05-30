@@ -215,7 +215,7 @@ class DangerMixin:
                         # v0.9.2: 下游写入走统一函数 _apply_relationships_from_map
                         #         （含 _is_rejected 过滤 + update 合并 + cap 30），
                         #         与合并路径共用同一份下游逻辑，避免两条路径行为漂移
-                        self._apply_relationships_from_map(relations)
+                        self._apply_relationships_from_map(relations, self._get_event_umo(event))
                 except json.JSONDecodeError:
                     pass
         except Exception as e:
@@ -1125,7 +1125,8 @@ class DangerMixin:
 
             # 仍然保留旧的世界观知识记录
             if self.config.get("worldview_enabled", False):
-                wv = self._read_worldview()
+                _wv_umo = self._get_event_umo(event)
+                wv = self._read_worldview(_wv_umo)
                 wv.setdefault("external_knowledge", []).append({
                     "query": desire_content,
                     "url": search_url,
@@ -1135,7 +1136,7 @@ class DangerMixin:
                 })
                 if len(wv["external_knowledge"]) > 15:
                     wv["external_knowledge"] = wv["external_knowledge"][-15:]
-                self._write_worldview(wv)
+                self._write_worldview(wv, _wv_umo)
 
             await self._record_tool_usage(event, "autonomous_research", desire_content, result_text[:400], True)
             # v0.8.0: 用 desire id 在全部欲望里精准 mark satisfied

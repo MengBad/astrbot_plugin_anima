@@ -10,7 +10,7 @@
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.25-blue)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.7-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
+[![Version](https://img.shields.io/badge/version-0.9.8-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
 
 </div>
 
@@ -369,8 +369,14 @@ data/plugin_data/astrbot_plugin_anima/
 ├── suppressed_topics.json 压抑话题列表（v0.4.1+）
 ├── scar_dimensions.json   伤痕维度数据（v0.4.1+）
 ├── anima_state.json       持久化状态（沉淀计数/情绪/稳定度）
-└── persona_core.yaml      核心规则（可被 danger_core_mutation 修改）
+├── persona_core.yaml      核心规则（可被 danger_core_mutation 修改）
+└── sessions/              会话级隔离目录（v0.9.8）
+    └── <安全化umo>/        每个群/私聊独立的会话上下文
+        ├── worldview.json  该会话的世界观（环境/关系图谱）
+        └── time_sense.json 该会话的时间感（互动频率）
 ```
+
+> **v0.9.8 会话隔离（方案 1）**：角色本体人格（self_notes / persona_core / personality_vector / scar / capabilities）**跨群共享**，是同一个"人"；而 worldview / time_sense 按 umo（每个群/私聊）隔离到 `sessions/` 子目录，避免 A 群的群友关系混进 B 群。升级后历史的全局 `worldview.json` / `time_sense.json` 作为回退源保留，老数据不丢。
 
 ---
 

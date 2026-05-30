@@ -1,5 +1,42 @@
 ﻿# Changelog
 
+## v0.9.8 - 会话级状态隔离（方案 1：人格全局共享，会话上下文按群隔离）+ 人设校验
+
+按"方案 1"实现状态隔离：**角色本体人格跨群共享（同一个"人"），会话上下文按 umo（每个群/私聊）隔离**，解决"A 群的群友关系图谱/互动记录混进 B 群"的跨群污染。
+
+### 隔离边界
+
+- **角色本体人格（全局共享，不隔离）**：self_notes / persona_core / personality_vector / scar_dimensions / personal_capabilities / identity_stability。跨群是同一个人格，不会被撕裂成多重人格。
+- **会话上下文（按 umo 隔离）**：`worldview.json`（群环境认知/关系图谱）、`time_sense.json`（互动频率）。每个群独立。
+- **已隔离不动**：desires（字段级 target_umo）、_outgoing_by_umo（内存 per-umo）。
+
+### 实现：per-umo 子目录 + 全局回退
+
+- 新增 `_safe_umo` / `_session_dir` / `_session_path` / `_read_session_json` / `_write_session_json`（state_io.py）。
+- 会话状态存到 `data/plugin_data/astrbot_plugin_anima/sessions/<安全化umo>/`。
+- `_safe_umo`：非法路径字符替换 + md5 哈希后缀消歧，天然防路径穿越、不同 umo 不碰撞。
+- **全局回退**：某 umo 首次读且无会话文件时，回退读旧的全局 `worldview.json`/`time_sense.json`（向后兼容，老数据不丢、平滑过渡）；旧全局文件保留不删。
+- `_read_worldview`/`_write_worldview`/`_read_time_sense`/`_write_time_sense` 加可选 umo 参数；各调用点传 `_get_event_umo(event)`。
+- **无 event 后台路径**（跨关系传播 `_propagate_cross_relation_scar` 经 create_task）：umo 层层透传，拿不到时回退 `_last_active_umo` → `_default_`。
+
+### 顺带：人设 prompt 校验（v0.9.7 的补充）
+
+`persona_prompt` 注入 system prompt 前做轻量校验（一次性日志、按内容去重防刷屏）：注入/越狱特征词检测告警 + 超长警告（`persona_prompt_warn_chars`，默认 2000）。不阻断注入，只提示。
+
+### 新配置项
+
+- `persona_prompt_warn_chars`（int，默认 2000）：人设超长告警阈值
+
+### 验证
+
+- 新增 17 个测试（v0.9.8 隔离 11 含 2 条 Hypothesis 属性：umo 安全化 / 会话写入隔离+全局回退；人设校验 6）
+- **298/298 测试全过**（v0.9.7 是 287）；单群场景行为等价（回归基线）
+
+### 部署
+
+覆盖重启。**升级后历史世界观/时间感数据通过全局回退自动读到，不丢失**。多群场景下各群的世界观/时间感开始独立演化；角色人格仍跨群统一。单群用户无感知。
+
+---
 ## v0.9.7 - 角色人设传入（system prompt 注入 + 人设锁定）
 
 补齐当前最弱的维度——角色人设传入。此前 Anima 唯一的人设入口 `persona_core.yaml` 注入到**用户消息**而非 system prompt，且会被核心突变自动改写、无法锁定。

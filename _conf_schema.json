@@ -65,6 +65,12 @@
     "default": false,
     "hint": "⚪ Token 无。v0.9.7：开启后 danger_core_mutation 不再改写 persona_core.yaml，你写死的核心人设不会被角色自我演化覆盖。情绪/欲望/世界观等其它演化不受影响"
   },
+  "persona_prompt_warn_chars": {
+    "description": "人设 prompt 超长警告阈值（字符）",
+    "type": "int",
+    "default": 2000,
+    "hint": "⚪ Token 无（仅日志告警）。v0.9.8：persona_prompt 超过此字符数时在日志告警，提示会显著增加每轮输入 token。同时注入前会检测注入/越狱特征词并告警"
+  },
   "sylanne_integration": {
     "description": "尝试读取 Sylanne 状态",
     "type": "bool",

@@ -36,13 +36,13 @@ from ..valence import (
 class WorldviewMixin:
     """模块二 世界观 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
-    def _read_worldview(self) -> dict:
-        """读取世界观"""
-        return self._read_json(self.worldview_path, default={})
+    def _read_worldview(self, umo: str = "") -> dict:
+        """读取世界观。v0.9.8：按 umo 会话隔离（不存在则回退全局文件）。"""
+        return self._read_session_json(umo, "worldview.json", self.worldview_path, default={})
 
-    def _write_worldview(self, data: dict):
-        """写入世界观"""
-        self._write_json(self.worldview_path, data)
+    def _write_worldview(self, data: dict, umo: str = ""):
+        """写入世界观。v0.9.8：只写该 umo 的会话文件。"""
+        self._write_session_json(umo, "worldview.json", data)
 
     async def _maybe_update_worldview(self, event: AstrMessageEvent, force: bool = False):
         """每 20 次沉淀触发一次世界观更新。
@@ -63,7 +63,7 @@ class WorldviewMixin:
             if not provider_id:
                 return
 
-            current_wv = self._read_worldview()
+            current_wv = self._read_worldview(self._get_event_umo(event))
             recent_notes = self._read_self_notes()[-1500:]
 
             # 获取当前发送者 ID
@@ -136,7 +136,7 @@ class WorldviewMixin:
                         new_wv["social_graph"] = merged
                     new_wv.pop("_social_graph_truncated", None)
                     new_wv["last_updated"] = datetime.now().isoformat()
-                    self._write_worldview(new_wv)
+                    self._write_worldview(new_wv, self._get_event_umo(event))
                     logger.info(
                         f"[Anima] 世界观已更新（social_graph: {len(new_wv.get('social_graph', {}))} 条）"
                     )
@@ -156,7 +156,7 @@ class WorldviewMixin:
         """获取世界观注入文本，包含当前对话者的画像"""
         if not self.config.get("worldview_enabled", False):
             return ""
-        wv = self._read_worldview()
+        wv = self._read_worldview(self._get_event_umo(event))
         if not wv:
             return ""
         parts = []

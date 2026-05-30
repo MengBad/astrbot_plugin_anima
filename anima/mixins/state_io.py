@@ -8,6 +8,7 @@ v0.8.0 从 main.py 抽出：# ==================== 通用工具方法 ==========
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -56,6 +57,39 @@ class StateIOMixin:
         if persona_prompt in existing_sys:
             return existing_sys
         return persona_prompt + ("\n\n" + existing_sys if existing_sys else "")
+
+    def _validate_persona_prompt_once(self, persona_prompt: str):
+        """v0.9.8: 人设 prompt 轻量校验（一次性日志，按内容去重防刷屏）。
+        - 注入/越狱文本检测：命中则告警（不阻断注入，只提示用户可能写了风险内容）
+        - 超长警告：超过 persona_prompt_warn_chars（默认 2000）提示会显著增加每轮输入 token
+        校验只产生日志，绝不抛异常、绝不阻断注入。"""
+        try:
+            # 按内容指纹去重，同一份人设只告警一次（用户改了才会再次校验）
+            fp = hash(persona_prompt)
+            if getattr(self, "_persona_prompt_validated_fp", None) == fp:
+                return
+            self._persona_prompt_validated_fp = fp
+
+            # 注入/越狱检测
+            try:
+                if self._is_injection(persona_prompt):
+                    logger.warning(
+                        "[Anima] persona_prompt 命中注入/越狱特征词，请确认这是有意的人设内容"
+                        "（仍会按配置注入，但可能影响模型行为）"
+                    )
+            except Exception:
+                pass
+
+            # 超长警告
+            warn_chars = int(self.config.get("persona_prompt_warn_chars", 2000))
+            n = len(persona_prompt)
+            if n > warn_chars:
+                logger.warning(
+                    f"[Anima] persona_prompt 较长（{n} 字符 > {warn_chars}），"
+                    f"会显著增加每轮 system prompt 的输入 token，建议精简"
+                )
+        except Exception:
+            pass
 
     def _is_rejected(self, text: str) -> bool:
         """检查文本是否包含拒绝短语（v0.7.0 委托给 anima.filters）"""
@@ -147,6 +181,65 @@ class StateIOMixin:
     def _load_state(self) -> dict:
         """加载持久化状态"""
         return self._read_json(self._state_path, default={})
+
+    # ── v0.9.8: 会话级隔离基础设施（per-umo 子目录 + 全局回退） ──────────────
+
+    def _safe_umo(self, umo: str) -> str:
+        """把 umo 转成安全目录名（v0.9.8）。
+        - 空 umo → '_default_'
+        - 非 [A-Za-z0-9_-] 字符替换为 '_'（天然防路径穿越：.. / / \\ 都被替换）
+        - 附加原始 umo 的 md5 前 8 位哈希后缀，保证不同 umo 不碰撞
+        """
+        if not umo:
+            return "_default_"
+        safe = re.sub(r'[^A-Za-z0-9_-]', '_', umo).strip('_')
+        if not safe:
+            safe = "umo"
+        h = hashlib.md5(umo.encode("utf-8")).hexdigest()[:8]
+        return f"{safe[:40]}_{h}"
+
+    def _session_dir(self, umo: str) -> str:
+        """返回某 umo 的会话目录 data_dir/sessions/<safe_umo>/，确保存在。"""
+        d = os.path.join(self.data_dir, "sessions", self._safe_umo(umo))
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"[Anima] 创建会话目录失败: {e}")
+        return d
+
+    def _session_path(self, umo: str, filename: str) -> str:
+        """返回某 umo 会话目录下指定文件的完整路径。"""
+        return os.path.join(self._session_dir(umo), filename)
+
+    def _resolve_umo(self, umo: str = "") -> str:
+        """umo 为空时回退到最近活跃 umo（用于无 event 的后台路径）。"""
+        return umo or getattr(self, "_last_active_umo", "") or ""
+
+    def _read_session_json(self, umo: str, filename: str, global_path: str, default=None):
+        """读会话文件；不存在则回退全局文件（向后兼容老数据）；都没有返回 default。
+        default 支持 callable（返回默认结构）或值。"""
+        umo = self._resolve_umo(umo)
+
+        def _mk_default():
+            if callable(default):
+                return default()
+            if default is None:
+                return {}
+            return default
+
+        sp = self._session_path(umo, filename)
+        if os.path.exists(sp):
+            return self._read_json(sp, default=_mk_default())
+        # 全局回退：升级后某 umo 首次读，读旧全局文件作为初始值
+        if global_path and os.path.exists(global_path):
+            return self._read_json(global_path, default=_mk_default())
+        return _mk_default()
+
+    def _write_session_json(self, umo: str, filename: str, data):
+        """只写某 umo 的会话文件（复用 _write_json 持锁）。不写全局文件。"""
+        umo = self._resolve_umo(umo)
+        self._write_json(self._session_path(umo, filename), data)
+
 
     def _atomic_update_state(self, updater):
         """原子地"读-改-写"持久化状态。
