@@ -170,21 +170,10 @@ class DangerMixin:
                 try:
                     relations = json.loads(text)
                     if relations and isinstance(relations, dict):
-                        wv = self._read_worldview()
-                        if "relationships" not in wv:
-                            wv["relationships"] = {}
-                        wv["relationships"].update(relations)
-                        # v0.8.8: 给 relationships 加上限裁剪（此前只 update 累加、
-                        #         无上限，长期运行会让 worldview.json 无限膨胀，
-                        #         拖慢反复全量读写。保留最近 30 条，与 external_knowledge
-                        #         的 [-15:] 截断同思路）
-                        max_rel = 30
-                        if len(wv["relationships"]) > max_rel:
-                            wv["relationships"] = dict(
-                                list(wv["relationships"].items())[-max_rel:]
-                            )
-                        self._write_worldview(wv)
-                        logger.debug(f"[DANGER][Anima] 关系推断: {list(relations.keys())}")
+                        # v0.9.2: 下游写入走统一函数 _apply_relationships_from_map
+                        #         （含 _is_rejected 过滤 + update 合并 + cap 30），
+                        #         与合并路径共用同一份下游逻辑，避免两条路径行为漂移
+                        self._apply_relationships_from_map(relations)
                 except json.JSONDecodeError:
                     pass
         except Exception as e:

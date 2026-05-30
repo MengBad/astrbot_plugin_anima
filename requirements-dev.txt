@@ -1,0 +1,4 @@
+# 开发/测试依赖（不随插件分发给最终用户，运行时依赖见 requirements.txt）
+-r requirements.txt
+pytest>=7.0
+hypothesis>=6.0

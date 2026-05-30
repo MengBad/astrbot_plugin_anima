@@ -1,5 +1,91 @@
 ﻿# Changelog
 
+## v0.9.2 - 独立端口仪表盘 + 沉淀三调用合并
+
+本版两件事：一是给运行仪表盘加一个**可选的独立 HTTP 端口**入口（满足"像别的插件那样开一个独立网址访问"的习惯）；二是把沉淀流程里**三次独立内部 LLM 调用合并为一次结构化 JSON 调用**，约省 2/3 内部 token。两者都默认关闭、可逆，不改变默认行为。
+
+## 一、沉淀三调用合并（省 token）
+
+沉淀流程（`_sediment_process`）原本串行发起三次独立内部 LLM 调用：情绪评估（`_evaluate_emotion`）、关系推断（`_danger_relationship_inference`）、欲望生成（`_maybe_generate_desire`）。本版把它们合并为**一次结构化 JSON 调用**，约省 2/3 内部调用 token。
+
+### 合并评估器
+
+新增 `anima/mixins/merged_eval.py`（`MergedEvalMixin`）：
+
+- **`_build_merged_prompt`**（纯函数）：按各子任务开关与前置条件**条件化拼装**提示词分段与"请求字段集合"。被关闭的子任务既不进提示词、也不进请求字段，真正省 token。情绪段恒在；关系段需 `danger_relationship_inference` 且 `worldview_enabled` 同时开；欲望段需 `desire_enabled` 开且 `sylanne_state` 非空。两者都关时退化为纯情绪评估，与旧 `_evaluate_emotion` 等价。
+- **`_parse_merged_response`**（纯函数）：剥 Markdown 围栏 → `json.loads` → 字段钳制；**逐级降级**保证最关键的沉淀总闸（情绪分）不被一次格式错误击穿。
+- **`_merged_evaluate`**（编排）：解析 provider（沿用 `internal_provider_id`）→ 15s 超时单次调用 → 仅在实际完成物理调用后计 `llm.sediment_merged` → 解析。任意失败路径返回安全结果（情绪分 0），**绝不抛异常、绝不回退旧三次调用**（否则反噬 token 节省）。
+
+### 降级策略（核心链路安全）
+
+- 响应含 ```` ```json ```` 围栏：先剥再解析。
+- JSON 解析失败：正则提取首个 0–1 数字作情绪分，关系/欲望跳过本轮。
+- 解析失败且无可提取数字：情绪分 0。
+- 任何降级都**不重新发起**旧路径三次调用。
+
+### 下游统一写入（新旧路径共用，杜绝行为漂移）
+
+抽出 `_apply_relationships_from_map` / `_apply_desire_from_text`，合并路径与旧路径写下游时**调用同一组函数**，从源头消除"两条路径下游行为漂移"。旧路径的 `_danger_relationship_inference` / `_maybe_generate_desire` 重构为"取得文本 → 调用统一写入"，自身 LLM 调用与埋点（`llm.relation` 等）保持不变。下游契约零改动：情绪分照样伤痕放大 + 阈值门控 + 持久化；关系照样 `update` 合并 + 30 条上限；欲望照样过 `_is_rejected` / `_is_desire_already_expressed` 去重 + 同形字典写入。
+
+### 统计口径
+
+- 合并路径计 `llm.sediment_merged`（实际物理调用一次一计），**不再** bump `llm.emotion`/`llm.relation`，避免对同一次物理调用重复计数。
+- `desire.created.outward` 两条路径一致。
+- 旧路径（开关关闭）的 `llm.emotion`/`llm.relation`/`desire.created.outward` 埋点完全不变。
+
+### 新配置项：`sediment_merge_llm_calls`（默认 false）
+
+💡 省 token 杠杆。开启后沉淀链把情绪+关系+欲望合并为单次调用。**默认关闭**（走旧分离调用路径以降低风险），可配合 `/anima_stats` 仪表盘做 A/B 对比，统计计入 `llm.sediment_merged`。
+
+## 二、独立端口仪表盘（在 WebUI 之外另开一个独立网址）
+
+v0.9.1 的仪表盘走 AstrBot 官方 Plugin Pages 机制，挂在 WebUI 左侧菜单、与主面板共用 6185 端口。
+有用户更习惯「像别的插件那样，双击打开一个独立网址」，本版在**不破坏原有 Plugin Page** 的前提下，
+额外提供一个**可选的独立 HTTP 端口**入口。
+
+### 独立端口仪表盘
+
+- 新增 `anima/standalone_server.py`，基于已有依赖 `aiohttp` 起一个独立 `AppRunner` + `TCPSite`，**零新依赖**。
+- **复用** `pages/dashboard/` 的同一套三件套，不复制仪表盘逻辑：服务端读取 `index.html` 并注入一段
+  极小的 `window.AstrBotPluginPage` shim（`ready()` / `apiGet()`），让既有 `app.js` 原样工作。
+- 数据接口 `/api/runtime_stats` 复用 `_stats_snapshot()`，与 Plugin Page 完全一致，且同样受
+  `dashboard_enabled` 总开关约束。
+- 生命周期挂在 `initialize()` 启动、`terminate()` 干净关闭；启动失败（端口占用等）只记日志、不影响主流程。
+
+### 安全设计（网络暴露服务，安全优先）
+
+- **默认关闭**：`dashboard_standalone_enabled` 默认 `false`。
+- **默认仅本机**：`dashboard_standalone_host` 默认 `127.0.0.1`，只有显式改成 `0.0.0.0` 才对外暴露，
+  且此时日志打印明确警告。
+- **强制 token 鉴权**：所有页面 / API 都要求 `?token=<token>`，不匹配返回 401。未配置 token 时启动
+  自动生成随机 token（`secrets.token_urlsafe`），且用恒定时间比较（`secrets.compare_digest`）避免时序侧信道。
+- 明确告知：这是明文 HTTP + token 鉴权，建议仅在可信内网使用。
+
+### 新配置项
+
+- `dashboard_standalone_enabled`（bool，默认 false）：总开关
+- `dashboard_standalone_host`（string，默认 `127.0.0.1`）：绑定地址
+- `dashboard_standalone_port`（int，默认 `9876`）：监听端口
+- `dashboard_standalone_token`（string，默认空＝自动生成）：访问口令
+
+### 新命令
+
+- `/anima_dashboard_url`：返回带 token 的完整访问地址、绑定信息和安全提示。未启用时给出开启指引。
+
+## 验证
+
+- 三调用合并新增 23 个测试（8 条 Correctness Property 用 Hypothesis 覆盖，每条 ≥100 次迭代：单次调用纪律 / 条件化组装 / 解析往返 / 非法 JSON 降级 / 阈值门控 / 关系上限 / 欲望过滤 / 新旧路径等价；外加配置、路由、旧路径回归示例测试）。
+- 独立端口仪表盘新增 14 个测试（token 鉴权 4 + shim 注入 3 + URL 构造 2 + 页面文件 3 + 缺 aiohttp 降级/安全关闭 2）。
+- **213/213 测试全过**（v0.9.1 是 176）。
+- `hypothesis` 仅作为开发/测试依赖加入 `requirements-dev.txt`，不污染最终用户运行时依赖。
+
+## 部署
+
+直接覆盖重启。**默认行为完全不变**（两个新特性都默认关闭）。
+- 想要独立网址：配置里开 `dashboard_standalone_enabled`、重载插件，再发 `/anima_dashboard_url` 拿地址。
+- 想省 token：配置里开 `sediment_merge_llm_calls`，用 `/anima_stats` 观察 `llm.sediment_merged` 与合并前的 token 画面做对比。
+
+---
 ## v0.9.1 - 运行仪表盘网页（WebUI Plugin Page）+ 开关
 
 把 v0.9.0 的 `/anima_stats` 文本统计搬上 WebUI 网页，图形化查看 token 消耗与各防线触发情况。

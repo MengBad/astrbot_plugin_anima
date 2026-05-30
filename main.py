@@ -23,6 +23,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from .plugin_api import PluginAPI  # 用于 Plugin Pages（WebUI 能力树面板）
+from .anima.standalone_server import StandaloneDashboardServer  # v0.9.2 独立端口仪表盘
 from .anima.filters import is_rejected as _ext_is_rejected, is_sensitive as _ext_is_sensitive
 from .anima.similarity import (
     text_token_set as _ext_text_token_set,
@@ -52,6 +53,7 @@ from .anima.mixins.feedback import FeedbackMixin
 from .anima.mixins.rumination import RuminationMixin
 from .anima.mixins.compression import CompressionMixin
 from .anima.mixins.sediment import SedimentMixin
+from .anima.mixins.merged_eval import MergedEvalMixin
 from .anima.mixins.capabilities import CapabilitiesMixin
 from .anima.mixins.danger import DangerMixin
 from .anima.mixins.stats import StatsMixin
@@ -70,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.1",
+    "0.9.2",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -88,6 +90,7 @@ class AnimaPlugin(
     RuminationMixin,
     CompressionMixin,
     SedimentMixin,
+    MergedEvalMixin,
     CapabilitiesMixin,
     DangerMixin,
     StatsMixin,
@@ -274,6 +277,9 @@ class AnimaPlugin(
         except Exception as e:
             logger.warning(f"[Anima] Plugin Pages 注册失败: {e}")
 
+        # v0.9.2: 独立端口仪表盘（默认关，在 async initialize() 中按配置启动）
+        self._standalone_server = StandaloneDashboardServer(self)
+
     async def initialize(self):
         """异步初始化钩子。AstrBot 在事件循环就绪后自动调用。
         把所有需要 running loop 的注册（如定时任务）放在这里，避免 __init__ 同步阶段崩溃。
@@ -293,6 +299,13 @@ class AnimaPlugin(
         # 这样"保存即生效"才真的接近实时，而不是等下条对话
         self._editor_poll_task = asyncio.create_task(self._editor_sync_loop())
         logger.info("[Anima] WebUI 编辑器同步轮询已启动（30s 间隔）")
+
+        # v0.9.2: 按配置启动独立端口仪表盘（默认关闭）
+        if self.config.get("dashboard_standalone_enabled", False):
+            try:
+                await self._standalone_server.start()
+            except Exception as e:
+                logger.warning(f"[Anima] 独立端口仪表盘启动失败: {e}")
 
     async def _editor_sync_loop(self):
         """后台轮询：检测 WebUI 配置中 self_notes_editor 的变化并同步到 self_notes.md。
@@ -779,6 +792,35 @@ class AnimaPlugin(
         用于判断 token 消耗与各防线触发情况，不再依赖导出 debug 日志。"""
         yield event.plain_result(self._render_stats())
 
+    @filter.command("anima_dashboard_url")
+    async def cmd_anima_dashboard_url(self, event: AstrMessageEvent):
+        """v0.9.2：获取独立端口仪表盘的访问地址（含 token）。
+        独立端口默认关闭，需在配置开启 dashboard_standalone_enabled。"""
+        if not self.config.get("dashboard_standalone_enabled", False):
+            yield event.plain_result(
+                "[Anima] 独立端口仪表盘未启用。\n"
+                "在 AstrBot 插件配置里把 dashboard_standalone_enabled 设为 true 并重载插件后，"
+                "再用本命令获取访问地址。\n"
+                "（提示：仪表盘也可直接在 AstrBot WebUI 左侧的 Anima 页面查看，无需独立端口。）"
+            )
+            return
+        server = getattr(self, "_standalone_server", None)
+        if not server or not server.running:
+            yield event.plain_result(
+                "[Anima] 独立端口仪表盘已启用但当前未在运行。\n"
+                "常见原因：端口被占用、或插件刚重载尚未启动。请检查后台日志中"
+                "「独立端口仪表盘」相关行，必要时更换 dashboard_standalone_port 后重载。"
+            )
+            return
+        yield event.plain_result(
+            "[Anima] 独立端口仪表盘访问地址（含 token，请妥善保管）：\n\n"
+            f"{server.url()}\n\n"
+            f"绑定：{server.host}:{server.port}\n"
+            "· 默认仅本机可访问（127.0.0.1）。\n"
+            "· 如需远程访问，把 dashboard_standalone_host 改为 0.0.0.0 并重载，"
+            "但请注意这是明文 HTTP + token 鉴权，仅建议在可信网络使用。"
+        )
+
     @filter.command("anima_world")
     async def cmd_anima_world(self, event: AstrMessageEvent):
         """查看当前世界观"""
@@ -1238,6 +1280,13 @@ class AnimaPlugin(
                 self._editor_poll_task.cancel()
         except Exception as e:
             logger.debug(f"[Anima] 取消编辑器轮询 task 失败: {e}")
+
+        # v0.9.2: 停止独立端口仪表盘
+        try:
+            if hasattr(self, "_standalone_server") and self._standalone_server:
+                await self._standalone_server.stop()
+        except Exception as e:
+            logger.debug(f"[Anima] 停止独立端口仪表盘失败: {e}")
 
         # 移除反刍定时任务
         if self.config.get("rumination_enabled", False):

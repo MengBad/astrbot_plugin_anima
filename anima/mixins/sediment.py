@@ -73,8 +73,23 @@ class SedimentMixin:
                     await self._store_memory(response_text, event, role="out")
 
                 # 2. 评估情绪强度（伤痕维度放大）
-                score = await self._evaluate_emotion(event, response_text)
-                self._stat_bump("llm.emotion")
+                # v0.9.2: 合并路径在此一次性取得情绪/关系/欲望三类结果（单次 LLM 调用）；
+                #         旧路径维持现状（仅情绪评估，关系/欲望在步骤 9/11 各自调用）。
+                merge_on = self.config.get("sediment_merge_llm_calls", False)
+                merged_relationships = None
+                merged_desire = None
+                merged_sylanne_state = ""
+                if merge_on:
+                    merged_sylanne_state = await self._try_read_sylanne_state(event)
+                    merged = await self._merged_evaluate(
+                        event, response_text, merged_sylanne_state
+                    )
+                    score = merged.emotion_score
+                    merged_relationships = merged.relationships
+                    merged_desire = merged.desire
+                else:
+                    score = await self._evaluate_emotion(event, response_text)
+                    self._stat_bump("llm.emotion")
                 scar_mult = self._get_scar_multiplier(user_text + " " + response_text)
                 if scar_mult > 1.0:
                     score = min(1.0, score * scar_mult)
@@ -184,8 +199,17 @@ class SedimentMixin:
                     self._maintain_capabilities_health()
 
                 # 9. 欲望生成
-                sylanne_state = await self._try_read_sylanne_state(event)
-                await self._maybe_generate_desire(event, sylanne_state, response_text)
+                # v0.9.2: 合并路径复用步骤 2 已读取的 sylanne_state 与已取得的欲望文本，
+                #         走统一下游写入；不再发起 _maybe_generate_desire 的 LLM 调用。
+                if merge_on:
+                    sylanne_state = merged_sylanne_state
+                    if self.config.get("desire_enabled", False):
+                        await self._apply_desire_from_text(
+                            merged_desire, response_text, event
+                        )
+                else:
+                    sylanne_state = await self._try_read_sylanne_state(event)
+                    await self._maybe_generate_desire(event, sylanne_state, response_text)
 
                 # 10. 矛盾检测
                 await self._maybe_detect_contradiction(event)
@@ -194,7 +218,12 @@ class SedimentMixin:
                 self._danger_identity_crisis_update(sylanne_state)
                 self._danger_identity_crisis_recover()
                 await self._danger_active_info_collection(event, response_text)
-                await self._danger_relationship_inference(event, response_text)
+                # v0.9.2: 合并路径下关系推断已并入单次调用，走统一下游写入；
+                #         不再发起 _danger_relationship_inference 的 LLM 调用。
+                if merge_on:
+                    self._apply_relationships_from_map(merged_relationships)
+                else:
+                    await self._danger_relationship_inference(event, response_text)
                 await self._danger_stance_propagation(event)
                 await self._danger_core_mutation(event)
                 await self._danger_autonomous_web(event)

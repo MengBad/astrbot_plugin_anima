@@ -238,35 +238,11 @@ class DesireMixin:
 
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
-                if self._is_rejected(result):
-                    return
-                if result and result != "无" and len(result) > 2:
-                    # v0.8.3 防线 A：跟 bot 刚刚的回复对比，太相似就丢弃
-                    # 因为这种欲望往往是"想问 X" 但 bot 在回复里已经问过 X 了
-                    if await self._is_desire_already_expressed(result, response_text, event):
-                        if self.config.get("log_level") == "debug":
-                            logger.debug(f"[Anima] 欲望已在回复中表达，跳过: {result[:40]}")
-                        return
-                    sender_id = ""
-                    if hasattr(event, "message_obj") and event.message_obj:
-                        sender_id = getattr(event.message_obj.sender, "user_id", "")
-                    new_desire = {
-                        "id": f"desire_{int(time.time())}",
-                        "content": result,
-                        "source": "relationship",
-                        "kind": "outward",  # v0.9.0: 想问/想对某人说 → 可主动发言
-                        "intensity": 0.7,
-                        "created_at": datetime.now().isoformat(),
-                        "target_user": sender_id,
-                        "target_umo": self._get_event_umo(event),  # v0.8.0: 跨群隔离
-                        "satisfied": False,
-                    }
-                    desires.append(new_desire)
-                    self._write_desires(desires)
-                    if hasattr(self, "_stat_bump"):
-                        self._stat_bump("desire.created.outward")
-                    if self.config.get("log_level") == "debug":
-                        logger.debug(f"[Anima] 新欲望: {result[:50]}")
+                # v0.9.2: 下游写入走统一函数 _apply_desire_from_text
+                #         （含退化值过滤 + _is_rejected + 队列上限 +
+                #          _is_desire_already_expressed 去重 + 同形 dict 写入 + 埋点），
+                #         与合并路径共用同一份下游逻辑，避免两条路径行为漂移
+                await self._apply_desire_from_text(result, response_text, event)
         except asyncio.TimeoutError:
             pass
         except Exception as e:

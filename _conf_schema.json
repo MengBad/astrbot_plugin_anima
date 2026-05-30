@@ -11,6 +11,36 @@
     "default": true,
     "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
   },
+  "dashboard_standalone_enabled": {
+    "description": "启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
+    "type": "bool",
+    "default": false,
+    "hint": "⚪ Token 无（纯本地）。开启后 Anima 会另起一个独立 HTTP 端口提供同一个仪表盘网页，像别的插件那样用 http://ip:端口 直接打开。受 dashboard_enabled 总开关约束。⚠️ 这是网络暴露服务：默认仅绑定本机(127.0.0.1)、强制 token 鉴权。用 /anima_dashboard_url 命令获取带 token 的访问地址。改此项后需重载插件生效"
+  },
+  "dashboard_standalone_host": {
+    "description": "独立端口仪表盘绑定地址",
+    "type": "string",
+    "default": "127.0.0.1",
+    "hint": "⚪ Token 无。默认 127.0.0.1（仅本机可访问，最安全）。⚠️ 改为 0.0.0.0 才能从其他机器访问，但那样会把仪表盘暴露到网络上，仅靠 token 保护且为明文 HTTP，请确保处于可信内网。改后需重载插件"
+  },
+  "dashboard_standalone_port": {
+    "description": "独立端口仪表盘监听端口",
+    "type": "int",
+    "default": 9876,
+    "hint": "⚪ Token 无。独立网址用的端口（如 9876 → http://127.0.0.1:9876）。需避开已被占用的端口（AstrBot 面板默认 6185）。改后需重载插件"
+  },
+  "dashboard_standalone_token": {
+    "description": "独立端口仪表盘访问 token",
+    "type": "string",
+    "default": "",
+    "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
+  },
+  "sediment_merge_llm_calls": {
+    "description": "合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
+    "type": "bool",
+    "default": false,
+    "hint": "💡 省 token 杠杆：开启后沉淀链把情绪评估+关系推断+欲望生成合并为单次调用，约省 2/3 内部 token。默认关闭（走旧的分离调用路径以降低风险），可配合 /anima_stats 仪表盘做 A/B 对比。统计计入 llm.sediment_merged"
+  },
   "emotion_threshold": {
     "description": "情绪强度阈值（0-1），超过此值触发内心独白沉淀",
     "type": "float",
