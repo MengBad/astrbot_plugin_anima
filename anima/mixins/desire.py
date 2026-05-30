@@ -53,6 +53,35 @@ class DesireMixin:
         except Exception:
             return ""
 
+    # v0.9.0: 欲望双类型隔离 —— 内省(inward) vs 对外(outward)
+    #
+    # 根治长期顽疾："内心独白经欲望提取后被润色成深情对外发言泄漏"（v0.8.1/0.8.3/
+    # 0.8.4/0.8.9 反复在出口打补丁）。根因是独白(对内)和发言(对外)共用一条 desire
+    # 链路。这里从数据模型上隔离：
+    #   - inward：自我内省/执念/想学的东西。只注入 prompt 上下文供模型感知，
+    #             永远不会被 _danger_stance_propagation 主动发到群里。
+    #   - outward：有明确对外指向（想问 X / 想对某人说 Y）。才允许主动发言。
+    # 按 source 归类（旧数据无 kind 字段时用此函数推断，向后兼容）：
+    _OUTWARD_SOURCES = frozenset({"info_collection", "relationship", "memory_infection"})
+    _INWARD_SOURCES = frozenset({"self", "mutation", "capability_gap_rumination"})
+
+    @classmethod
+    def _desire_kind(cls, source: str) -> str:
+        """按 source 推断 desire 类型。未知 source 默认 inward（保守：不主动外发）。"""
+        if source in cls._OUTWARD_SOURCES:
+            return "outward"
+        return "inward"
+
+    @classmethod
+    def _desire_is_outward(cls, desire: dict) -> bool:
+        """判断一条 desire 是否可对外主动发言。
+        优先用显式 kind 字段；缺失（旧数据）时按 source 推断。
+        """
+        kind = desire.get("kind")
+        if kind in ("inward", "outward"):
+            return kind == "outward"
+        return cls._desire_kind(desire.get("source", "")) == "outward"
+
     def _filter_desires_for_umo(self, desires: list, umo: str) -> list:
         """筛选当前 umo 可见的 desires。
         - target_umo 完全匹配：可见
@@ -225,6 +254,7 @@ class DesireMixin:
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "relationship",
+                        "kind": "outward",  # v0.9.0: 想问/想对某人说 → 可主动发言
                         "intensity": 0.7,
                         "created_at": datetime.now().isoformat(),
                         "target_user": sender_id,
@@ -233,6 +263,8 @@ class DesireMixin:
                     }
                     desires.append(new_desire)
                     self._write_desires(desires)
+                    if hasattr(self, "_stat_bump"):
+                        self._stat_bump("desire.created.outward")
                     if self.config.get("log_level") == "debug":
                         logger.debug(f"[Anima] 新欲望: {result[:50]}")
         except asyncio.TimeoutError:
@@ -400,6 +432,7 @@ class DesireMixin:
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "self",
+                        "kind": "inward",  # v0.9.0: 独白提取的自省欲望，只进上下文，永不主动外发
                         "intensity": 0.6,
                         "created_at": datetime.now().isoformat(),
                         "target_user": "",
@@ -415,6 +448,8 @@ class DesireMixin:
                             force=False
                         ))
                     self._write_desires(desires)
+                    if hasattr(self, "_stat_bump"):
+                        self._stat_bump("desire.created.inward")
                     logger.debug(f"[Anima] 反刍产生欲望: {result[:50]}")
         except Exception as e:
             logger.debug(f"[Anima] 反刍欲望提取失败: {e}")

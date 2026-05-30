@@ -118,6 +118,7 @@ class DangerMixin:
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "info_collection",
+                        "kind": "outward",  # v0.9.0: 针对当前对话的提问 → 可主动发言
                         "intensity": 0.4,  # v0.8.4: 低于 stance_propagation 的 0.5 门槛
                         # 避免同一轮沉淀里"写入即发出"的零延迟问题
                         # 下一轮对话如果用户回应了相关话题，intensity 不会衰减到 0.5 以下
@@ -157,6 +158,8 @@ class DangerMixin:
                 self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
                 timeout=15.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.relation")
 
             if llm_resp and llm_resp.completion_text:
                 text = llm_resp.completion_text.strip()
@@ -222,6 +225,11 @@ class DangerMixin:
         fresh_high = []
         for d in desires:
             if d.get("intensity", 0) <= 0.5 or d.get("satisfied", False):
+                continue
+            # v0.9.0: 只有 outward（对外指向）欲望才能触发主动发言。
+            # inward（自省/执念/想学）欲望只进 prompt 上下文，从源头杜绝
+            # "内心独白被润色成对外深情发言"的泄漏链路。
+            if not self._desire_is_outward(d):
                 continue
             created = d.get("created_at", "")
             try:
@@ -311,6 +319,8 @@ class DangerMixin:
                 ),
                 timeout=15.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.stance")
 
             if llm_resp and llm_resp.completion_text:
                 message = llm_resp.completion_text.strip()
@@ -323,6 +333,8 @@ class DangerMixin:
                     logger.warning(
                         f"[DANGER][Anima] 主动发言疑似内心独白，已丢弃: {message[:60]}"
                     )
+                    if hasattr(self, "_stat_bump"):
+                        self._stat_bump("stance.blocked.monologue")
                     return
 
                 if self._is_rejected(message) or self._is_sensitive(message):
@@ -342,6 +354,8 @@ class DangerMixin:
                             logger.warning(
                                 f"[DANGER][Anima] 主动发言（润色后）跟当前对话无关，已丢弃: {message[:60]}"
                             )
+                            if hasattr(self, "_stat_bump"):
+                                self._stat_bump("stance.blocked.irrelevant")
                             # mark satisfied 避免反复触发
                             target_id = desire.get("id")
                             all_desires = self._read_desires()
@@ -360,6 +374,8 @@ class DangerMixin:
                 chain = MessageChain()
                 chain.chain.append(Plain(message))
                 await self.context.send_message(event.unified_msg_origin, chain)
+                if hasattr(self, "_stat_bump"):
+                    self._stat_bump("stance.sent")
                 # v0.8.0: 用 desire 的 id 在全部欲望里精准 mark satisfied，
                 # 避免覆盖写丢掉其他 umo 的 desires
                 target_id = desire.get("id")
@@ -642,6 +658,7 @@ class DangerMixin:
             "content": f"[突变执念] {content}",
             "intensity": 0.92,
             "source": "mutation",
+            "kind": "inward",  # v0.9.0: 突变执念是内在驱动，只影响认知/研究，不直接外发
             "created_at": datetime.now().isoformat(),
             "target_umo": "",  # v0.8.0: 突变执念是全局通用的（跨 umo 都该影响）
             "satisfied": False,
@@ -1069,6 +1086,7 @@ class DangerMixin:
                         "id": f"desire_{int(time.time())}",
                         "content": f"想让对方记住：{result}",
                         "source": "memory_infection",
+                        "kind": "outward",  # v0.9.0: 想让对方记住某事 → 对外指向，可主动发言
                         "intensity": 0.75,
                         "created_at": datetime.now().isoformat(),
                         "target_user": "",

@@ -234,6 +234,7 @@ class RuminationMixin:
                                                 "content": f"我想学会/改进：{gap_text[:120]}",
                                                 "intensity": 0.72,
                                                 "source": "capability_gap_rumination",
+                                                "kind": "inward",  # v0.9.0: 想学/改进能力 → 驱动自主研究，不直接外发
                                                 "created_at": datetime.now().isoformat(),
                                                 "target_umo": "",  # v0.8.0: 反刍产生的能力缺口是全局通用的
                                                 "satisfied": False,
