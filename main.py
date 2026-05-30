@@ -54,6 +54,7 @@ from .anima.mixins.compression import CompressionMixin
 from .anima.mixins.sediment import SedimentMixin
 from .anima.mixins.capabilities import CapabilitiesMixin
 from .anima.mixins.danger import DangerMixin
+from .anima.mixins.stats import StatsMixin
 from astrbot.core.agent.message import TextPart
 
 # For thorough executable personal capabilities (per AstrBot AI tool guide)
@@ -69,7 +70,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.8.9",
+    "0.9.0",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -89,6 +90,7 @@ class AnimaPlugin(
     SedimentMixin,
     CapabilitiesMixin,
     DangerMixin,
+    StatsMixin,
     Star,
 ):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -770,6 +772,12 @@ class AnimaPlugin(
         yield event.plain_result(
             f"[Anima] 当前会话可见欲望队列（{len(desires)}/{total} 条；其余条目属于其他会话）：\n{result}"
         )
+
+    @filter.command("anima_stats")
+    async def cmd_anima_stats(self, event: AstrMessageEvent):
+        """v0.9.0：查看今日各子系统运行统计（LLM 调用次数 / 沉淀 / 主动发言拦截 / 存储），
+        用于判断 token 消耗与各防线触发情况，不再依赖导出 debug 日志。"""
+        yield event.plain_result(self._render_stats())
 
     @filter.command("anima_world")
     async def cmd_anima_world(self, event: AstrMessageEvent):

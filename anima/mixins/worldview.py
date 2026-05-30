@@ -115,6 +115,8 @@ class WorldviewMixin:
                 ),
                 timeout=float(self.config.get("worldview_update_timeout", 60.0)),
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.worldview")
 
             if llm_resp and llm_resp.completion_text:
                 text = llm_resp.completion_text.strip()

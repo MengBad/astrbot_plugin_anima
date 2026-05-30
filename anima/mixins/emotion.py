@@ -150,6 +150,8 @@ class EmotionMixin:
                 ),
                 timeout=30.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.monologue")
 
             if llm_resp and llm_resp.completion_text:
                 monologue = llm_resp.completion_text.strip()

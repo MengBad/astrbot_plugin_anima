@@ -179,6 +179,8 @@ class StorageMixin:
                     ),
                     op_name="记忆存储",
                 )
+                if hasattr(self, "_stat_bump"):
+                    self._stat_bump(f"store.{role}")
                 if self.config.get("log_level") == "debug":
                     logger.debug(f"[Anima] 存储记忆: {text_with_time[:50]}...")
         except Exception as e:
