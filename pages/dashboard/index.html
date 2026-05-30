@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>Anima 运行仪表盘</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-row">
+        <div>
+          <h1>Anima 运行仪表盘</h1>
+          <p class="subtitle">今日各子系统运行统计 · 一眼看清 token 烧在哪、哪条防线在触发</p>
+        </div>
+        <div class="header-actions">
+          <button id="refresh-btn" class="btn" onclick="loadDashboard()">刷新</button>
+          <button id="auto-btn" class="btn btn-ghost" onclick="toggleAuto()">自动刷新：开</button>
+        </div>
+      </div>
+      <div class="meta-bar" id="meta-bar">加载中…</div>
+    </header>
+
+    <!-- 禁用 / 错误 / 加载 占位 -->
+    <div id="notice" class="notice" style="display:none"></div>
+
+    <!-- 主体（数据正常时显示） -->
+    <div id="dashboard-body">
+      <section class="section">
+        <h2><span class="ico">🧠</span> 内部 LLM 调用</h2>
+        <p class="hint">Anima 自己发起的内部调用（非主对话）。调用越多越费 token，可在配置里按 🔴/🟡 标注关闭高耗项。</p>
+        <div id="llm-summary" class="big-number"></div>
+        <div id="llm-breakdown" class="bar-list"></div>
+      </section>
+
+      <div class="two-col">
+        <section class="section">
+          <h2><span class="ico">🪶</span> 沉淀流程</h2>
+          <div id="sediment-cards" class="stats-grid"></div>
+        </section>
+
+        <section class="section">
+          <h2><span class="ico">💭</span> 欲望产生</h2>
+          <div id="desire-cards" class="stats-grid"></div>
+          <p class="hint">inward（内省）只进上下文不外发；outward（对外）才可能触发主动发言。</p>
+        </section>
+      </div>
+
+      <section class="section">
+        <h2><span class="ico">📣</span> 主动发言</h2>
+        <div id="stance-cards" class="stats-grid"></div>
+        <div id="stance-blocked" class="bar-list"></div>
+      </section>
+
+      <section class="section">
+        <h2><span class="ico">💾</span> 记忆存储</h2>
+        <div id="store-cards" class="stats-grid"></div>
+      </section>
+    </div>
+
+    <footer>
+      <span class="hint">数据每日 0 点归零 · 仪表盘自身零 token 消耗</span>
+    </footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -5,6 +5,12 @@
     "default": true,
     "hint": "⚪ Token 无（开关本身）。关闭则整个插件停工，所有内部 LLM 调用归零（最彻底的省 token 方式）"
   },
+  "dashboard_enabled": {
+    "description": "启用运行仪表盘（WebUI 网页 + /anima_stats 统计）",
+    "type": "bool",
+    "default": true,
+    "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
+  },
   "emotion_threshold": {
     "description": "情绪强度阈值（0-1），超过此值触发内心独白沉淀",
     "type": "float",

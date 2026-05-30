@@ -53,8 +53,11 @@ class StatsMixin:
         self._stats = {"date": today, "counts": counts}
 
     def _stat_bump(self, key: str, n: int = 1):
-        """给某个计数 key 累加 n。埋点绝不抛异常影响主流程。"""
+        """给某个计数 key 累加 n。埋点绝不抛异常影响主流程。
+        v0.9.1: 受 dashboard_enabled 开关控制 —— 关闭时连内存累加都跳过。"""
         try:
+            if getattr(self, "config", None) and not self.config.get("dashboard_enabled", True):
+                return
             self._ensure_stats_loaded()
             self._stats["counts"][key] = self._stats["counts"].get(key, 0) + n
             # 懒持久化：写回 state（_atomic_update_state 持锁，安全）
@@ -76,8 +79,49 @@ class StatsMixin:
         except Exception:
             return 0
 
+    def _stats_snapshot(self) -> dict:
+        """v0.9.1: 返回结构化统计快照，供网页仪表盘（Plugin Pages）消费。
+        纯读，不调 LLM。结构稳定，前端按字段渲染。"""
+        self._ensure_stats_loaded()
+        c = dict(self._stats["counts"])
+
+        def _bucket(prefix):
+            return {
+                k[len(prefix):]: v
+                for k, v in sorted(c.items(), key=lambda kv: -kv[1])
+                if k.startswith(prefix)
+            }
+
+        llm = _bucket("llm.")
+        blocked = _bucket("stance.blocked.")
+        return {
+            "date": self._stats["date"],
+            "llm_calls": llm,
+            "llm_total": sum(llm.values()),
+            "sediment": {
+                "run": c.get("sediment.run", 0),
+                "skip_low": c.get("sediment.skip_low", 0),
+            },
+            "desire": {
+                "outward": c.get("desire.created.outward", 0),
+                "inward": c.get("desire.created.inward", 0),
+            },
+            "stance": {
+                "sent": c.get("stance.sent", 0),
+                "blocked": blocked,
+                "blocked_total": sum(blocked.values()),
+            },
+            "store": {
+                "in": c.get("store.in", 0),
+                "out": c.get("store.out", 0),
+            },
+            "raw": c,
+        }
+
     def _render_stats(self) -> str:
         """渲染 /anima_stats 文本。"""
+        if getattr(self, "config", None) and not self.config.get("dashboard_enabled", True):
+            return "[Anima] 运行仪表盘已在配置中禁用（dashboard_enabled=false）。开启后可查看今日统计。"
         self._ensure_stats_loaded()
         c = self._stats["counts"]
         if not c:

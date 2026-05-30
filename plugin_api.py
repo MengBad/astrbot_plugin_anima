@@ -23,6 +23,7 @@ class PluginAPI:
             ("/capabilities", "handle_get_capabilities", ["GET"]),
             ("/events", "handle_get_events", ["GET"]),
             ("/stats", "handle_get_stats", ["GET"]),
+            ("/runtime_stats", "handle_get_runtime_stats", ["GET"]),
             ("/export", "handle_export", ["GET"]),
             ("/config", "handle_get_autonomy_config", ["GET"]),
         ]
@@ -101,6 +102,23 @@ class PluginAPI:
                 "last_research": self._get_capabilities().get("last_research_ts")
             }
         })
+
+    async def handle_get_runtime_stats(self):
+        """v0.9.1: 返回今日运行统计快照（LLM 调用 / 沉淀 / 主动发言拦截 / 存储），
+        供运行仪表盘网页消费。
+        v0.9.1: 受 dashboard_enabled 开关控制（默认开）。"""
+        try:
+            if not self.plugin.config.get("dashboard_enabled", True):
+                return jsonify({
+                    "success": False,
+                    "disabled": True,
+                    "error": "运行仪表盘已在插件配置中禁用（dashboard_enabled=false）",
+                })
+            snap = self.plugin._stats_snapshot()
+            return jsonify({"success": True, "stats": snap})
+        except Exception as e:
+            logger.error(f"[Anima] 获取运行统计失败: {e}")
+            return jsonify({"success": False, "error": str(e)})
 
     async def handle_export(self):
         """导出完整能力树 JSON（带统计）"""

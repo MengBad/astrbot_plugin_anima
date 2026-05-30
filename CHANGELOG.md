@@ -1,5 +1,52 @@
 ﻿# Changelog
 
+## v0.9.1 - 运行仪表盘网页（WebUI Plugin Page）+ 开关
+
+把 v0.9.0 的 `/anima_stats` 文本统计搬上 WebUI 网页，图形化查看 token 消耗与各防线触发情况。
+
+### 网页仪表盘
+
+走 AstrBot 官方 Plugin Pages 机制（与 Anima 自带的能力树面板、社区插件同一套标准约定，非自创）：
+
+- `pages/dashboard/` 三件套（index.html + app.js + style.css），框架自动扫描挂载到 WebUI
+- 后端 `plugin_api.py` 新增只读接口 `/runtime_stats`，返回结构化统计快照 `_stats_snapshot()`
+- 前端用框架 `window.AstrBotPluginPage` bridge 的 `apiGet` 拉数据，纯本地渲染
+
+展示内容（与 `/anima_stats` 一致，图形化）：
+
+- 内部 LLM 调用总次数 + 按用途分桶条形图（emotion / monologue / relation / worldview / stance / info_collection）
+- 沉淀触发 / 情绪未达阈值跳过
+- 欲望产生 outward（可外发）/ inward（只内省）
+- 主动发言实际发出 / 被各防线拦截（分项）
+- 记忆存储 in / out
+
+体验：暗色主题自动适配、自动刷新可开关（默认 15s）、禁用/错误/加载态友好提示、移动端自适应。
+
+### 开关：`dashboard_enabled`（新配置项，默认 true）
+
+⚪ Token 无（仪表盘纯本地计数，不调 LLM）。关闭后：
+
+- `/runtime_stats` 接口返回禁用标志
+- 各子系统 `_stat_bump` 埋点停止累加（连内存 +1 都省）
+- `/anima_stats` 命令显示禁用提示
+- 网页打开后显示「已禁用」提示卡片并停止轮询
+
+注：页面菜单项由 AstrBot 框架自动挂载，插件配置无法移除菜单本身，仅停用其数据。
+
+### 验证
+
+- 新增 7 个测试（snapshot 结构 3 + 开关行为 4）
+- 176/176 测试全过（v0.9.0 是 169）
+
+### 部署
+
+直接覆盖重启。WebUI 左侧出现 Anima 的 dashboard 页面，可看图形化运行统计。不想要可在配置关 `dashboard_enabled`。
+
+### 下一步（v0.9.2）
+
+方向三：情绪评分 + 关系推断 + 欲望提取三次独立 LLM 调用合并成一次结构化输出，token 砍约 2/3。现在有了仪表盘，可量化合并前后的 token 变化。
+
+---
 ## v0.9.0 - 欲望双类型隔离 + 运行统计仪表盘 + 技术债治理
 
 演化路线 B 的第一站（方向三"内部调用合并"留待 v0.9.1 独立验证）。这版做三件事：从数据模型根治主动发言泄漏、让运行状态可观测、修两个遗留技术债。

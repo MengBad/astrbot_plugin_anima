@@ -107,3 +107,82 @@ class TestRenderStats:
         assert "共 7 次" in out
         # 拦截分项
         assert "irrelevant" in out
+
+
+class TestStatsSnapshot:
+    """v0.9.1: 结构化快照（网页仪表盘数据接口的核心）。"""
+
+    def test_empty_snapshot_shape(self):
+        h = _Host()
+        snap = h._stats_snapshot()
+        # 结构稳定，字段齐全
+        assert snap["llm_total"] == 0
+        assert snap["llm_calls"] == {}
+        assert snap["sediment"] == {"run": 0, "skip_low": 0}
+        assert snap["desire"] == {"outward": 0, "inward": 0}
+        assert snap["stance"]["sent"] == 0
+        assert snap["stance"]["blocked_total"] == 0
+        assert snap["store"] == {"in": 0, "out": 0}
+
+    def test_snapshot_aggregates(self):
+        h = _Host()
+        h._stat_bump("llm.emotion", 5)
+        h._stat_bump("llm.relation", 2)
+        h._stat_bump("sediment.run", 3)
+        h._stat_bump("sediment.skip_low", 7)
+        h._stat_bump("desire.created.outward", 1)
+        h._stat_bump("desire.created.inward", 4)
+        h._stat_bump("stance.sent", 1)
+        h._stat_bump("stance.blocked.irrelevant", 2)
+        h._stat_bump("stance.blocked.monologue", 1)
+        h._stat_bump("store.in", 10)
+        h._stat_bump("store.out", 9)
+        snap = h._stats_snapshot()
+        assert snap["llm_total"] == 7
+        assert snap["llm_calls"]["emotion"] == 5
+        assert snap["llm_calls"]["relation"] == 2
+        assert snap["sediment"] == {"run": 3, "skip_low": 7}
+        assert snap["desire"] == {"outward": 1, "inward": 4}
+        assert snap["stance"]["sent"] == 1
+        assert snap["stance"]["blocked_total"] == 3
+        assert snap["stance"]["blocked"]["irrelevant"] == 2
+        assert snap["store"] == {"in": 10, "out": 9}
+
+    def test_snapshot_llm_calls_sorted_desc(self):
+        """llm_calls 按次数降序，方便网页直接渲染。"""
+        h = _Host()
+        h._stat_bump("llm.emotion", 2)
+        h._stat_bump("llm.relation", 9)
+        h._stat_bump("llm.worldview", 5)
+        snap = h._stats_snapshot()
+        values = list(snap["llm_calls"].values())
+        assert values == sorted(values, reverse=True)
+
+
+class TestDashboardSwitch:
+    """v0.9.1: dashboard_enabled 开关 —— 关闭时埋点跳过、render 提示禁用。"""
+
+    def test_bump_skipped_when_disabled(self):
+        h = _Host()
+        h.config["dashboard_enabled"] = False
+        h._stat_bump("llm.emotion", 5)
+        # 关闭时不累加
+        assert h._stats_get("llm.emotion") == 0
+
+    def test_bump_works_when_enabled(self):
+        h = _Host()
+        h.config["dashboard_enabled"] = True
+        h._stat_bump("llm.emotion", 5)
+        assert h._stats_get("llm.emotion") == 5
+
+    def test_bump_default_enabled(self):
+        """未显式配置时默认开（不影响现有行为）。"""
+        h = _Host()
+        h._stat_bump("llm.emotion", 2)
+        assert h._stats_get("llm.emotion") == 2
+
+    def test_render_shows_disabled(self):
+        h = _Host()
+        h.config["dashboard_enabled"] = False
+        out = h._render_stats()
+        assert "禁用" in out
