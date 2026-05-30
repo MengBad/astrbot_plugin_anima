@@ -45,11 +45,49 @@ from astrbot.api.event import AstrMessageEvent
 class DangerMixin:
     """高危功能层 mixin。所有方法依赖宿主类（AnimaPlugin）提供 self.* 状态。"""
 
+    def _warn_desire_dep_once(self, feature: str):
+        """v0.9.5: 当某高危功能已开启但依赖的 desire_enabled 关闭导致静默失效时，
+        打一次性 debug 日志说明原因，避免每轮沉淀刷屏。"""
+        try:
+            warned = getattr(self, "_warned_desire_dep", None)
+            if warned is None:
+                warned = set()
+                self._warned_desire_dep = warned
+            if feature in warned:
+                return
+            warned.add(feature)
+            if self.config.get("log_level") == "debug":
+                logger.debug(
+                    f"[DANGER][Anima] {feature} 已开启，但 desire_enabled 关闭，"
+                    f"该功能依赖欲望系统、当前静默失效（需同时开 desire_enabled）"
+                )
+        except Exception:
+            pass
+
+    def _validate_persona_core(self, text: str) -> bool:
+        """v0.9.5: 核心人格突变写盘前的合法性校验。
+        必须：含"用户主权" + 可被 YAML 解析为 dict + 含 core_beliefs 顶层键。
+        软依赖 PyYAML：无 yaml 时退化为字符串结构检查，绝不因缺依赖中断。"""
+        if not text or "用户主权" not in text:
+            return False
+        try:
+            import yaml
+            data = yaml.safe_load(text)
+            if not isinstance(data, dict):
+                return False
+            return "core_beliefs" in data
+        except ImportError:
+            # 无 PyYAML：退化为基础结构检查
+            return "core_beliefs:" in text
+        except Exception:
+            return False
+
     async def _danger_active_info_collection(self, event: AstrMessageEvent, response_text: str):
         """[DANGER] 主动信息收集：生成自然的提问存入欲望"""
         if not self.config.get("danger_active_info_collection", False):
             return
         if not self.config.get("desire_enabled", False):
+            self._warn_desire_dep_once("danger_active_info_collection")
             return
 
         try:
@@ -79,6 +117,8 @@ class DangerMixin:
                 self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
                 timeout=10.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.info_collection")
 
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
@@ -114,15 +154,17 @@ class DangerMixin:
                 desires = self._read_desires()
                 max_queue = self.config.get("desire_max_queue", 5)
                 if len(desires) < max_queue:
+                    # v0.9.5: intensity 按开关决定能否越过 stance 0.5 发言门槛。
+                    #   can_speak=True → 0.55（可被主动问出口，功能名实相符）
+                    #   can_speak=False → 0.4（仅上下文暗示，维持 v0.8.4 保守行为）
+                    can_speak = self.config.get("active_info_collection_can_speak", False)
+                    info_intensity = 0.55 if can_speak else 0.4
                     desires.append({
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "info_collection",
                         "kind": "outward",  # v0.9.0: 针对当前对话的提问 → 可主动发言
-                        "intensity": 0.4,  # v0.8.4: 低于 stance_propagation 的 0.5 门槛
-                        # 避免同一轮沉淀里"写入即发出"的零延迟问题
-                        # 下一轮对话如果用户回应了相关话题，intensity 不会衰减到 0.5 以下
-                        # 但如果没人接话，自然衰减会让它消失
+                        "intensity": info_intensity,
                         "created_at": datetime.now().isoformat(),
                         "target_user": "",
                         "target_umo": self._get_event_umo(event),  # v0.8.0: 跨群隔离
@@ -367,11 +409,25 @@ class DangerMixin:
                     self._stat_bump("stance.sent")
                 # v0.8.0: 用 desire 的 id 在全部欲望里精准 mark satisfied，
                 # 避免覆盖写丢掉其他 umo 的 desires
+                # v0.9.5: 记忆感染（source=memory_infection）走"有限次重复"路径——
+                # 发一次只自增 repeat_count 并刷新时效窗口，达到 max_repeats 才 satisfied，
+                # 让"想让对方记住"的信息能在多轮里被重复强调（符合"感染"理念）。
+                # 其它 source 维持原行为：发一次即 satisfied。
                 target_id = desire.get("id")
                 all_desires = self._read_desires()
                 for d in all_desires:
                     if d.get("id") == target_id:
-                        d["satisfied"] = True
+                        if d.get("source") == "memory_infection":
+                            reps = d.get("repeat_count", 0) + 1
+                            max_reps = d.get("max_repeats", int(self.config.get("memory_infection_max_repeats", 2)))
+                            if reps < max_reps:
+                                d["repeat_count"] = reps
+                                d["created_at"] = datetime.now().isoformat()  # 刷新时效窗口，下轮仍可强调
+                            else:
+                                d["repeat_count"] = reps
+                                d["satisfied"] = True
+                        else:
+                            d["satisfied"] = True
                         break
                 self._write_desires(all_desires)
                 logger.info(f"[DANGER][Anima] 主动发言: {message[:50]}")
@@ -491,6 +547,8 @@ class DangerMixin:
                     self.context.llm_generate(chat_provider_id=provider_id, prompt=type_prompt),
                     timeout=12.0,
                 )
+                if hasattr(self, "_stat_bump"):
+                    self._stat_bump("llm.mutation")
                 chosen_type = (type_resp.completion_text or "").strip() if type_resp else ""
                 if chosen_type not in mutation_types:
                     import random
@@ -521,6 +579,8 @@ class DangerMixin:
                 self.context.llm_generate(chat_provider_id=provider_id, prompt=mutation_prompt),
                 timeout=35.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.mutation")
 
             if not llm_resp or not llm_resp.completion_text:
                 return
@@ -541,9 +601,12 @@ class DangerMixin:
                 # 去掉 TYPE 行，保留剩余作为 new_core
                 new_core = "\n".join([l for l in raw.splitlines() if not l.strip().startswith("TYPE:")]).strip()
 
-            # 安全检查
-            if "用户主权" not in new_core:
-                logger.warning("[DANGER][Anima][Phase5] 突变试图删除用户主权规则，已拒绝")
+            # 安全检查 + v0.9.5 YAML 合法性校验：畸形/截断输出不写盘，避免污染核心文件
+            if not self._validate_persona_core(new_core):
+                logger.warning(
+                    "[DANGER][Anima][Phase5] 突变输出未通过校验"
+                    "（缺用户主权/非法 YAML/缺 core_beliefs），已放弃写入并保留原文件"
+                )
                 return
 
             # 备份 + 写入
@@ -660,16 +723,41 @@ class DangerMixin:
         logger.info(f"[Anima][Phase5] 新执念已转化为高强度欲望: {content[:40]}")
 
     def _danger_identity_crisis_update(self, sylanne_state: str):
-        """[DANGER] 身份危机：根据 Sylanne 状态更新稳定度"""
+        """[DANGER] 身份危机：更新身份稳定度。
+        v0.9.5：除既有 Sylanne 状态驱动外，增加不依赖外部插件的内生信号，
+        使未装 Sylanne 时该功能也能真实触发（此前为死逻辑）。"""
         if not self.config.get("danger_identity_crisis", False):
             return
-        if not sylanne_state:
-            return
-        # 如果 scar 状态为 scarred 或 rawVoid 不为 none
-        state_lower = sylanne_state.lower()
-        if "scarred" in state_lower or ("rawvoid" in state_lower and "rawvoid: none" not in state_lower):
-            self._identity_stability = max(0.0, self._identity_stability - 0.1)
-            logger.debug(f"[DANGER][Anima] 身份稳定度下降: {self._identity_stability:.2f}")
+
+        # 既有路径：Sylanne 状态驱动（装了 Sylanne 时生效）
+        if sylanne_state:
+            state_lower = sylanne_state.lower()
+            if "scarred" in state_lower or ("rawvoid" in state_lower and "rawvoid: none" not in state_lower):
+                self._identity_stability = max(0.0, self._identity_stability - 0.1)
+                logger.debug(f"[DANGER][Anima] 身份稳定度下降(Sylanne): {self._identity_stability:.2f}")
+
+        # v0.9.5 内生信号（不依赖 Sylanne）
+        try:
+            state = self._load_state()
+            # 1. 高情绪 + 触及"身份否定"伤痕维度
+            last_emotion = float(state.get("last_emotion_score", 0) or 0)
+            scars = self._read_scar_dimensions()
+            if last_emotion > 0.85 and "identity_denial" in scars:
+                self._identity_stability = max(0.0, self._identity_stability - 0.08)
+                logger.debug(f"[DANGER][Anima] 身份稳定度下降(内生:高情绪+身份否定伤痕): {self._identity_stability:.2f}")
+            # 2. 近 48h 内发生过核心突变
+            mut = state.get("mutation_history", [])
+            if mut:
+                try:
+                    last_ts = mut[-1].get("timestamp", "")
+                    if last_ts and (datetime.now() - datetime.fromisoformat(last_ts)).total_seconds() < 48 * 3600:
+                        self._identity_stability = max(0.0, self._identity_stability - 0.05)
+                        logger.debug(f"[DANGER][Anima] 身份稳定度下降(内生:近期核心突变): {self._identity_stability:.2f}")
+                except Exception:
+                    pass
+        except Exception as e:
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[DANGER][Anima] 身份危机内生信号评估异常: {e}")
 
     def _danger_identity_crisis_recover(self):
         """身份稳定度自然恢复"""
@@ -686,24 +774,44 @@ class DangerMixin:
         return ""
 
     async def _fetch_url(self, url: str) -> str:
-        """用 aiohttp 抓取 URL，提取 <p> 标签文本"""
+        """用 aiohttp 抓取 URL，提取正文文本。
+        v0.9.5：从仅 <p> 扩到 {p,li,h1-h3,div}，过滤 <script>/<style> 噪音，
+        段数上限 60、字符上限可配（autonomous_web_extract_chars，默认 1500），去重碎片。"""
+        content_tags = {"p", "li", "h1", "h2", "h3", "div"}
+        skip_tags = {"script", "style", "noscript"}
+
         class _TextExtractor(HTMLParser):
             def __init__(self):
                 super().__init__()
                 self.text = []
-                self.in_p = False
+                self.capture_depth = 0
+                self.skip_depth = 0
 
             def handle_starttag(self, tag, attrs):
-                if tag == "p":
-                    self.in_p = True
+                if tag in skip_tags:
+                    self.skip_depth += 1
+                elif tag in content_tags:
+                    self.capture_depth += 1
 
             def handle_endtag(self, tag):
-                if tag == "p":
-                    self.in_p = False
+                if tag in skip_tags:
+                    self.skip_depth = max(0, self.skip_depth - 1)
+                elif tag in content_tags:
+                    self.capture_depth = max(0, self.capture_depth - 1)
 
             def handle_data(self, data):
-                if self.in_p and data.strip():
-                    self.text.append(data.strip())
+                if self.skip_depth > 0:
+                    return
+                if self.capture_depth > 0:
+                    piece = data.strip()
+                    # 过滤过短碎片，去重相邻重复段
+                    if len(piece) >= 4 and (not self.text or self.text[-1] != piece):
+                        self.text.append(piece)
+
+        try:
+            max_chars = int(self.config.get("autonomous_web_extract_chars", 1500))
+        except (TypeError, ValueError):
+            max_chars = 1500
 
         headers = {"User-Agent": "Mozilla/5.0 (compatible; AstrBot/1.0)"}
         async with aiohttp.ClientSession() as session:
@@ -713,7 +821,7 @@ class DangerMixin:
                 html = await resp.text()
                 extractor = _TextExtractor()
                 extractor.feed(html)
-                return " ".join(extractor.text[:20])[:500]
+                return " ".join(extractor.text[:60])[:max_chars]
 
     def _should_allow_autonomy_trigger(self, trigger_type: str) -> bool:
         """根据配置判断特定类型的自主研究触发是否允许。"""
@@ -883,6 +991,7 @@ class DangerMixin:
         if not self.config.get("danger_autonomous_web", False):
             return
         if not self.config.get("desire_enabled", False):
+            self._warn_desire_dep_once("danger_autonomous_web")
             return
 
         desires = self._read_desires_for_event(event)  # v0.8.0: 按 umo 过滤
@@ -946,6 +1055,8 @@ class DangerMixin:
                         self.context.llm_generate(chat_provider_id=provider_id, prompt=synthesis_prompt),
                         timeout=25.0,
                     )
+                    if hasattr(self, "_stat_bump"):
+                        self._stat_bump("llm.research_synthesis")
                     if llm_resp and llm_resp.completion_text:
                         import json as _json, re as _re
                         text = llm_resp.completion_text.strip()
@@ -1039,6 +1150,7 @@ class DangerMixin:
         if not self.config.get("danger_memory_infection_confirm", False):
             return
         if not self.config.get("desire_enabled", False):
+            self._warn_desire_dep_once("danger_memory_infection")
             return
 
         import random
@@ -1062,6 +1174,8 @@ class DangerMixin:
                 self.context.llm_generate(chat_provider_id=provider_id, prompt=prompt),
                 timeout=10.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.memory_infection")
 
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
@@ -1076,6 +1190,10 @@ class DangerMixin:
                         "source": "memory_infection",
                         "kind": "outward",  # v0.9.0: 想让对方记住某事 → 对外指向，可主动发言
                         "intensity": 0.75,
+                        # v0.9.5: 重复强调机制 —— 不在首次发言后立即满足，
+                        # 而是有限次重复（达 max_repeats 才满足；对方提及则提前满足）
+                        "repeat_count": 0,
+                        "max_repeats": int(self.config.get("memory_infection_max_repeats", 2)),
                         "created_at": datetime.now().isoformat(),
                         "target_user": "",
                         "target_umo": self._get_event_umo(event),  # v0.8.0: 跨群隔离

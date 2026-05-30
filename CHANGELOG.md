@@ -1,5 +1,39 @@
 ﻿# Changelog
 
+## v0.9.5 - 高危功能名副其实化 + 横切缺陷修复
+
+整合两份审计（高危功能保真度 + 能力闭环）结论。7 个高危功能里有的名不副实、有的几乎触发不了，本版让它们"开启时行为与配置语义一致"。所有高危功能仍默认关闭，默认行为不变。
+
+### P0 — 明确 bug / 数据安全
+
+- **主动信息收集阈值矛盾**：生成欲望 `intensity=0.4`，而主动发言门槛 `>0.5`，**永远发不出口**。新增开关 `active_info_collection_can_speak`：开启用 0.55（能真正问出），关闭维持 0.4（仅上下文暗示）。不动 stance 的 0.5 门槛（稳定值），只改上游 intensity。
+- **核心突变写盘无校验**：`danger_core_mutation` 把 LLM 输出直接当 `persona_core.yaml` 写文件，只查 `"用户主权"` 子串。新增 `_validate_persona_core`——必须含"用户主权" + 可被 YAML 解析为含 `core_beliefs` 的 dict 才写盘；畸形/截断输出放弃写入、保留原文件。软依赖 PyYAML（无则退化字符串检查）。
+
+### P1 — 理念落地 / 质量
+
+- **记忆感染一次性 → 有限次重复**："感染"理念是重复植入，此前发一次就 satisfied。新增 `repeat_count`/`max_repeats`（配置 `memory_infection_max_repeats` 默认 2）：感染欲望发言后只自增计数并刷新时效窗口，达上限才满足；对方消息提及相关信息则提前满足（视为已记住）。其它 source 维持发一次即满足。
+- **自主网络抓取质量**：`_fetch_url` 从仅 `<p>` 扩到 `{p,li,h1-h3,div}`，过滤 `<script>/<style>` 噪音，字符上限 500→可配（`autonomous_web_extract_chars` 默认 1500），去重碎片。
+
+### P2 — 解耦 / 可观测
+
+- **身份危机内生触发**：稳定度下降此前**完全依赖 Sylanne 状态**，没装 Sylanne 即死代码。新增内生信号：高情绪(>0.85)+触及 identity_denial 伤痕 → -0.08；近 48h 有核心突变 → -0.05。装了 Sylanne 两条信号叠加。
+- **内部 LLM 调用埋点补齐**：反刍/矛盾/突变/信息收集/记忆感染/autonomous_web 合成 6 处此前无埋点，仪表盘低报 token。补齐 `llm.rumination`/`llm.contradiction`/`llm.mutation`/`llm.info_collection`/`llm.memory_infection`/`llm.research_synthesis`。
+- **高危依赖透明化**：`danger_active_info_collection`/`danger_memory_infection`/`danger_autonomous_web` 的 hint 标注"需同时开 desire_enabled"；因该依赖关闭而静默失效时打一次性 debug 日志（标志位防刷屏）。
+
+### 新配置项
+
+`active_info_collection_can_speak`(false) / `memory_infection_max_repeats`(2) / `autonomous_web_extract_chars`(1500)，全部 ⚪ 零 token。
+
+### 验证
+
+- 新增 23 个测试（5 条 Correctness Property 用 Hypothesis 覆盖：信息收集 intensity 与开关一致 / YAML 校验拒绝非法 / 感染重复有界 / 抓取多标签过滤脚本 / 身份危机内生触发；外加埋点、依赖透明化）。
+- **259/259 测试全过**（v0.9.4 是 236）。特别确认 stance_propagation 对非 memory_infection source 的满足行为不变。
+
+### 部署
+
+覆盖重启。默认行为完全不变（所有高危默认关闭）。想让主动信息收集真能发问：开 `danger_active_info_collection` + `danger_stance_propagation` + `desire_enabled` + `active_info_collection_can_speak`。
+
+---
 ## v0.9.4 - 个人能力系统闭环修复（解开"只增不减"的死锁）
 
 生产仪表盘暴露：**105 个能力 / 平均置信度 93.2% / 总使用 0 次 / 总修正 0 次**。这是一条**从未闭合的自我修正闭环**——系统只生产、不验证、不修剪。

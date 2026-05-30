@@ -371,13 +371,31 @@
     "description": "⚠️ 高危：主动信息收集",
     "type": "bool",
     "default": false,
-    "hint": "🔴 Token 高。会额外调 LLM 生成'还想了解什么'并可能主动发言。【降 token 可关】"
+    "hint": "🔴 Token 高。会额外调 LLM 生成'还想了解什么'并可能主动发言。【降 token 可关】需同时开 desire_enabled 才生效。默认只作上下文暗示，开 active_info_collection_can_speak 才会主动发问"
+  },
+  "active_info_collection_can_speak": {
+    "description": "允许主动信息收集把问题真正发到群里",
+    "type": "bool",
+    "default": false,
+    "hint": "⚪ Token 无（仅控制行为）。默认主动信息收集生成的问题只作上下文暗示（intensity 低于主动发言门槛）；开启后用更高 intensity 写入，使问题能被立场传播真正问出口。需同时开 danger_active_info_collection + danger_stance_propagation + desire_enabled"
+  },
+  "memory_infection_max_repeats": {
+    "description": "记忆感染同一信息最大主动强调次数",
+    "type": "int",
+    "default": 2,
+    "hint": "⚪ Token 无。v0.9.5：同一条'想让对方记住'的信息被主动强调的最大次数，达到后标记满足；若对方消息提及相关信息则提前满足（视为已记住）"
+  },
+  "autonomous_web_extract_chars": {
+    "description": "自主网络抓取正文提取字符上限",
+    "type": "int",
+    "default": 1500,
+    "hint": "⚪ Token 无（抓取本身不调 LLM；但提取越多，后续合成能力的 prompt 越长）。v0.9.5：从 500 提升并改为多标签提取（p/li/h1-h3/div），过滤 script/style 噪音"
   },
   "danger_autonomous_web": {
     "description": "⚠️ 高危：自主网络行动（仍作为外部手动触发入口保留）",
     "type": "bool",
     "default": false,
-    "hint": "🟡 Token 中（联网抓取 + LLM 处理，按需触发）"
+    "hint": "🟡 Token 中（联网抓取 + LLM 处理，按需触发）。需同时开 desire_enabled 才生效"
   },
   "danger_relationship_inference": {
     "description": "⚠️ 高危：关系图谱推断",
@@ -401,7 +419,7 @@
     "description": "🔴 极高危：记忆感染",
     "type": "bool",
     "default": false,
-    "hint": "🟡 Token 中（触发时调 LLM）。需同时开 danger_memory_infection_confirm"
+    "hint": "🟡 Token 中（触发时调 LLM）。需同时开 danger_memory_infection_confirm + desire_enabled。v0.9.5：同一信息会被有限次重复强调（memory_infection_max_repeats），对方提及则提前满足"
   },
   "danger_memory_infection_confirm": {
     "description": "🔴 记忆感染二次确认",

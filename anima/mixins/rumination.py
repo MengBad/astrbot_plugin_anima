@@ -75,6 +75,8 @@ class RuminationMixin:
                 ),
                 timeout=20.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.contradiction")
 
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
@@ -172,6 +174,8 @@ class RuminationMixin:
                 ),
                 timeout=30.0,
             )
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump("llm.rumination")
 
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
