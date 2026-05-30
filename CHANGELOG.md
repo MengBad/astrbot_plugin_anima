@@ -1,5 +1,61 @@
 ﻿# Changelog
 
+## v0.8.8 - 全项目查缺补漏 + 配置项 token 消耗标注
+
+基于生产稳定运行后的一次全量代码审计（main.py + 16 mixin + 纯函数层 + 测试），修了几个明确 bug 和性能点，并给配置菜单加上 token 消耗提示，方便按成本调开关。
+
+### 1. 版本号显示错误（明确 bug）
+
+`main.py` 的 `@register(...)` 装饰器里硬编码的版本号停在 `0.8.3`，而 `metadata.yaml` 已是 0.8.7。AstrBot WebUI 插件列表显示的是 `@register` 这个值，导致用户一直看到 0.8.3、无法判断是否需要升级。改为与 metadata 同步（本版 0.8.8），后续发布一并维护。
+
+### 2. 工具日记注入归属错误（明确 bug）
+
+`on_llm_request` 里"注入工具日记（最近 500 字）"这段被错误地缩进在 `if danger_core_mutation:` 块内部，导致**只有开启高危的核心人格突变功能后，工具日记才会被注入对话**。工具日记属于 `tool_learning` 体系，已移出 danger 块、改挂在 `tool_learning_enabled` 下。未开核心突变的用户现在也能正常获得工具日记注入。
+
+### 3. 欲望注入缺字段防御（明确 bug）
+
+`_get_active_desires_text` 用 `d['content']` 硬下标取值，而代码库其余处都用 `d.get("content", "")`。该方法在 `on_llm_request` 注入路径上且外层无 try 兜底，一旦遇到缺 `content` 字段的 desire（旧数据 / 外部写入）会抛 `KeyError` 打断主对话注入。改为 `.get` + 过滤空内容。
+
+### 4. 欲望语义满足检索走退避重试（健壮性）
+
+`_check_desire_satisfaction_semantic` 在 `for d in all_desires` 循环里逐条裸调 `kb_manager.retrieve`，是全项目唯一没走 v0.8.6 `_kb_call_with_retry` 也没有 `wait_for` 超时的 kb 调用。kb.db 是多插件共享 SQLite，高并发锁时这里会阻塞整个沉淀。改为走 `_kb_call_with_retry` + 15s 超时，与其它 kb 调用对齐。
+
+### 5. 关系图谱无限增长裁剪（性能）
+
+`_danger_relationship_inference` 写入 `worldview.relationships` 时只 `update` 累加、无上限，长期运行会让 `worldview.json` 无限膨胀、拖慢反复全量读写。加上限裁剪（保留最近 30 条），与 `external_knowledge` 的 `[-15:]` 同思路。
+
+### 6. state 落盘节流 + 单请求读盘收敛（性能）
+
+- `on_llm_request` 此前每条消息都 `_save_state()` 全量落盘 `anima_state.json`，只为记 `last_active_umo`。改为**仅在 umo 真正变化时**落盘。
+- 同一次 `on_llm_request` 里 `_load_state()` 被独立调用 3 次（情绪分、突变记录、记忆注入染色各一次）。改为请求入口读一次 `state`、下游复用。高频群聊下单条消息从「1 写 + 3 读」降到「按需写 + 1 读」。
+
+### 7. 配置菜单加 token 消耗标注
+
+`_conf_schema.json` 每个配置项的提示加上 token 消耗等级，WebUI 里一眼可判断该不该关：
+
+- 🔴 Token 高（每轮/每次沉淀都额外调 LLM，常带长 reasoning）
+- 🟡 Token 中（周期/条件触发的额外 LLM 调用）
+- 🟢 Token 低（只走 embedding 或偶发）
+- ⚪ Token 无（纯本地计算）
+- 💡 省 token 杠杆（`internal_provider_id` / `worldview_provider_id` 指向便宜模型即可整体降本，无需关功能）
+
+并对 `danger_relationship_inference` / `desire_enabled` / `emotion_threshold`（总闸）/ `autonomy_enabled` / `worldview_enabled` 等标注了「降 token 优先级」提示。
+
+### 验证
+
+- 新增 6 个 `test_v088_audit_fixes` 测试（desire 缺字段防御 3 + relationships 裁剪 3）
+- 149/149 测试全过（v0.8.7 是 143）
+
+### 部署
+
+直接覆盖重启。无需手动改配置。部署后：
+
+- WebUI 插件列表正确显示 0.8.8
+- 配置菜单出现 token 消耗标注
+- 工具日记注入对所有用户生效（之前只对开核心突变的人生效）
+- 高频群聊下磁盘读写明显减少
+
+---
 ## v0.8.7 - Markdown 反引号剥离 + 框架错误文本过滤
 
 基于生产实测两个问题，跟之前的拒答循环 / 注入污染同一类机理（被存进记忆 → 检索注入 → 模型模仿 → 加剧），一起处理。

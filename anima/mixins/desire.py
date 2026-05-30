@@ -138,10 +138,18 @@ class DesireMixin:
                 continue
             content = d.get("content", "")
             try:
-                result = await self.context.kb_manager.retrieve(
-                    query=content,
-                    kb_names=["anima_memory"],
-                    top_m_final=3,
+                # v0.8.8: 走 _kb_call_with_retry（database is locked 退避重试）
+                #         + wait_for 超时，避免裸调在 kb.db 高并发锁时阻塞整个沉淀
+                result = await asyncio.wait_for(
+                    self._kb_call_with_retry(
+                        lambda: self.context.kb_manager.retrieve(
+                            query=content,
+                            kb_names=["anima_memory"],
+                            top_m_final=3,
+                        ),
+                        op_name="欲望满足检索",
+                    ),
+                    timeout=15.0,
                 )
                 if result and result.get("results"):
                     for r in result["results"]:
@@ -414,5 +422,11 @@ class DesireMixin:
         active = [d for d in desires if d.get("intensity", 0) > 0.3]
         if not active:
             return ""
-        lines = [f"此刻内心隐约想着：{d['content']}" for d in active[:3]]
+        # v0.8.8: 用 .get 避免历史/外部写入的 desire 缺 content 字段时 KeyError
+        # （此方法在 on_llm_request 注入路径上，外层无 try 兜底，抛错会打断主对话注入）
+        lines = [
+            f"此刻内心隐约想着：{c}"
+            for d in active[:3]
+            if (c := d.get("content", "").strip())
+        ]
         return "\n".join(lines)

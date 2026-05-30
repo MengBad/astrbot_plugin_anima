@@ -69,7 +69,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.8.3",
+    "0.8.8",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -503,8 +503,15 @@ class AnimaPlugin(
         self._update_time_sense(event)
 
         # 记录最近活跃的 umo（用于离线反刍）
-        self._last_active_umo = event.unified_msg_origin
-        self._save_state()
+        # v0.8.8: 仅在 umo 真正变化时落盘，避免每条群消息都全量读改写 anima_state.json
+        new_umo = event.unified_msg_origin
+        if new_umo != self._last_active_umo:
+            self._last_active_umo = new_umo
+            self._save_state()
+
+        # v0.8.8: 整个请求只读一次 state，下游复用（此前 last_emotion_score /
+        #         mutation_history 各独立 _load_state 一次，单请求重复读盘 3 次）
+        state = self._load_state()
 
         # WebUI 编辑器同步：只有当内容与上次插件同步的不同时，才认为是用户手动编辑
         editor_content = self.config.get("self_notes_editor", "")
@@ -577,7 +584,8 @@ class AnimaPlugin(
                     )
 
         # 情绪强度注入：让主模型感知当前情绪状态
-        last_emotion = self._load_state().get("last_emotion_score", 0)
+        # v0.8.8: 复用开头读到的 state，避免重复读盘
+        last_emotion = state.get("last_emotion_score", 0)
         if last_emotion > 0.3:
             level = "极高" if last_emotion > 0.8 else "高" if last_emotion > 0.6 else "中等"
             injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
@@ -592,7 +600,10 @@ class AnimaPlugin(
         if suppressed_text:
             injection_parts.append(suppressed_text)
 
-        # 工具学习：注入工具偏好规律
+        # 工具学习：注入工具偏好规律 + 工具日记
+        # v0.8.8: 工具日记注入此前被错误地嵌套在 danger_core_mutation 块内，
+        #         导致未开核心突变的用户永远看不到工具日记。工具日记属于
+        #         tool_learning 体系，移到这里正确归属。
         if self.config.get("tool_learning_enabled", False):
             tl = self._read_tool_learning()
             tool_rules = []
@@ -604,9 +615,15 @@ class AnimaPlugin(
             if tool_rules:
                 injection_parts.append("工具使用经验：" + "；".join(tool_rules))
 
+            # 注入工具日记（最近 500 字）
+            diary = self._read_tool_diary()
+            if diary:
+                diary_snippet = diary[-500:] if len(diary) > 500 else diary
+                injection_parts.append(f"[工具日记]\n{diary_snippet}")
+
         # Phase 5: 最近核心突变记录（如果有，提醒角色自己发生过深刻变化）
         if self.config.get("danger_core_mutation", False):
-            mut_hist = self._load_state().get("mutation_history", [])
+            mut_hist = state.get("mutation_history", [])
             if mut_hist:
                 last = mut_hist[-1]
                 recent_ts = last.get("timestamp", "")
@@ -616,12 +633,6 @@ class AnimaPlugin(
                         injection_parts.append(f"[内部状态] 最近核心突变：{last.get('type','')} - {last.get('description','')[:60]}")
                 except Exception:
                     pass
-
-            # 注入工具日记（最近 500 字）
-            diary = self._read_tool_diary()
-            if diary:
-                diary_snippet = diary[-500:] if len(diary) > 500 else diary
-                injection_parts.append(f"[工具日记]\n{diary_snippet}")
 
         # v0.7.2: 注入向量记忆（让 anima_memory 知识库里的对话历史真正在对话时可用）
         # 之前 _query_memory 只在沉淀阶段被调用，结果只用来生成内心独白写进 self_notes，
@@ -646,7 +657,8 @@ class AnimaPlugin(
                         ]
                     if related:
                         # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
-                        last_emotion = float(self._load_state().get("last_emotion_score", 0.5))
+                        # v0.8.8: 复用开头读到的 state，避免重复读盘
+                        last_emotion = float(state.get("last_emotion_score", 0.5))
                         related = self._rerank_memories_by_emotion(related, last_emotion)
                         # 每条裁到 200 字，避免上下文爆炸
                         mem_lines = "\n".join(f"- {m[:200]}" for m in related[:n_mem] if m)
