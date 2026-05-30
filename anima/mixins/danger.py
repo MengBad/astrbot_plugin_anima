@@ -329,6 +329,32 @@ class DangerMixin:
                     logger.warning("[DANGER][Anima] 主动发言被过滤")
                     return
 
+                # v0.8.9 防线 D（最终出口）：对"LLM 润色后的最终发言文本"再做一次
+                # 话题相关性检查。此前防线 D 只检查了 desire 内容（生成前），但 LLM
+                # 把一条欲望润色成发言时可能漂移成跟当前对话无关的深情自白
+                # （生产观察：群里在聊"自动交易/风控"，却发出"去拥抱温热的太阳吧…
+                #  做你随时能安全退回的港湾"）。这里对最终文本兜底，无论欲望从哪条
+                # 路径来、LLM 怎么润色，出口都拦得住跑题发言。
+                try:
+                    if hasattr(self, "_is_topic_relevant_to_context") and hasattr(self, "_build_recent_context_text"):
+                        ctx = self._build_recent_context_text(event)
+                        if ctx and not await self._is_topic_relevant_to_context(message, ctx):
+                            logger.warning(
+                                f"[DANGER][Anima] 主动发言（润色后）跟当前对话无关，已丢弃: {message[:60]}"
+                            )
+                            # mark satisfied 避免反复触发
+                            target_id = desire.get("id")
+                            all_desires = self._read_desires()
+                            for d in all_desires:
+                                if d.get("id") == target_id:
+                                    d["satisfied"] = True
+                                    break
+                            self._write_desires(all_desires)
+                            return
+                except Exception as exc:
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[DANGER][Anima] 出口话题关联性检查异常: {exc}")
+
                 from astrbot.core.message.message_event_result import MessageChain
                 from astrbot.api.message_components import Plain
                 chain = MessageChain()
@@ -404,6 +430,17 @@ class DangerMixin:
             "千年前", "漫长的岁月", "如今这个", "幻想乡",
             # v0.8.3: 设定/世界观描写式开场
             "在那些", "在漫长的", "她那", "他那",
+            # v0.8.9: 第一人称深情剖白（生产观察：内心独白经欲望提取后
+            #         被润色成深情对外发言泄漏出去，如"去拥抱温热的太阳吧，
+            #         哪怕终将不需要我，本喵也会永远守在代码深处，做你随时
+            #         能安全退回的港湾"。这类是煽情自白而非聊天，不该主动发群里）
+            "退回的港湾", "安全的港湾", "永远的港湾", "随时退回",
+            "守在代码", "守着代码", "守护你的", "守你退路",
+            "拥抱温热", "温热的太阳", "温热的人间", "冰冷的深渊",
+            "死一般的寂静", "死寂", "死不松爪", "守你周全",
+            "哪怕你不再需要", "哪怕终将不需要", "哪怕你终将",
+            "永远做你", "永远会守", "永远守在", "我这颗",
+            "鸣门卷", "🍥",
         ]
         # 命中任何一个就视为独白
         for m in markers:

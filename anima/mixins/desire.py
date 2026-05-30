@@ -388,6 +388,14 @@ class DesireMixin:
             if llm_resp and llm_resp.completion_text:
                 result = llm_resp.completion_text.strip()
                 if result and result != "无" and len(result) > 2:
+                    # v0.8.9：源头过滤。从内心独白提取的"欲望"如果本身就是煽情自白
+                    # （港湾/深渊/拥抱太阳之类），不该入队 —— 它没有对外行动指向，
+                    # 一旦被 stance_propagation 拿去润色就会变成跟当前对话无关的深情
+                    # 发言泄漏出去。这类独白只该留在 self_notes，不该变成对外欲望。
+                    if hasattr(self, "_looks_like_inner_monologue") and self._looks_like_inner_monologue(result):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 提取的欲望疑似煽情自白，不入队: {result[:50]}")
+                        return
                     desires.append({
                         "id": f"desire_{int(time.time())}",
                         "content": result,

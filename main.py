@@ -69,7 +69,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.8.8",
+    "0.8.9",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
