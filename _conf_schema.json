@@ -392,6 +392,37 @@
     "default": 0.6,
     "hint": "⚪ Token 无。v0.9.4：能力名+描述的字符 2-gram Jaccard 相似度 ≥ 此值视为同概念合并（覆盖无核心语义槽位的中文长名）。调高=更不易合并"
   },
+  "capability_promote_enabled": {
+    "description": "启用能力晋升（按价值分把 Top-K 能力注册为命名独立工具）",
+    "type": "bool",
+    "default": false,
+    "hint": "🔴 Token 高（晋升出的命名工具会让主请求的工具列表变长，输入 token 增加）。v0.9.10：放弃 confidence>=0.65 注册门槛，改按价值分取 Top-K 晋升，让新能力（哪怕 0.3 基线）也能被发现、被调用，赚到唯一能提升置信度的真实使用——闭合能力使用闭环。【强烈推荐开启】关闭时行为与 v0.9.4 完全一致（零回归）"
+  },
+  "capability_promote_top_k": {
+    "description": "晋升为命名工具的能力数上限 (Top-K)",
+    "type": "int",
+    "default": 3,
+    "hint": "⚪ Token 无（仅排序选择，不调 LLM）。v0.9.10：每次刷新按价值分降序至多晋升 K 个能力为命名独立工具，并为从未晋升过的新能力保留至少一个试用名额。受每日注册配额与能力总数上限约束"
+  },
+  "capability_match_hint_enabled": {
+    "description": "启用相关性触发的定向提示（命中时提示模型优先调用匹配能力）",
+    "type": "bool",
+    "default": true,
+    "hint": "🟢 近乎免费（本地 Jaccard 词法相似度，零额外 LLM 调用，仅在命中阈值时多注入一句提示；不命中零 token）。v0.9.10：用当前用户消息与能力 when_to_use/description 的词法相关性，命中最高分能力时注入一条定向提示"
+  },
+  "capability_match_hint_threshold": {
+    "description": "注入定向提示的最低词法相关性阈值",
+    "type": "float",
+    "default": 0.2,
+    "hint": "⚪ Token 无。v0.9.10：仅当最高词法相关性 ≥ 此值时才注入定向提示；调高=更少但更精准的提示，调低=更频繁提示"
+  },
+  "capability_match_hint_backend": {
+    "description": "定向提示的相关性计算后端",
+    "type": "string",
+    "default": "lexical",
+    "options": ["lexical", "embedding"],
+    "hint": "⚪ Token 无（lexical 为本地 Jaccard）。v0.9.10：lexical=纯本地词法匹配（默认、零 LLM）；embedding=可选升级路径，当 embedding 不可用或计算失败时自动降级为 Jaccard，绝不抛异常"
+  },
 
   "allow_capability_code_execution": {
     "description": "允许能力卡中包含并执行代码片段",

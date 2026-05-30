@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -45,6 +46,7 @@ from ..capability_dedup import (
     normalize_capability_signature as _ext_normalize_cap_sig,
     find_similar_capability as _ext_find_similar_cap,
 )
+from ..similarity import text_jaccard, cosine_similarity as _ext_cosine
 
 if TYPE_CHECKING:
     from ..mixins import _PluginAlias  # 仅类型提示用
@@ -231,18 +233,25 @@ class CapabilitiesMixin:
                 lines.append(f"  我通常这样用：{how}")
         return "\n".join(lines)
 
-    def _dynamically_register_capability_as_tool(self, capability: dict):
+    def _dynamically_register_capability_as_tool(self, capability: dict, force: bool = False):
         """
         真正按需动态注册独立工具（更高阶动态）。
         受 dynamic_tool_registration_enabled 控制。
 
         v0.6.1: 加入每日配额（默认 3 个/天）+ 工具名归一化避免撞名占位符。
         超过配额时能力照常进 personal_capabilities.json，但不再注册成独立 LLM 工具。
+
+        v0.9.10: 新增 force 参数。
+        - force=False（默认，既有调用方）：行为完全不变，下方两个标记闸门
+          （dynamic_tool_registration_enabled / register_as_independent_tool）照常生效。
+        - force=True（晋升路径 _refresh_capability_tool_belt）：跳过上述两个标记闸门，
+          但**保留**每日配额检查与同名跳过——它们对两条路径都生效不变。
         """
-        if not self.config.get("dynamic_tool_registration_enabled", False):
-            return
-        if not capability.get("register_as_independent_tool", False):
-            return
+        if not force:
+            if not self.config.get("dynamic_tool_registration_enabled", False):
+                return
+            if not capability.get("register_as_independent_tool", False):
+                return
 
         # ====== v0.6.1：每日配额检查 ======
         today = datetime.now().strftime("%Y-%m-%d")
@@ -339,10 +348,13 @@ class CapabilitiesMixin:
 
     async def _execute_single_capability(self, capability_name: str, query_or_args: str):
         """被动态注册的独立能力工具调用的统一执行入口（复用主逻辑）。"""
+        self._stat_bump("capability.call.attempt")
         caps = self._read_personal_capabilities()
         target = self._resolve_capability(capability_name, caps.get("capabilities", []))
         if not target:
+            self._stat_bump("capability.call.unresolved")
             return ToolExecResult(result=f"未找到能力「{capability_name}」")
+        self._stat_bump("capability.call.resolved")
 
         # 复用 dispatcher 里的智能执行逻辑（包括 snippet 支持）
         # 这里简化实现一个公共版本
@@ -386,6 +398,228 @@ class CapabilitiesMixin:
             days = 999
         recency = max(0.0, 1.0 - days / 90.0)
         return usage * 2.0 + corr * 0.5 + recency
+
+    def _select_promotion_set(
+        self,
+        capabilities: list,
+        k: int,
+        already_promoted_ids: set | None = None,
+        now=None,
+    ) -> list:
+        """v0.9.10 (Layer 1)：纯函数 —— 从 capabilities 选出至多 k 个待晋升能力。
+
+        纯契约：无 I/O、无 LLM、无 config 读取。所有依赖均来自入参；
+        `now` 可注入以保证确定性（不传则取 datetime.now()）。复用同样为纯方法的
+        `_capability_value_score` 做排序，不读取自封 `confidence`（解死锁，R1.4）。
+
+        算法：
+        1. 仅按 `_capability_value_score(cap, now)` 降序、稳定排序（同分保持原始
+           顺序，结果确定）。
+        2. `k <= 0` 或空 `capabilities` → 返回 `[]`；返回集合长度恒 `<= k`。
+        3. `top = ranked[:k]`。
+        4. Trial_Slot 规则：为"从未被晋升过的新能力"保留至少一个名额，确保
+           新能力（哪怕 0 使用）能被看见、被调用，从而赚到真实使用：
+           - newcomers = `usage_count == 0` 且 `id` 不在 `already_promoted_ids`
+             的能力（按价值分降序）。
+           - 若 newcomers 非空、且 `top` 中不含任何 newcomer、且 `k >= 1`：
+             取 `top` 的前 `k-1` 个，追加价值分最高的 newcomer（`newcomers[0]`），
+             组成至多 k 个的集合。
+
+        Args:
+            capabilities: 能力字典列表。
+            k: 晋升名额上限（Top-K）。
+            already_promoted_ids: 本进程已晋升过的能力 id 集合（判定"新能力"用）。
+            now: 可注入的时间，保证价值分计算确定性。
+
+        Returns:
+            待晋升能力列表，长度 `<= k`。
+
+        Validates: Requirements 1.3, 1.4, 1.5, 1.7
+        """
+        now = now or datetime.now()
+        already_promoted_ids = already_promoted_ids or set()
+
+        if k <= 0 or not capabilities:
+            return []
+
+        # 稳定降序排序：sorted 是稳定的，对价值分取负即可在保持原始相对顺序的
+        # 同时实现降序（同分保持原始顺序 → 确定性）。
+        ranked = sorted(
+            capabilities,
+            key=lambda c: -self._capability_value_score(c, now),
+        )
+
+        top = ranked[:k]
+
+        # Trial_Slot：保证至少一个"从未晋升过的新能力"进入晋升集合。
+        newcomers = [
+            c
+            for c in ranked
+            if (c.get("usage_count", 0) or 0) == 0
+            and c.get("id") not in already_promoted_ids
+        ]
+        if newcomers and k >= 1 and not any(
+            (c.get("usage_count", 0) or 0) == 0
+            and c.get("id") not in already_promoted_ids
+            for c in top
+        ):
+            top = top[: k - 1] + [newcomers[0]]
+
+        return top
+
+    def _refresh_capability_tool_belt(self):
+        """v0.9.10 (Layer 1)：晋升刷新 —— 按 Value_Score Top-K 注册命名工具。
+
+        非纯编排器：薄薄包裹纯函数 `_select_promotion_set` 与既有注册函数
+        `_dynamically_register_capability_as_tool`。整体 try/except 包裹，任何
+        异常仅 logger.debug，绝不抛出，不影响 initialize() / 对话 / 健康维护（R2.4）。
+
+        闸门（双开关）：
+        - `capability_system_enabled=false` → 直接返回，零动作（R2.2）。
+        - `capability_promote_enabled=false`（默认）→ 直接返回，零新注册，
+          行为退化为 v0.9.4 既有逻辑（R2.1 / Property 4）。
+
+        晋升判定：对每个待晋升能力，以 `force=True` 调用注册函数（跳过两个标记
+        闸门，但保留每日配额检查与同名跳过）。通过比较注册前后
+        `self._daily_tool_register["count"]` 的差值，精确识别**本次真实新注册**
+        ——跳过的同名/超配额不会增量计数。仅在真实新增时把能力 id 加入
+        `self._promoted_cap_ids` 并对 `capability.promoted` 累加。由此保证：
+        `capability.promoted` 只统计真实新增，且工具带大小受 K 与每日配额双重
+        约束（R1.6、R1.7、R1.8、Property 5）。
+
+        Validates: Requirements 1.3, 1.6, 1.7, 1.8, 2.1, 2.2, 2.3, 2.4
+        """
+        try:
+            if not self.config.get("capability_system_enabled", True):
+                return                                  # R2.2
+            if not self.config.get("capability_promote_enabled", False):
+                return                                  # R2.1 / Property 4：默认关，零新注册
+            caps = self._read_personal_capabilities().get("capabilities", [])
+            if not caps:
+                return
+            k = int(self.config.get("capability_promote_top_k", 3))
+            selected = self._select_promotion_set(caps, k, self._promoted_cap_ids)
+            for cap in selected:
+                before = self._daily_tool_register.get("count", 0)
+                self._dynamically_register_capability_as_tool(cap, force=True)  # 含配额/同名检查
+                after = self._daily_tool_register.get("count", 0)
+                if after > before:                       # 仅真正新注册才算晋升
+                    self._promoted_cap_ids.add(cap.get("id", ""))
+                    self._stat_bump("capability.promoted")  # R1.8
+        except Exception as e:
+            logger.debug(f"[Anima] 能力工具带刷新异常: {e}")   # R2.4
+
+    def _compute_capability_relevance(
+        self,
+        user_text: str,
+        capabilities: list,
+        *,
+        backend: str = "lexical",
+        embed_fn=None,
+    ) -> tuple[int, float]:
+        """v0.9.10 (Layer 2)：纯函数 —— 计算 user_text 与各能力的相关性，
+        返回 `(best_index, best_score)`。
+
+        纯/确定性契约（lexical 路径）：无 config 读取、无文件 I/O、无 logging。
+        唯一的"非纯"来源是注入的 `embed_fn`（仅 embedding 后端使用），便于属性测试
+        传入 `None` 或抛异常的桩来验证降级行为。
+
+        Match_Text 规则（Layer 3 回退，Property 8）：每个能力参与计算的文本为
+            `(cap.get("when_to_use") or "").strip() or cap.get("description", "")`
+        —— `when_to_use` 存在且非空白时取它，否则回退 `description`；二者皆缺则空串。
+
+        后端：
+        - `backend="lexical"`（默认）：score = `text_jaccard(user_text, match_text)`。
+        - `backend="embedding"` 且 `embed_fn` 提供：embed user_text 与每个 match_text，
+          取 `cosine_similarity`。整个 embedding 路径以 try/except 包裹；只要
+          `embed_fn` 为 None 或任意一步抛异常，即对**全部能力**降级为 lexical
+          `text_jaccard`，**绝不抛出异常**（Property 7）。降级结果与纯 lexical 路径
+          完全一致。
+
+        返回：
+        - 空 `capabilities` → `(-1, 0.0)`。
+        - 否则返回最高分能力的下标与分值；平局时取**首个**（最低 index）达到最大值
+          的能力，保证确定性。
+        - `best_score` 恒为有限、非负的 float（cosine 的负值/NaN 会被收敛到 `0.0`）。
+
+        Validates: Requirements 3.4, 3.7, 4.3, 4.4
+        """
+        if not capabilities:
+            return (-1, 0.0)
+
+        def _match_text(cap: dict) -> str:
+            # Match_Text：when_to_use（非空白）否则 description（Property 8 回退）。
+            return (cap.get("when_to_use") or "").strip() or cap.get("description", "")
+
+        def _lexical_scores() -> list:
+            return [text_jaccard(user_text, _match_text(cap)) for cap in capabilities]
+
+        scores = None
+        if backend == "embedding" and embed_fn is not None:
+            # 整个 embedding 路径包裹在 try/except：任一步失败即对全部能力降级 lexical。
+            try:
+                user_vec = embed_fn(user_text)
+                emb_scores = []
+                for cap in capabilities:
+                    cap_vec = embed_fn(_match_text(cap))
+                    emb_scores.append(_ext_cosine(user_vec, cap_vec))
+                scores = emb_scores
+            except Exception:
+                scores = None  # 降级：绝不抛出（Property 7）
+
+        if scores is None:
+            scores = _lexical_scores()
+
+        # argmax；平局取首个（最低 index）达到最大值者 → 确定性。
+        best_index = 0
+        best_score = scores[0]
+        for i in range(1, len(scores)):
+            if scores[i] > best_score:
+                best_index = i
+                best_score = scores[i]
+
+        # best_score 收敛为有限非负 float（cosine 可能为负/NaN）。
+        try:
+            best_score = float(best_score)
+        except (TypeError, ValueError):
+            best_score = 0.0
+        if not math.isfinite(best_score) or best_score < 0.0:
+            best_score = 0.0
+
+        return (best_index, best_score)
+
+    def _build_capability_hint(
+        self,
+        user_text: str,
+        capabilities: list,
+        threshold: float,
+        *,
+        backend: str = "lexical",
+        embed_fn=None,
+    ) -> str:
+        """v0.9.10 (Layer 2)：纯函数 —— 据相关性决定是否生成一条定向提示串。
+
+        委托 `_compute_capability_relevance` 取 `(best_index, best_score)`，再据
+        `threshold` 决定：
+
+        - `best_index < 0`（无能力）或 `best_score < threshold`（未达阈值）→ 返回
+          空串 `""`（Property 6：不命中零提示，不注入任何额外 token）。
+        - 命中（`best_score >= threshold`）→ 返回指向 argmax 能力名称的定向提示串，
+          提示文本必定包含该能力的 `name`（缺失时用「未命名能力」兜底）。
+
+        `threshold` 由编排器（`on_llm_request`）从 config 读出后传入，使核心比较逻辑
+        保持纯（无 config 读取、无 I/O、无 LLM），便于属性测试以任意 threshold 驱动。
+        `backend` / `embed_fn` 原样透传给 `_compute_capability_relevance`。
+
+        Validates: Requirements 3.5, 3.6
+        """
+        idx, score = self._compute_capability_relevance(
+            user_text, capabilities, backend=backend, embed_fn=embed_fn
+        )
+        if idx < 0 or score < threshold:
+            return ""                                   # Property 6：不命中零提示
+        name = capabilities[idx].get("name", "未命名能力")
+        return f"用户当前的需求很可能匹配你的能力「{name}」——优先考虑调用它。"
 
     def _migrate_capabilities_v094(self):
         """v0.9.4: 存量迁移 —— 把历史"自封高分但 0 使用"的能力置信度归正到基线。
@@ -531,6 +765,10 @@ class CapabilitiesMixin:
                 f"[Anima] 能力健康维护：{len(original)} → {len(kept)} "
                 f"（丢弃 {dropped_count} / 超限淘汰 {capped_count}）"
             )
+
+        # v0.9.10 (Layer 1)：维护（淘汰/降权/合并/上限）后刷新能力工具带。
+        # 编排器内部已 gate + try/except，promote 关时为 no-op，安全。
+        self._refresh_capability_tool_belt()
 
     def _apply_capability_feedback(self, capability_name: str, success: bool, reflection: str = ""):
         """

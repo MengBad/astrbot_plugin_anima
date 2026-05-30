@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.9",
+    "0.9.10",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -225,6 +225,8 @@ class AnimaPlugin(
         self._research_cooldown: dict = {}
         self._research_semaphore = asyncio.Semaphore(1)
         self._daily_tool_register: dict = {"date": "", "count": 0}
+        # v0.9.10: 本进程已晋升过的能力 id（Trial_Slot 判定用，不持久化）
+        self._promoted_cap_ids: set = set()
 
         # 注：离线反刍定时任务的注册已迁移到 async initialize() 中，
         # 因为 __init__ 是同步阶段，不能安全地 create_task（Python 3.10+ 上
@@ -321,6 +323,12 @@ class AnimaPlugin(
         except Exception as e:
             logger.debug(f"[Anima] 人物认知迁移调用失败: {e}")
 
+        # v0.9.10: 按价值分晋升 Top-K 能力为命名工具（capability_promote_enabled 默认关）
+        try:
+            self._refresh_capability_tool_belt()
+        except Exception as e:
+            logger.debug(f"[Anima] 能力工具带刷新调用失败: {e}")
+
         # v0.9.6: embedding 可用性自检（相似度静默降级可被察觉）
         try:
             if self.config.get("embedding_provider_id"):
@@ -405,12 +413,15 @@ class AnimaPlugin(
                 if not plugin:
                     return ToolExecResult(result="内部错误：能力系统未正确初始化")
 
+                plugin._stat_bump("capability.call.attempt")
                 caps = plugin._read_personal_capabilities()
                 # v0.9.4: 用统一的模糊解析（精确 → 子串 → 文本相似度），降低使用门槛
                 target = plugin._resolve_capability(capability_name, caps.get("capabilities", []))
 
                 if not target:
+                    plugin._stat_bump("capability.call.unresolved")
                     return ToolExecResult(result=f"[我的能力系统] 我目前没有叫「{capability_name}」的个人工具。")
+                plugin._stat_bump("capability.call.resolved")
 
                 # 更安全的代码片段执行（仅在最高危模式下，且严格沙箱）
                 # 使用新的细粒度配置：allow_capability_code_execution
@@ -603,6 +614,20 @@ class AnimaPlugin(
         caps_injection = self._get_personal_capabilities_injection()
         if caps_injection:
             injection_parts.append(caps_injection)
+            # v0.9.10 (Layer 2): 相关性触发的定向提示（命中阈值才注入，不命中零 token）
+            try:
+                if self.config.get("capability_match_hint_enabled", True):
+                    caps = self._read_personal_capabilities().get("capabilities", [])
+                    if caps:
+                        user_text = event.message_str if (event is not None and hasattr(event, "message_str")) else ""
+                        threshold = float(self.config.get("capability_match_hint_threshold", 0.2))
+                        backend = self.config.get("capability_match_hint_backend", "lexical")
+                        hint = self._build_capability_hint(user_text, caps, threshold, backend=backend, embed_fn=None)
+                        if hint:
+                            injection_parts.append(hint)
+                            self._stat_bump("capability.match.hint_injected")
+            except Exception as e:
+                logger.debug(f"[Anima] 能力定向提示注入异常: {e}")
 
         injection_parts.append(f"[Anima] 当前自我认知：\n{notes}")
 

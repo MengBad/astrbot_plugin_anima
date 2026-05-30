@@ -943,6 +943,7 @@ class DangerMixin:
                     '  "name": "简短有力且带隐喻的名字",\n'
                     '  "description": "第一人称的自我描述（我学会了...）",\n'
                     '  "how_to_use": "清晰的步骤或 prompt 模板",\n'
+                    '  "when_to_use": "描述这个能力适用的具体触发场景（什么样的用户需求/情境下该用它）",\n'
                     '  "confidence": 0.0-1.0,\n'
                     '  "category": "self_cognition | memory | social | creative | analysis",\n'
                     '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] },\n'
@@ -968,6 +969,8 @@ class DangerMixin:
                             "category": cap_data.get("category", "self_discovered"),
                             "source_research": reason,
                         }
+                        if "when_to_use" in cap_data:
+                            cap_payload["when_to_use"] = str(cap_data["when_to_use"])[:300]
                         if "parameters_schema" in cap_data:
                             cap_payload["parameters_schema"] = cap_data["parameters_schema"]
                         if "executable_snippet" in cap_data:
@@ -1050,6 +1053,7 @@ class DangerMixin:
                     '  "name": "能力名称",\n'
                     '  "description": "第一人称描述",\n'
                     '  "how_to_use": "具体使用方法",\n'
+                    '  "when_to_use": "描述这个能力适用的具体触发场景（什么样的用户需求/情境下该用它）",\n'
                     '  "confidence": 0.75,\n'
                     '  "category": "information_retrieval | creative | analysis | social",\n'
                     '  "parameters_schema": { "type": "object", "properties": {...}, "required": [...] },\n'
@@ -1086,6 +1090,8 @@ class DangerMixin:
                             "source_research": desire_content,
                             "research_summary": result_text[:300],
                         }
+                        if "when_to_use" in cap_data:
+                            cap_payload["when_to_use"] = str(cap_data["when_to_use"])[:300]
                         if "parameters_schema" in cap_data:
                             cap_payload["parameters_schema"] = cap_data["parameters_schema"]
                         if "executable_snippet" in cap_data:  # 实验性：角色自己写的简单可执行片段

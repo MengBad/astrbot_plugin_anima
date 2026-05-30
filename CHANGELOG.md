@@ -1,5 +1,54 @@
 ﻿# Changelog
 
+## v0.9.10 - 能力使用闭环强化（晋升 + 定向提示 + when_to_use + 度量）
+
+个人能力系统生产实测 **105 个能力 / 总使用 0 次**。v0.9.4 修掉了"自封高分导致只增不减"，但没解决另一根因——**能力极少被真实调用**。本版从三层入手让能力使用闭环真正闭合，并补一条度量闭环让"强化是否生效"可量化。整体改动是加法且默认安全：晋升默认关，关闭时行为与 v0.9.4 完全一致（零回归）。
+
+### 三条根因（代码级）
+
+1. **置信度死锁（可发现性）**：新能力从基线置信度起步，只有真实使用经反馈才能提升置信度；但要成为可被发现的"独立命名工具"当前要求 `confidence >= 0.65`。于是没用过 → 分低 → 不被提升为命名工具 → 不被发现 → 没用过，**死循环**。
+2. **纯靠模型自觉（意愿）**：能力以叙事方式注入系统提示，仅通过一个通用工具 `use_my_personal_capability` 暴露。模型往往直接作答，`usage_count`（置信度唯一能增长之处）几乎从不 +1。
+3. **能力描述含糊（质量）**：合成出的能力描述模糊，没有显式的"何时使用"触发字段，模型与任何匹配器都无法判断某能力何时适用。
+
+### Layer 1 — 晋升模型：打破死锁（默认关）
+
+放弃用 `confidence >= 0.65` 作为注册命名工具的门槛，改用**晋升模型**。
+
+- 新增纯函数 `_select_promotion_set`：按价值分 `_capability_value_score` 取 Top-K（**不看 confidence**），并为"从未晋升过的新能力"保留至少一个 Trial_Slot 试用名额，让新能力哪怕 0.3 置信度也能被看见、被调用，从而赚到唯一能提升置信度的真实使用。
+- 新增编排器 `_refresh_capability_tool_belt`：在 `initialize()` 与每次健康维护后刷新，按 Top-K 注册命名独立工具。
+- 给 `_dynamically_register_capability_as_tool` 增加 `force` 参数：晋升路径以 `force=True` 跳过 `confidence>=0.65` 与 `register_as_independent_tool` 闸门，但**仍保留**每日注册配额与同名跳过，因此与旧自动注册路径天然不会双注册。
+- 受新开关 `capability_promote_enabled`（默认 `false`，🔴 高 token）控制，关闭时零新注册、行为与 v0.9.4 完全一致；`capability_promote_top_k` 默认 `3`。
+
+### Layer 2 — 相关性触发的定向提示（默认开，近乎免费）
+
+在 `on_llm_request` 注入能力后，用本地词法相似度（`anima/similarity.text_jaccard`，零额外 LLM 调用）计算当前用户消息与每个能力 `when_to_use` / `description` 的相关性，最高分 ≥ 阈值时注入一句定向提示，引导模型优先调用该能力。
+
+- 新增纯函数 `_compute_capability_relevance`（embedding 后端可选，不可用时自动降级 Jaccard，**绝不抛异常**）+ `_build_capability_hint`。
+- 开关 `capability_match_hint_enabled`（默认 `true`）/ `capability_match_hint_threshold`（默认 `0.2`）/ `capability_match_hint_backend`（默认 `lexical`）。
+- 不命中零 token。
+
+### Layer 3 — 合成时要求 when_to_use（默认开）
+
+`danger.py` 两处能力合成 prompt 新增 `when_to_use` 字段（描述适用的具体触发场景），经 `_create_or_update_capability` 作为普通键自动持久化。缺失时 Layer 2 匹配回退 `description`。向后兼容存量能力，创建/注入/匹配/调用全链路不报错。
+
+### 度量闭环
+
+新增 5 个埋点 `capability.promoted` / `capability.match.hint_injected` / `capability.call.attempt` / `capability.call.resolved` / `capability.call.unresolved`（`attempt == resolved + unresolved`，互斥穷尽），让 `/anima_capabilities_audit` 与仪表盘能量化"强化是否真的提升了使用率"。全部经既有 `_stat_bump`（受 `dashboard_enabled` 控制、不抛异常）。
+
+### 新配置项
+
+`capability_promote_enabled`(false，🔴 高 token) / `capability_promote_top_k`(3) / `capability_match_hint_enabled`(true) / `capability_match_hint_threshold`(0.2) / `capability_match_hint_backend`("lexical")。
+
+### 验证
+
+- 新增 29 个测试，含 9 条 Hypothesis 属性：Top-K 选择 / 不依赖 confidence / Trial_Slot / 晋升默认关无回归 / 配额上界 / 提示命中即注入 / embedding 降级 / Match_Text 回退 / 埋点互斥穷尽；外加 schema 冒烟、晋升接线、Layer 2 / Layer 3 / 度量接线示例测试。
+- **339/339 测试全过**（v0.9.9 是 310）。
+
+### 部署
+
+覆盖重启。默认行为不变（晋升默认关）。**强烈推荐开启 `capability_promote_enabled`** 让能力使用闭环真正闭合；开启后跑一段时间用 `/anima_capabilities_audit` 看 `total_usage` 是否上升、hint→call 的转化率。
+
+---
 ## v0.9.9 - 人物认知全局化（群环境仍按群隔离）
 
 细化 v0.9.8 的隔离粒度。v0.9.8 把整个 `worldview.json` 按群（umo）隔离，但 worldview 内部其实混了两类性质不同的数据：**群环境**（这个群是什么样）和**对人的认知**（bot 认识谁、谁跟谁什么关系）。同一个人出现在多个群时，按群切开会导致 bot 对他有多份割裂画像。本版把"对人的认知"抽到全局，群环境保持按群隔离。
