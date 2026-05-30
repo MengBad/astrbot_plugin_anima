@@ -35,6 +35,12 @@
     "default": "",
     "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
   },
+  "dashboard_history_days": {
+    "description": "仪表盘历史趋势保留天数",
+    "type": "int",
+    "default": 30,
+    "hint": "⚪ Token 无。v1.0.0：跨天时自动归档当天统计快照，保留最近 N 天供趋势图展示。调大=更长历史但 anima_state.json 略增大"
+  },
   "sediment_merge_llm_calls": {
     "description": "合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
     "type": "bool",

@@ -37,7 +37,10 @@ class StatsMixin:
 
     def _ensure_stats_loaded(self):
         """懒初始化内存计数器 self._stats = {"date": "YYYY-MM-DD", "counts": {...}}。
-        从 state 恢复当天数据；跨天则归零。"""
+        从 state 恢复当天数据；跨天则归档旧数据后归零。
+
+        v1.0.0: 跨天时把前一天的 Daily_Snapshot 追加到 stats_history（上限
+        dashboard_history_days，默认 30），使历史趋势可回溯。"""
         today = self._today_key()
         cur = getattr(self, "_stats", None)
         if cur is not None and cur.get("date") == today:
@@ -45,12 +48,51 @@ class StatsMixin:
         # 尝试从持久化 state 恢复当天数据
         counts = {}
         try:
-            saved = self._load_state().get("stats_daily", {})
+            state = self._load_state()
+            saved = state.get("stats_daily", {})
             if isinstance(saved, dict) and saved.get("date") == today:
                 counts = dict(saved.get("counts", {}))
+            elif isinstance(saved, dict) and saved.get("date") and saved.get("counts"):
+                # 跨天：归档旧数据（仅当 dashboard_enabled 且旧数据非空）
+                if getattr(self, "config", None) and self.config.get("dashboard_enabled", True):
+                    self._archive_daily_snapshot(saved)
         except Exception:
             counts = {}
         self._stats = {"date": today, "counts": counts}
+
+    def _archive_daily_snapshot(self, snapshot: dict):
+        """v1.0.0: 把一天的 Daily_Snapshot 归档到 stats_history。
+        上限 dashboard_history_days（默认 30），超出丢弃最旧。同一天不重复归档。"""
+        try:
+            max_days = int(getattr(self, "config", {}).get("dashboard_history_days", 30))
+
+            def _update(state: dict):
+                history = state.get("stats_history", [])
+                if not isinstance(history, list):
+                    history = []
+                # 同一天不重复归档（幂等，Property 3）
+                if history and history[-1].get("date") == snapshot.get("date"):
+                    return
+                history.append({"date": snapshot["date"], "counts": dict(snapshot.get("counts", {}))})
+                # 上限裁剪（Property 2）
+                if len(history) > max_days:
+                    history = history[-max_days:]
+                state["stats_history"] = history
+
+            if hasattr(self, "_atomic_update_state"):
+                self._atomic_update_state(_update)
+        except Exception as e:
+            if getattr(self, "config", None) and self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 统计归档失败: {e}")
+
+    def _get_stats_history(self) -> list:
+        """v1.0.0: 读取历史归档列表。"""
+        try:
+            state = self._load_state()
+            history = state.get("stats_history", [])
+            return history if isinstance(history, list) else []
+        except Exception:
+            return []
 
     def _stat_bump(self, key: str, n: int = 1):
         """给某个计数 key 累加 n。埋点绝不抛异常影响主流程。
@@ -116,6 +158,7 @@ class StatsMixin:
                 "out": c.get("store.out", 0),
             },
             "raw": c,
+            "history": self._get_stats_history(),
         }
 
     def _render_stats(self) -> str:
@@ -170,4 +213,16 @@ class StatsMixin:
 
         lines.append("")
         lines.append("提示：内部 LLM 调用越多越费 token。可在配置里按 🔴/🟡 标注关闭高耗项。")
+
+        # v1.0.0: 近 7 天 LLM 调用趋势
+        history = self._get_stats_history()
+        if history:
+            lines.append("")
+            lines.append("■ 近 7 天 LLM 调用趋势")
+            for entry in history[-7:]:
+                day_counts = entry.get("counts", {})
+                day_llm = sum(v for k, v in day_counts.items() if k.startswith("llm."))
+                lines.append(f"   · {entry.get('date', '?')}: {day_llm} 次")
+            lines.append(f"   · {self._stats['date']}(今日): {llm_total} 次")
+
         return "\n".join(lines)

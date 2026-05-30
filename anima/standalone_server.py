@@ -148,6 +148,7 @@ class StandaloneDashboardServer:
         # 数据接口（只读，全部要求 token）
         app.router.add_get("/api/runtime_stats", self._handle_runtime_stats)
         app.router.add_get("/api/stats", self._handle_stats)
+        app.router.add_get("/api/stats_history", self._handle_stats_history)
         app.router.add_get("/api/capabilities", self._handle_capabilities)
         app.router.add_get("/api/events", self._handle_events)
         app.router.add_get("/api/export", self._handle_export)
@@ -365,6 +366,17 @@ class StandaloneDashboardServer:
             })
         except Exception as e:
             logger.error(f"[Anima] 独立端口获取能力统计失败: {e}")
+            return _aiohttp_web.json_response({"success": False, "error": str(e)})
+
+    async def _handle_stats_history(self, request):
+        """v1.0.0: 返回历史趋势数据（近 N 天的 Daily_Snapshot 列表）。"""
+        if not self._check_token(request):
+            return self._unauthorized_json()
+        try:
+            history = self.plugin._get_stats_history()
+            return _aiohttp_web.json_response({"success": True, "history": history})
+        except Exception as e:
+            logger.error(f"[Anima] 独立端口获取历史统计失败: {e}")
             return _aiohttp_web.json_response({"success": False, "error": str(e)})
 
     async def _handle_capabilities(self, request):
