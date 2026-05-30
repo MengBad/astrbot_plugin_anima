@@ -37,10 +37,17 @@ class _MessageChain:
         self.chain = []
 
 
-_stub("astrbot.api.message_components", {"Plain": _Plain})
+def _install_stubs():
+    """重新安装本测试需要的 Plain/MessageChain 桩。
+    防止其它测试文件在收集期把 message_components.Plain 覆盖成 object
+    （danger.py 在 send_message 处运行时 import Plain，需要带 .text 的真实类）。"""
+    _stub("astrbot.api.message_components", {"Plain": _Plain})
+    _stub("astrbot.core.message.message_event_result", {"MessageChain": _MessageChain})
+
+
+_install_stubs()
 _stub("astrbot.core")
 _stub("astrbot.core.message")
-_stub("astrbot.core.message.message_event_result", {"MessageChain": _MessageChain})
 _stub("aiohttp", {"ClientSession": object, "ClientTimeout": lambda **kw: None})
 
 from anima.mixins.danger import DangerMixin  # noqa: E402
@@ -134,6 +141,10 @@ CFG = {
 
 
 class TestInfectionRepeat:
+    def setup_method(self):
+        # 防测试污染：每个用例运行前重装 Plain/MessageChain 桩
+        _install_stubs()
+
     def test_first_speak_not_satisfied(self):
         h = StanceHost(CFG, [_infection_desire()])
         asyncio.run(h._danger_stance_propagation(_Ev()))

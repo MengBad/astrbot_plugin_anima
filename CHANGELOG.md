@@ -1,5 +1,51 @@
 ﻿# Changelog
 
+## v0.9.7 - 角色人设传入（system prompt 注入 + 人设锁定）
+
+补齐当前最弱的维度——角色人设传入。此前 Anima 唯一的人设入口 `persona_core.yaml` 注入到**用户消息**而非 system prompt，且会被核心突变自动改写、无法锁定。
+
+### persona_prompt：注入 system prompt
+
+新增文本配置项 `persona_prompt`，在 `on_llm_request` 把内容**前置注入到 `req.system_prompt`**（已确认 `ProviderRequest.system_prompt` 是可写字段），以最高权重稳定生效。
+
+- 人设在前、框架原 system prompt 在后，换行分隔
+- 幂等保护：已包含则不重复叠加（防框架重试/多次进 hook 越拼越长）
+- 留空则完全不碰 system prompt
+- 与既有 `<anima_self_awareness>` 用户消息块并存、互不干扰
+- 注入逻辑抽成可测纯函数 `_compose_system_prompt`
+
+### persona_lock：锁定核心人设
+
+新增开关 `persona_lock`（默认关）。开启后 `_danger_core_mutation` 在任何 LLM 调用/写盘前提前返回，你写死的 `persona_core.yaml` 不会被角色自我演化覆盖。情绪/欲望/世界观等其它演化不受影响。
+
+### 三层人设厘清（文档）
+
+README 新增"角色人设：三层配置"小节，用表格说明分工与注入位置：
+- 框架 system prompt（基础设定/说话风格）→ system
+- `persona_prompt`（v0.9.7 新增）→ system（最前，最高权重）
+- `persona_core.yaml`（行为边界/自我认知规则）→ 用户消息块，可被核心突变改写（受 persona_lock）
+- `seed_persona`（初始自我种子）→ 一次性写入 self_notes
+
+### 新配置项
+
+- `persona_prompt`（text，默认空）：🟡 增 system prompt 输入 token
+- `persona_lock`（bool，默认 false）：⚪ 零 token
+
+### 顺带修复
+
+- `capability_dedup.text_similarity` 对完全相等的非空文本短路返回 1.0（修复全标点/全空白字符串经 ngram 抽空导致自相似度为 0 的边界，由 Hypothesis 发现）
+- 修复测试间 `astrbot.api.message_components.Plain` 桩互相覆盖导致的全量运行污染（`test_v095_prop3_infection` 加 `setup_method` 重装桩）
+
+### 验证
+
+- 新增 8 个测试（2 条 Correctness Property：persona_prompt 注入语义+幂等 / persona_lock 阻断核心突变）
+- **281/281 测试全过**（v0.9.6 是 273）
+
+### 部署
+
+覆盖重启。默认行为不变（persona_prompt 空 + persona_lock false）。想用：在插件配置写 `persona_prompt`，需要锁死人设就开 `persona_lock`。
+
+---
 ## v0.9.6 - 卫生治理 + 性能短板补平
 
 补齐前序版本"已立项未实现"的卫生项，并修复生产日志暴露的明确性能问题。把反馈/欲望/世界观/压抑矛盾几个维度的短板补平，所有改动局部、低风险、不改默认启用功能集。

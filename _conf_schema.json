@@ -53,6 +53,18 @@
     "default": "",
     "hint": "⚪ Token 无。角色的初始自我认知描述，留空则由角色自行发展"
   },
+  "persona_prompt": {
+    "description": "角色人设 Prompt（注入到 system prompt，最高权重）",
+    "type": "text",
+    "default": "",
+    "hint": "🟡 Token 中（增加每轮 system prompt 的输入 token，内容越长越费）。v0.9.7：在此直接写角色人设（名字/性格/说话风格/背景），会被注入到 system prompt 最前面。留空则不注入。与 AstrBot 角色配置的 system prompt 叠加（本项在前）"
+  },
+  "persona_lock": {
+    "description": "锁定核心人设（禁止自我演化改写 persona_core.yaml）",
+    "type": "bool",
+    "default": false,
+    "hint": "⚪ Token 无。v0.9.7：开启后 danger_core_mutation 不再改写 persona_core.yaml，你写死的核心人设不会被角色自我演化覆盖。情绪/欲望/世界观等其它演化不受影响"
+  },
   "sylanne_integration": {
     "description": "尝试读取 Sylanne 状态",
     "type": "bool",

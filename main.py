@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.6",
+    "0.9.7",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -532,6 +532,17 @@ class AnimaPlugin(
         """对话前注入 self_notes 到上下文"""
         if not self.config.get("enabled", True):
             return
+
+        # v0.9.7: 人设 prompt 注入 system prompt（最高权重，独立于下方用户消息块）
+        try:
+            persona_prompt = (self.config.get("persona_prompt", "") or "").strip()
+            if persona_prompt:
+                existing_sys = getattr(req, "system_prompt", "") or ""
+                # 幂等：已包含则不重复叠加（防框架重试/多次进 hook）
+                req.system_prompt = self._compose_system_prompt(persona_prompt, existing_sys)
+        except Exception as e:
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] persona_prompt 注入 system 失败: {e}")
 
         # 时间感更新
         self._update_time_sense(event)

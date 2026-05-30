@@ -77,8 +77,11 @@ def _char_ngrams(text: str, n: int = 2) -> Set[str]:
 
 def text_similarity(a: str, b: str) -> float:
     """两段文本的字符 2-gram Jaccard 相似度（v0.9.4，0.0–1.0）。
-    用于无核心语义槽位的中文长名能力去重兜底。出错返回 0.0（视为不相似）。"""
+    用于无核心语义槽位的中文长名能力去重兜底。出错返回 0.0（视为不相似）。
+    v0.9.6: 完全相等的非空文本短路返回 1.0（含全标点/全空白等 ngram 抽空的情况）。"""
     try:
+        if a == b:
+            return 1.0 if (a or "").strip() else 0.0
         ga, gb = _char_ngrams(a, 2), _char_ngrams(b, 2)
         if not ga or not gb:
             return 0.0

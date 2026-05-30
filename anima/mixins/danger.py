@@ -515,6 +515,14 @@ class DangerMixin:
             return
         if not self.config.get("danger_core_mutation_confirm", False):
             return
+        # v0.9.7: 人设锁定 —— 用户锁死人设时，核心突变不写盘（在任何 LLM 调用前返回）
+        if self.config.get("persona_lock", False):
+            if not getattr(self, "_warned_persona_lock", False):
+                self._warned_persona_lock = True
+                logger.info(
+                    "[DANGER][Anima] persona_lock 已开启，核心突变被禁止改写 persona_core.yaml"
+                )
+            return
         # 每 100 次沉淀触发一次（给角色足够时间积累经历）
         if self._sediment_count % 100 != 0:
             return

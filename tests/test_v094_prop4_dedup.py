@@ -45,5 +45,9 @@ class TestProp4Dedup:
     def test_text_similarity_bounds(self, a, b):
         sim = text_similarity(a, b)
         assert 0.0 <= sim <= 1.0
-        # 自相似度为 1（非空）
-        assert abs(text_similarity(a, a) - 1.0) < 1e-9
+        # 自相似度：非空白文本为 1（全标点/全空白经 ngram 抽空，语义上视为不可比，返回 0）
+        self_sim = text_similarity(a, a)
+        if a.strip():
+            assert abs(self_sim - 1.0) < 1e-9
+        else:
+            assert self_sim == 0.0

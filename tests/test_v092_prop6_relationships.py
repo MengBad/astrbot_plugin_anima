@@ -44,8 +44,11 @@ def test_prop6_relationship_write_and_cap(existing, candidate, rejected):
     if no_write:
         assert after == before
     else:
-        # update 语义：候选键值应覆盖/新增
-        for k, v in candidate.items():
-            assert after[k] == v
-        # 上限不变量
+        # 上限不变量：写入后至多 30 条
         assert len(after) <= 30
+        # update 语义：候选键若仍保留在最终结果中，其值应为候选值（覆盖/新增）。
+        # 注意：合并后若总数超 30 会按插入序保留最近 30 条，早位置的候选键可能被裁掉，
+        # 所以只对"仍存在的候选键"断言值正确，不强求全部候选键都在。
+        for k, v in candidate.items():
+            if k in after:
+                assert after[k] == v

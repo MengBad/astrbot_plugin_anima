@@ -42,6 +42,21 @@ from ..valence import (
 class StateIOMixin:
     """通用工具方法 + state IO mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
+    @staticmethod
+    def _compose_system_prompt(persona_prompt: str, existing_sys: str) -> str:
+        """v0.9.7: 把人设 prompt 前置合并到既有 system prompt。
+        - persona_prompt 在前，原 system 在后，换行分隔
+        - 幂等：persona_prompt 已包含在 existing_sys 中则不重复叠加
+          （防框架重试 / 多次进 hook 导致 system prompt 越拼越长）
+        """
+        persona_prompt = (persona_prompt or "").strip()
+        existing_sys = existing_sys or ""
+        if not persona_prompt:
+            return existing_sys
+        if persona_prompt in existing_sys:
+            return existing_sys
+        return persona_prompt + ("\n\n" + existing_sys if existing_sys else "")
+
     def _is_rejected(self, text: str) -> bool:
         """检查文本是否包含拒绝短语（v0.7.0 委托给 anima.filters）"""
         reject_phrases = self.config.get("reject_phrases", None)
