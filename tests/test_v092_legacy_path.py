@@ -52,6 +52,7 @@ class LegacyHost(MergedEvalMixin, DesireMixin, DangerMixin):
     def __init__(self, config=None):
         self.config = config or {}
         self._worldview = {}
+        self._social_store = {"social_graph": {}, "relationships": {}}
         self._desires = []
         self.stats = {}
         self.desire_llm_text = "想问问对方周末去哪了"
@@ -84,6 +85,13 @@ class LegacyHost(MergedEvalMixin, DesireMixin, DangerMixin):
 
     def _write_worldview(self, data, umo=""):
         self._worldview = data
+
+    def _read_social_store(self):
+        import copy
+        return copy.deepcopy(self._social_store)
+
+    def _write_social_store(self, data):
+        self._social_store = data
 
     def _read_desires(self):
         import copy
@@ -131,7 +139,7 @@ class TestLegacyRelationshipPath:
         host._next_text = '{"u1 -> u2": "同事"}'
         event = FakeEvent()
         asyncio.run(host._danger_relationship_inference(event, "bot reply"))
-        assert host._worldview.get("relationships", {}).get("u1 -> u2") == "同事"
+        assert host._social_store.get("relationships", {}).get("u1 -> u2") == "同事"
         assert host.stats.get("llm.relation") == 1
 
     def test_relationship_skipped_when_disabled(self):
@@ -141,5 +149,5 @@ class TestLegacyRelationshipPath:
         })
         event = FakeEvent()
         asyncio.run(host._danger_relationship_inference(event, "bot reply"))
-        assert host._worldview == {}
+        assert host._social_store.get("relationships", {}) == {}
         assert "llm.relation" not in host.stats

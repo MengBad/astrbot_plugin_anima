@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.8",
+    "0.9.9",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -116,6 +116,8 @@ class AnimaPlugin(
         self.desires_path = os.path.join(self.data_dir, "desires.json")
         self.worldview_path = os.path.join(self.data_dir, "worldview.json")
         self.time_sense_path = os.path.join(self.data_dir, "time_sense.json")
+        # v0.9.9: 全局人物认知（social_graph + relationships），跨群统一，不按 umo 隔离
+        self.social_graph_path = os.path.join(self.data_dir, "social_graph.json")
 
         # 初始化 self_notes
         if not os.path.exists(self.self_notes_path):
@@ -312,6 +314,12 @@ class AnimaPlugin(
             self._migrate_capabilities_v094()
         except Exception as e:
             logger.debug(f"[Anima] 能力存量迁移调用失败: {e}")
+
+        # v0.9.9: 人物认知（social_graph/relationships）全局化迁移（幂等）
+        try:
+            self._migrate_social_graph_v099()
+        except Exception as e:
+            logger.debug(f"[Anima] 人物认知迁移调用失败: {e}")
 
         # v0.9.6: embedding 可用性自检（相似度静默降级可被察觉）
         try:

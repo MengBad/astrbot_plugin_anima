@@ -58,6 +58,7 @@ class Host(MergedEvalMixin):
     def __init__(self, config=None):
         self.config = config or {}
         self._worldview = {}
+        self._social_store = {"social_graph": {}, "relationships": {}}
         self._desires = []
         self.stats = {}
         # 可控依赖默认值
@@ -108,6 +109,13 @@ class Host(MergedEvalMixin):
 
     def _write_worldview(self, data, umo=""):
         self._worldview = data
+
+    def _read_social_store(self):
+        import copy
+        return copy.deepcopy(self._social_store)
+
+    def _write_social_store(self, data):
+        self._social_store = data
 
     def _read_desires(self):
         import copy

@@ -155,6 +155,12 @@
     "default": false,
     "hint": "🔴 Token 高。世界观更新会注入大 prompt 并调 LLM，群成员越多越贵。【降 token 可关】"
   },
+  "social_graph_max": {
+    "description": "全局人物画像（social_graph）最大保留条数",
+    "type": "int",
+    "default": 100,
+    "hint": "⚪ Token 无。v0.9.9：对人的画像（social_graph）跨群全局统一存储，此为最大条数，超出保留最近 N 条"
+  },
   "worldview_graph_inject_cap": {
     "description": "世界观更新时注入到 LLM prompt 的 social_graph 条目上限（v0.8.1：防止 prompt 爆炸超时；其余条目仍会保留在 worldview.json 里）",
     "type": "int",

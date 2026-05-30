@@ -10,7 +10,7 @@
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.25-blue)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.8-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
+[![Version](https://img.shields.io/badge/version-0.9.9-orange)](https://github.com/MengBad/astrbot_plugin_anima/releases)
 
 </div>
 
@@ -370,13 +370,16 @@ data/plugin_data/astrbot_plugin_anima/
 ├── scar_dimensions.json   伤痕维度数据（v0.4.1+）
 ├── anima_state.json       持久化状态（沉淀计数/情绪/稳定度）
 ├── persona_core.yaml      核心规则（可被 danger_core_mutation 修改）
+├── social_graph.json      全局人物认知（social_graph 群友画像 + relationships 关系图谱，跨群统一，v0.9.9）
 └── sessions/              会话级隔离目录（v0.9.8）
     └── <安全化umo>/        每个群/私聊独立的会话上下文
-        ├── worldview.json  该会话的世界观（环境/关系图谱）
+        ├── worldview.json  该会话的群环境（environment/norms/my_position，v0.9.9 起不含人物认知）
         └── time_sense.json 该会话的时间感（互动频率）
 ```
 
 > **v0.9.8 会话隔离（方案 1）**：角色本体人格（self_notes / persona_core / personality_vector / scar / capabilities）**跨群共享**，是同一个"人"；而 worldview / time_sense 按 umo（每个群/私聊）隔离到 `sessions/` 子目录，避免 A 群的群友关系混进 B 群。升级后历史的全局 `worldview.json` / `time_sense.json` 作为回退源保留，老数据不丢。
+>
+> **v0.9.9 人物认知全局化**：在 v0.9.8 基础上再细分 worldview——**群环境**（environment/norms/my_position/external_knowledge）仍按群隔离在 `sessions/<umo>/worldview.json`；而**对人的认知**（social_graph 群友画像 + relationships 关系图谱）抽到全局 `social_graph.json`，跨群共用一份。同一个人出现在多个群时，bot 对他的认知统一。升级后历史人物认知自动迁移到全局文件，老数据不丢。
 
 ---
 

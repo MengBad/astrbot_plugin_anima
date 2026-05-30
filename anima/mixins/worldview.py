@@ -36,13 +36,98 @@ from ..valence import (
 class WorldviewMixin:
     """模块二 世界观 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
+    def _read_social_store(self) -> dict:
+        """v0.9.9: 读全局人物认知（social_graph + relationships），跨群统一。"""
+        return self._read_json(
+            self.social_graph_path,
+            default={"social_graph": {}, "relationships": {}},
+        )
+
+    def _write_social_store(self, data: dict):
+        """v0.9.9: 写全局人物认知。"""
+        self._write_json(self.social_graph_path, data)
+
+    @staticmethod
+    def _cap_dict(d: dict, n: int) -> dict:
+        """保留最近 n 条（dict 在 Python 3.7+ 保插入序）。"""
+        if not isinstance(d, dict) or len(d) <= n:
+            return d
+        return dict(list(d.items())[-n:])
+
+    def _migrate_social_graph_v099(self):
+        """v0.9.9: 把历史 social_graph/relationships 从旧全局 worldview.json 及各
+        sessions/*/worldview.json 收集进全局 Social_Store。幂等；不删旧数据；冲突后写覆盖。"""
+        try:
+            store = self._read_social_store()
+            if store.get("migrated_v099"):
+                return
+            sg = dict(store.get("social_graph", {}) or {})
+            rels = dict(store.get("relationships", {}) or {})
+
+            def _collect(path):
+                try:
+                    if not os.path.exists(path):
+                        return
+                    with open(path, "r", encoding="utf-8") as f:
+                        wv = json.load(f)
+                    if isinstance(wv, dict):
+                        if isinstance(wv.get("social_graph"), dict):
+                            sg.update(wv["social_graph"])  # 后写覆盖
+                        if isinstance(wv.get("relationships"), dict):
+                            rels.update(wv["relationships"])
+                except Exception:
+                    pass  # 单文件损坏跳过，继续收集其余
+
+            # 旧全局 worldview.json
+            _collect(self.worldview_path)
+            # 各会话 worldview.json
+            sessions_dir = os.path.join(self.data_dir, "sessions")
+            if os.path.isdir(sessions_dir):
+                for name in os.listdir(sessions_dir):
+                    _collect(os.path.join(sessions_dir, name, "worldview.json"))
+
+            # 上限裁剪后写入
+            store["social_graph"] = self._cap_dict(sg, int(self.config.get("social_graph_max", 100)))
+            store["relationships"] = self._cap_dict(rels, 30)
+            store["migrated_v099"] = True
+            self._write_social_store(store)
+            logger.info(
+                f"[Anima] v0.9.9 人物认知迁移完成：social_graph {len(store['social_graph'])} 条 / "
+                f"relationships {len(store['relationships'])} 条"
+            )
+        except Exception as e:
+            logger.debug(f"[Anima] 人物认知迁移异常: {e}")
+
     def _read_worldview(self, umo: str = "") -> dict:
-        """读取世界观。v0.9.8：按 umo 会话隔离（不存在则回退全局文件）。"""
-        return self._read_session_json(umo, "worldview.json", self.worldview_path, default={})
+        """读取世界观（合并视图，v0.9.9）。
+        群环境（environment/norms/my_position/external_knowledge）按 umo 隔离；
+        人物认知（social_graph/relationships）从全局 Social_Store 取，跨群统一。"""
+        env = self._read_session_json(umo, "worldview.json", self.worldview_path, default={})
+        # 过滤掉会话文件里可能残留的人物认知字段（迁移后以全局为准）
+        merged = {k: v for k, v in env.items() if k not in ("social_graph", "relationships")}
+        store = self._read_social_store()
+        merged["social_graph"] = store.get("social_graph", {})
+        merged["relationships"] = store.get("relationships", {})
+        return merged
 
     def _write_worldview(self, data: dict, umo: str = ""):
-        """写入世界观。v0.9.8：只写该 umo 的会话文件。"""
+        """写入世界观（v0.9.9 分流）。
+        social_graph/relationships → 全局 Social_Store（跨群统一）；其余群环境 → 该 umo 会话文件。"""
+        data = dict(data or {})
+        sg = data.pop("social_graph", None)
+        rel = data.pop("relationships", None)
+        # 群环境写会话文件
         self._write_session_json(umo, "worldview.json", data)
+        # 人物认知写全局（仅当本次确有这两项）
+        if sg is not None or rel is not None:
+            store = self._read_social_store()
+            if isinstance(sg, dict):
+                store["social_graph"] = self._cap_dict(
+                    sg, int(self.config.get("social_graph_max", 100))
+                )
+            if isinstance(rel, dict):
+                store["relationships"] = self._cap_dict(rel, 30)
+            self._write_social_store(store)
 
     async def _maybe_update_worldview(self, event: AstrMessageEvent, force: bool = False):
         """每 20 次沉淀触发一次世界观更新。

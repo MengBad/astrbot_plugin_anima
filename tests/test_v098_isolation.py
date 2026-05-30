@@ -36,6 +36,7 @@ class Host(StateIOMixin, WorldviewMixin, TimeSenseMixin):
         self._io_lock = threading.Lock()
         self.worldview_path = os.path.join(data_dir, "worldview.json")
         self.time_sense_path = os.path.join(data_dir, "time_sense.json")
+        self.social_graph_path = os.path.join(data_dir, "social_graph.json")
         self._last_active_umo = ""
 
 
@@ -90,8 +91,8 @@ class TestWorldviewIsolation:
     def test_a_write_not_seen_by_b(self):
         h = _mk_host()
         h._write_worldview({"environment": "只属于A"}, "umo_a")
-        # B 无会话文件、无全局文件 → 空
-        assert h._read_worldview("umo_b") == {}
+        # B 群环境无 A 的数据（social_graph/relationships 是全局合并视图的空字典）
+        assert h._read_worldview("umo_b").get("environment", "") == ""
 
     def test_global_fallback(self):
         h = _mk_host()
@@ -139,10 +140,10 @@ class TestTimeSenseIsolation:
     val_a=st.text(min_size=1, max_size=10),
 )
 # Feature: v098-session-isolation, Property 2/3: 会话写入隔离 + 全局回退 ——
-# 向 A 写入后读 B 不返回 A 的数据（B 无会话且无全局）。
+# 向 A 写入 environment 后读 B 不返回 A 的 environment（B 无会话且无全局）。
 def test_prop23_isolation(umo_a, umo_b, val_a):
     h = _mk_host()
     h._write_worldview({"environment": val_a}, umo_a)
-    # 仅当 A、B 映射到不同会话目录时验证隔离
+    # 仅当 A、B 映射到不同会话目录时验证群环境隔离
     if h._safe_umo(umo_a) != h._safe_umo(umo_b):
-        assert h._read_worldview(umo_b) == {}
+        assert h._read_worldview(umo_b).get("environment", "") == ""

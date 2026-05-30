@@ -37,8 +37,8 @@ class GateHost(Host):
 # 不发生任何关系/欲望下游副作用。
 def test_prop5_threshold_gate(score, threshold, relationships):
     host = GateHost()
-    host._worldview = {"relationships": {}}
-    before = dict(host._worldview["relationships"])
+    host._social_store = {"social_graph": {}, "relationships": {}}
+    before = dict(host._social_store["relationships"])
 
     proceeded = host.gate_and_maybe_write(score, threshold, relationships, None)
 
@@ -46,12 +46,12 @@ def test_prop5_threshold_gate(score, threshold, relationships):
         assert proceeded is False
         assert host.stats.get("sediment.skip_low") == 1
         assert "sediment.run" not in host.stats
-        # 无任何下游写入
-        assert host._worldview["relationships"] == before
+        # 无任何下游写入（关系全局 store 不变）
+        assert host._social_store["relationships"] == before
     else:
         assert proceeded is True
         assert host.stats.get("sediment.run") == 1
         assert "sediment.skip_low" not in host.stats
-        # 过闸后关系被写入
+        # 过闸后关系被写入全局 store
         for k, v in relationships.items():
-            assert host._worldview["relationships"][k] == v
+            assert host._social_store["relationships"][k] == v

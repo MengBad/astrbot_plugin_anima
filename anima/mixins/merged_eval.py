@@ -199,9 +199,9 @@ class MergedEvalMixin:
     # ── 下游统一写入（新旧路径共用） ──────────────────────────────────────────
 
     def _apply_relationships_from_map(self, relations: object, umo: str = "") -> None:
-        """把关系映射写入 worldview.relationships（含 _is_rejected 过滤与 cap 30）。
+        """把关系映射写入全局人物认知（含 _is_rejected 过滤与 cap 30）。
         relations 非 dict 或为空时静默跳过；任何情形不抛异常。
-        v0.9.8：worldview 按 umo 隔离，写入对应会话。"""
+        v0.9.9：relationships 跨群全局统一，直接写 Social_Store（umo 参数保留但不影响存储位置）。"""
         try:
             if not isinstance(relations, dict) or not relations:
                 return
@@ -212,16 +212,16 @@ class MergedEvalMixin:
                 rel_text = str(relations)
             if self._is_rejected(rel_text):
                 return
-            wv = self._read_worldview(umo)
-            if "relationships" not in wv or not isinstance(wv.get("relationships"), dict):
-                wv["relationships"] = {}
-            wv["relationships"].update(relations)
-            if len(wv["relationships"]) > _MAX_RELATIONSHIPS:
-                wv["relationships"] = dict(
-                    list(wv["relationships"].items())[-_MAX_RELATIONSHIPS:]
-                )
-            self._write_worldview(wv, umo)
-            logger.debug(f"[Anima] 关系写入（合并路径）: {list(relations.keys())}")
+            store = self._read_social_store()
+            rels = store.get("relationships", {})
+            if not isinstance(rels, dict):
+                rels = {}
+            rels.update(relations)
+            if len(rels) > _MAX_RELATIONSHIPS:
+                rels = dict(list(rels.items())[-_MAX_RELATIONSHIPS:])
+            store["relationships"] = rels
+            self._write_social_store(store)
+            logger.debug(f"[Anima] 关系写入全局（合并路径）: {list(relations.keys())}")
         except Exception as e:
             logger.debug(f"[Anima] 关系写入异常: {e}")
 

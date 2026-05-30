@@ -1,5 +1,41 @@
 ﻿# Changelog
 
+## v0.9.9 - 人物认知全局化（群环境仍按群隔离）
+
+细化 v0.9.8 的隔离粒度。v0.9.8 把整个 `worldview.json` 按群（umo）隔离，但 worldview 内部其实混了两类性质不同的数据：**群环境**（这个群是什么样）和**对人的认知**（bot 认识谁、谁跟谁什么关系）。同一个人出现在多个群时，按群切开会导致 bot 对他有多份割裂画像。本版把"对人的认知"抽到全局，群环境保持按群隔离。
+
+### 隔离边界（在 v0.9.8 基础上再细分 worldview）
+
+- **群环境（按群隔离，保持 v0.9.8）**：`environment`（氛围）/ `norms`（群规）/ `my_position`（角色在群里的位置）/ `external_knowledge`（该群联网知识）。存 `sessions/<umo>/worldview.json`。
+- **人物认知（跨群全局统一，本版新增）**：`social_graph`（群友画像，key=user_id）+ `relationships`（关系图谱，key="uid -> uid"）。抽到全局 `social_graph.json`，所有会话共用一份——A 群更新某人画像，B 群立即读到。
+
+### 实现：合并视图 + 写入分流（调用点零改动）
+
+- 新增全局 Social_Store：`_read_social_store` / `_write_social_store`（worldview.py），文件 `data/.../social_graph.json`，结构 `{social_graph, relationships}`。
+- `_read_worldview(umo)` 返回**合并视图**：该 umo 群环境 + 全局人物认知（过滤掉会话文件里残留的 social_graph/relationships，以全局为准）。
+- `_write_worldview(data, umo)` **内部分流**：pop 出 social_graph/relationships 写全局 store（各自上限 `social_graph_max`/30），其余群环境写会话文件。
+- 因为分流封装进读写两端，`_maybe_update_worldview` / `_get_worldview_text` / `_propagate_cross_relation_scar` 等绝大多数调用点**无需改动**。
+- `_apply_relationships_from_map`（merged_eval.py）改为直接读改写全局 store 的 relationships（保留 `_is_rejected` 过滤 + 30 条上限）；umo 参数保留向后兼容，不再影响存储位置。
+
+### 存量迁移（幂等、不删旧数据）
+
+- `_migrate_social_graph_v099`（main.py initialize 调用）：从旧全局 `worldview.json` 及各 `sessions/*/worldview.json` 收集历史 social_graph/relationships 并入全局 store，写 `migrated_v099` 标记；第二次为空操作；冲突按"后写覆盖"；不删旧文件。
+
+### 新配置项
+
+- `social_graph_max`（int，默认 100）：全局人物画像最大保留条数，超出保留最近 N 条
+
+### 验证
+
+- 新增 12 个测试（v0.9.9：合并视图/分流/跨群统一 7 含 3 条 Hypothesis 属性，迁移幂等 5 含 1 条属性）
+- 同步修复受 `_write_worldview`/`_apply_relationships_from_map` 行为变化影响的既有测试 host（v0.9.2 关系路径、v0.9.8 隔离）
+- **310/310 测试全过**（v0.9.8 是 298）；单群场景行为与 v0.9.8 等价
+
+### 部署
+
+覆盖重启。**升级后历史 social_graph/relationships 自动迁移到全局 `social_graph.json`，不丢失**。多群场景下"对人的认知"开始跨群统一，群环境仍各群独立。单群用户无感知。
+
+---
 ## v0.9.8 - 会话级状态隔离（方案 1：人格全局共享，会话上下文按群隔离）+ 人设校验
 
 按"方案 1"实现状态隔离：**角色本体人格跨群共享（同一个"人"），会话上下文按 umo（每个群/私聊）隔离**，解决"A 群的群友关系图谱/互动记录混进 B 群"的跨群污染。

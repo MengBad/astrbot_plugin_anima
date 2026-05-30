@@ -23,7 +23,7 @@ _vals = st.text(min_size=1, max_size=10)
 # 候选为 None/非 dict/空 dict/命中 _is_rejected 时关系保持不变；否则 update 合并且写入后 len<=30；任何情形不抛异常。
 def test_prop6_relationship_write_and_cap(existing, candidate, rejected):
     host = Host()
-    host._worldview = {"relationships": dict(existing)}
+    host._social_store = {"social_graph": {}, "relationships": dict(existing)}
     if rejected:
         # 让所有关系文本命中拒答
         host._rejected_substrings = {"{", "["}  # json.dumps 必含 { 或 空 dict {}
@@ -33,7 +33,7 @@ def test_prop6_relationship_write_and_cap(existing, candidate, rejected):
     # 不应抛异常
     host._apply_relationships_from_map(candidate)
 
-    after = host._worldview.get("relationships", {})
+    after = host._social_store.get("relationships", {})
 
     no_write = (
         candidate is None
