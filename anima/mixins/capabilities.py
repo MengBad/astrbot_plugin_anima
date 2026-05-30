@@ -592,6 +592,10 @@ class CapabilitiesMixin:
             "timestamp": datetime.now().isoformat(),
         }
         tl["records"].append(record)
+        # v0.9.6: records 上限裁剪，防止无界增长（不影响 _summarize_tool_rules 读最近记录）
+        rmax = int(self.config.get("tool_records_max", 200))
+        if len(tl["records"]) > rmax:
+            tl["records"] = tl["records"][-rmax:]
 
         # 更新偏好计数
         if tool_name not in tl["preferences"]:

@@ -155,6 +155,48 @@
     "default": 300,
     "hint": "🟢 Token 低（仅在 danger_stance_propagation 开启时影响其触发频率）。调小 = 过期更快 = 更少主动发言 = 略省 token"
   },
+  "cross_relation_low_emotion_threshold": {
+    "description": "跨关系传播的低情绪判定阈值",
+    "type": "float",
+    "default": 0.2,
+    "hint": "⚪ Token 无。v0.9.6：情绪评分低于此值才计入连续低情绪。此前硬编码 0.35 对日常闲聊过宽（闲聊本就 0.0-0.25），导致跨关系传播几乎每轮触发、空耗 CPU。调低更保守"
+  },
+  "cross_relation_streak_threshold": {
+    "description": "触发跨关系传播的连续低情绪次数门槛",
+    "type": "int",
+    "default": 5,
+    "hint": "⚪ Token 无。v0.9.6：连续低情绪达此次数才触发跨关系传播（此前 3 次，过于频繁）。调大 = 更少触发"
+  },
+  "feedback_accepted_threshold": {
+    "description": "反馈判定 accepted 的相似度阈值",
+    "type": "float",
+    "default": 0.45,
+    "hint": "⚪ Token 无。v0.9.6：用户回应与角色上次发言的相似度 ≥ 此值才判 accepted。此前 0.30 过松，日常对话延续几乎全判 accepted，反馈信号失真"
+  },
+  "feedback_ignored_threshold": {
+    "description": "反馈判定 ignored 的相似度阈值",
+    "type": "float",
+    "default": 0.15,
+    "hint": "⚪ Token 无。v0.9.6：相似度低于此值判 ignored（被忽略→转压抑话题）；与 accepted 阈值之间判 none（中性，不强化不惩罚）"
+  },
+  "contradiction_max": {
+    "description": "矛盾记录最大保留条数",
+    "type": "int",
+    "default": 50,
+    "hint": "⚪ Token 无。v0.9.6：此前 contradictions.json 无上限会无限膨胀（全项目唯一未裁剪集合），现保留最近 N 条"
+  },
+  "tool_records_max": {
+    "description": "工具学习记录最大保留条数",
+    "type": "int",
+    "default": 200,
+    "hint": "⚪ Token 无。v0.9.6：tool_learning.json 的 records 列表上限，防止无界增长"
+  },
+  "dedup_text_threshold": {
+    "description": "压抑话题/矛盾记录去重的文本相似度阈值",
+    "type": "float",
+    "default": 0.7,
+    "hint": "⚪ Token 无。v0.9.6：新压抑话题/矛盾加入前与现有条目做字符 2-gram Jaccard 比较，≥ 此值视为重复不加入。调高=更不易判重"
+  },
   "desire_dedup_threshold": {
     "description": "欲望去重相似度阈值（v0.8.3 引入，v0.8.4 默认 0.45→0.50）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.45-0.55",
     "type": "float",

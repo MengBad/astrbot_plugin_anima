@@ -83,17 +83,34 @@ class RuminationMixin:
                 if self._is_rejected(result):
                     return
                 if result and result != "无" and len(result) > 4:
+                    # v0.9.6 语义去重：与近期矛盾（最近 10 条）比对，相似则整条跳过
+                    # （不写 contradictions / 不写 self_notes / 不触发研究，避免重复噪音）
+                    contradictions = self._read_contradictions()
+                    try:
+                        from ..capability_dedup import text_similarity as _ext_text_sim
+                        dthreshold = float(self.config.get("dedup_text_threshold", 0.7))
+                        if any(
+                            _ext_text_sim(result, c.get("description", "")) >= dthreshold
+                            for c in contradictions[-10:]
+                        ):
+                            if self.config.get("log_level") == "debug":
+                                logger.debug(f"[Anima] 矛盾与近期记录相似，跳过: {result[:50]}")
+                            return
+                    except Exception:
+                        pass
+
                     # 记录矛盾
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
                     entry = f"[{timestamp}] (矛盾感知) 我发现自己在某件事上前后不一致：{result}"
                     self._append_self_notes(entry)
 
-                    # 存入矛盾历史
-                    contradictions = self._read_contradictions()
+                    # 存入矛盾历史 + v0.9.6 上限裁剪（此前无上限会无限膨胀）
                     contradictions.append({
                         "timestamp": datetime.now().isoformat(),
                         "description": result,
                     })
+                    cmax = int(self.config.get("contradiction_max", 50))
+                    contradictions = contradictions[-cmax:]
                     self._write_contradictions(contradictions)
 
                     self._append_evolution_log(

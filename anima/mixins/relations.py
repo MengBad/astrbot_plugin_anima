@@ -48,14 +48,18 @@ class RelationsMixin:
         return ""
 
     def _update_user_low_emotion_streak(self, uid: str, score: float):
-        """更新用户低情绪连续计数（<0.35 记为低）。原子读-改-写。"""
+        """更新用户低情绪连续计数（< 阈值记为低）。原子读-改-写。
+        v0.9.6：阈值与触发门槛改为可配，修复"日常闲聊每轮触发跨关系传播"的性能黑洞。
+        此前硬编码 score<0.35（闲聊本就 0.0-0.25 全中）+ 连续 3 次，过于频繁。"""
         if not uid:
             return
+        low_threshold = float(self.config.get("cross_relation_low_emotion_threshold", 0.2))
+        streak_threshold = int(self.config.get("cross_relation_streak_threshold", 5))
         triggered_propagate = {"v": False}
 
         def _update(state: dict):
             streaks = state.get("user_low_emotion_streaks", {})
-            if score < 0.35:
+            if score < low_threshold:
                 streaks[uid] = streaks.get(uid, 0) + 1
             else:
                 streaks[uid] = 0
@@ -66,7 +70,7 @@ class RelationsMixin:
                 if len(active) < 25:
                     streaks = active
             state["user_low_emotion_streaks"] = streaks
-            if streaks.get(uid, 0) >= 3:
+            if streaks.get(uid, 0) >= streak_threshold:
                 triggered_propagate["v"] = True
 
         self._atomic_update_state(_update)

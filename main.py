@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.5",
+    "0.9.6",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -312,6 +312,22 @@ class AnimaPlugin(
             self._migrate_capabilities_v094()
         except Exception as e:
             logger.debug(f"[Anima] 能力存量迁移调用失败: {e}")
+
+        # v0.9.6: embedding 可用性自检（相似度静默降级可被察觉）
+        try:
+            if self.config.get("embedding_provider_id"):
+                ok = await self._check_embedding_availability()
+                if ok:
+                    logger.info("[Anima] embedding 可用性自检：通过")
+                else:
+                    logger.warning(
+                        "[Anima] embedding 可用性自检：失败，相似度计算将回退 Jaccard（精度下降）。"
+                        "请检查 embedding_provider_id 配置与 provider 接口"
+                    )
+            else:
+                logger.info("[Anima] 未配置 embedding_provider_id，相似度计算走本地 Jaccard")
+        except Exception as e:
+            logger.debug(f"[Anima] embedding 自检异常（不影响运行）: {e}")
 
     async def _editor_sync_loop(self):
         """后台轮询：检测 WebUI 配置中 self_notes_editor 的变化并同步到 self_notes.md。

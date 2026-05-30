@@ -94,6 +94,17 @@ class FeedbackMixin:
             logger.debug(f"[Anima] embedding 调用失败: {e}")
             return None
 
+    async def _check_embedding_availability(self) -> bool:
+        """v0.9.6: 探测 embedding provider 是否真正可用（返回非空向量）。
+        用于启动自检，让"靠猜方法名调用→静默降级 Jaccard"的情况可被察觉。"""
+        if not self.config.get("embedding_provider_id"):
+            return False
+        try:
+            v = await self._embed_one("健康检查")
+            return bool(v) and isinstance(v, list) and len(v) > 0
+        except Exception:
+            return False
+
     async def _evaluate_feedback(self, event: AstrMessageEvent) -> str:
         """v0.7.0: 评估用户对角色上次发言的反馈：accepted/ignored/rejected/none。
         每个 umo 各自维护一个观察窗口。
@@ -146,13 +157,15 @@ class FeedbackMixin:
             if self.config.get("log_level") == "debug":
                 logger.debug(f"[Anima] 反馈相似度（jaccard）: {sim:.3f}")
 
-        # 阈值：保守倾向 accepted（避免把"对话延续"误判为"忽略"）
-        if sim >= 0.30:
+        # 阈值（v0.9.6 可配）：accepted/ignored 之间判 none（中性），不再保守判 accepted
+        acc_t = float(self.config.get("feedback_accepted_threshold", 0.45))
+        ign_t = float(self.config.get("feedback_ignored_threshold", 0.15))
+        if sim >= acc_t:
             return "accepted"
-        if sim < 0.10:
+        if sim < ign_t:
             return "ignored"
-        # 中间区段：判 accepted（用户做了相关回应）
-        return "accepted"
+        # 中间区段：判 none（此前误判 accepted，导致日常对话延续被大量当成正反馈）
+        return "none"
 
     def _process_feedback(self, feedback: str, event: AstrMessageEvent):
         """根据反馈信号调整系统状态"""

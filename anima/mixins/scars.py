@@ -45,8 +45,22 @@ class ScarsMixin:
         self._write_json(self.suppressed_topics_path, topics)
 
     def _add_suppressed_topic(self, topic: str, source: str, target_user: str = ""):
-        """新增一个压抑话题"""
+        """新增一个压抑话题。
+        v0.9.6：加入前与现有未解决话题做文本相似度去重，避免同一件事以不同措辞反复堆积。"""
         topics = self._read_suppressed_topics()
+        # v0.9.6 语义去重：复用 capability_dedup.text_similarity（字符 2-gram Jaccard，不调 LLM）
+        try:
+            from ..capability_dedup import text_similarity as _ext_text_sim
+            threshold = float(self.config.get("dedup_text_threshold", 0.7))
+            for t in topics:
+                if t.get("resolved"):
+                    continue
+                if _ext_text_sim(topic, t.get("topic", "")) >= threshold:
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[Anima] 压抑话题与现有相似，跳过: {topic[:40]}")
+                    return
+        except Exception:
+            pass
         topics.append({
             "topic": topic,
             "created_at": datetime.now().isoformat(),

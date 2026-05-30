@@ -1,5 +1,43 @@
 ﻿# Changelog
 
+## v0.9.6 - 卫生治理 + 性能短板补平
+
+补齐前序版本"已立项未实现"的卫生项，并修复生产日志暴露的明确性能问题。把反馈/欲望/世界观/压抑矛盾几个维度的短板补平，所有改动局部、低风险、不改默认启用功能集。
+
+### 性能：跨关系传播每轮触发（日志已证实的黑洞）
+
+生产日志显示几乎每条消息后都打印"跨关系传播触发"。根因：低情绪判定 `score < 0.35` 对日常闲聊过宽（闲聊本就 0.0–0.25 全中），连续 3 次即触发，导致每轮都跑一次 `_propagate_cross_relation_scar`（读写 worldview + state）。
+
+修复：阈值与门槛改可配——`cross_relation_low_emotion_threshold`（默认 0.2）+ `cross_relation_streak_threshold`（默认 5）。传播效果（+0.04 微调）不变，只收紧触发频率。
+
+### 信号质量：反馈 accepted 阈值收紧
+
+`_evaluate_feedback` 此前 `sim >= 0.30` 判 accepted 且中间区段也判 accepted，日常对话延续几乎全判 accepted，反馈信号失真。改为三段：`feedback_accepted_threshold`（0.45）以上 accepted、`feedback_ignored_threshold`（0.15）以下 ignored、中间判 **none**（中性）。否定词优先判 rejected 不变。
+
+### 卫生：去重 + 上限
+
+- **压抑话题语义去重**：`_add_suppressed_topic` 加入前与未解决话题做字符 2-gram Jaccard 比较（复用 `capability_dedup.text_similarity`），相似度 ≥ `dedup_text_threshold`（0.7）则不重复加。
+- **矛盾记录去重 + 上限**：矛盾写入前与近期 10 条比对去重；新增 `contradiction_max`（50）上限裁剪（此前是全项目唯一无上限集合）。
+- **工具学习记录上限**：`tool_records_max`（200），防止 `records` 无界增长。
+
+### 可观测：embedding 启动自检
+
+`_embed_one` 靠猜方法名调用，框架改名会静默降级到 Jaccard。新增 `_check_embedding_availability`，`initialize()` 时探测一次并记录日志（通过/失败/未配置），让精度静默下降可被察觉。
+
+### 新配置项
+
+`cross_relation_low_emotion_threshold`(0.2) / `cross_relation_streak_threshold`(5) / `feedback_accepted_threshold`(0.45) / `feedback_ignored_threshold`(0.15) / `contradiction_max`(50) / `tool_records_max`(200) / `dedup_text_threshold`(0.7)，全部 ⚪ 零 token。
+
+### 验证
+
+- 新增 14 个测试（5 条 Correctness Property 用 Hypothesis 覆盖：跨关系触发条件 / 反馈三段判定 / 压抑去重 / 矛盾去重+上限 / 工具记录上限；外加 embedding 自检）。
+- **273/273 测试全过**（v0.9.5 是 259）。
+
+### 部署
+
+覆盖重启。默认行为不变（新阈值默认值已是更合理的收紧值）。升级后跨关系传播日志会明显变少，反馈不再被大量误判 accepted，矛盾/压抑/工具记录不再无限堆积。
+
+---
 ## v0.9.5 - 高危功能名副其实化 + 横切缺陷修复
 
 整合两份审计（高危功能保真度 + 能力闭环）结论。7 个高危功能里有的名不副实、有的几乎触发不了，本版让它们"开启时行为与配置语义一致"。所有高危功能仍默认关闭，默认行为不变。
