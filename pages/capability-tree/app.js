@@ -139,9 +139,11 @@ function filterCapabilities() {
 
   const container = document.getElementById('capabilities-list');
   const sorted = filtered.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-  container.innerHTML = sorted.length > 0 
-    ? sorted.map(createCapabilityCard).join('') 
-    : '<p class="no-data">没有匹配的能力</p>';
+  if (sorted.length > 0) {
+    renderCapabilities(sorted);
+  } else {
+    container.innerHTML = '<p class="no-data">没有匹配的能力</p>';
+  }
 }
 
 async function loadEvents() {

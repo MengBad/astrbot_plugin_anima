@@ -1,5 +1,46 @@
 ﻿# Changelog
 
+## v0.9.3 - 独立端口仪表盘升级为多页（运行仪表盘 + 能力树）
+
+v0.9.2 的独立端口只搬了"运行仪表盘"一个页面。本版把 AstrBot WebUI 里能看的页面**全部**搬上独立端口，并加顶部导航在多页间切换。
+
+### 多页 + 导航
+
+- 独立端口现在同时提供两个页面，与 WebUI Plugin Page 一致：
+  - **运行仪表盘**（`/`）：今日各子系统运行统计
+  - **能力树**（`/capability-tree/`）：角色自创能力 + 自主演化事件
+- 每个页面顶部注入一条 **Anima 导航条**（带 token 的页面间链接，当前页高亮），无需手动改 URL 即可切换。
+- 复用 `pages/<page>/` 的真实三件套，不复制页面逻辑。
+
+### 数据接口补齐
+
+独立端口接上 `plugin_api.py` 已有的全部只读接口（全部要求 token）：
+`/api/runtime_stats`、`/api/stats`、`/api/capabilities`、`/api/events`、`/api/export`、`/api/config`。
+数据直接复用宿主插件方法，返回结构与 WebUI Plugin Page 完全一致。
+
+### bridge shim 升级
+
+注入的 `window.AstrBotPluginPage` shim 现在支持 `apiGet(path, params)` 第二参数（能力树用 `apiGet('events', {limit:20})`），并统一打到绝对 `/api/` 路径，兼容子目录下的页面。
+
+### 顺手修的 bug
+
+`pages/capability-tree/app.js` 的 `filterCapabilities()` 调用了不存在的 `createCapabilityCard`，导致筛选时报错。改为复用 `renderCapabilities`。此修复对 WebUI Plugin Page 同样生效。
+
+### 安全不变
+
+仍是默认关闭、默认仅绑 `127.0.0.1`、强制 token 鉴权（恒定时间比较）。所有页面与数据接口都过 token 校验，静态资源（app.js/style.css）不含敏感数据故不强制。
+
+### 验证
+
+- 独立端口测试从 14 增至 21（新增多页文件可读、未知页面拒绝、导航条、页面渲染注入等）。
+- **220/220 测试全过**（v0.9.2 是 213）。
+- 另用真实 aiohttp 做了 live 端到端冒烟：两页渲染 + 6 个数据接口 + token 鉴权（无 token 401）+ 中文 JSON 往返，全部通过。
+
+### 部署
+
+覆盖重启。默认行为不变（独立端口仍默认关闭）。开启 `dashboard_standalone_enabled` 后，`/anima_dashboard_url` 拿到的地址打开即是带导航的多页仪表盘。
+
+---
 ## v0.9.2 - 独立端口仪表盘 + 沉淀三调用合并
 
 本版两件事：一是给运行仪表盘加一个**可选的独立 HTTP 端口**入口（满足"像别的插件那样开一个独立网址访问"的习惯）；二是把沉淀流程里**三次独立内部 LLM 调用合并为一次结构化 JSON 调用**，约省 2/3 内部 token。两者都默认关闭、可逆，不改变默认行为。
