@@ -117,11 +117,12 @@ class CapabilitiesMixin:
         return _ext_normalize_cap_sig(name, description)
 
     def _find_similar_capability(self, capability: dict, caps: list) -> int:
-        """v0.7.0: 委托给 anima.capability_dedup"""
+        """v0.7.0: 委托给 anima.capability_dedup。v0.9.4: 传入文本相似度阈值。"""
         return _ext_find_similar_cap(
             capability.get("name", ""),
             capability.get("description", ""),
             caps,
+            text_threshold=float(self.config.get("capability_dedup_text_threshold", 0.6)),
         )
 
     def _create_or_update_capability(self, capability: dict):
@@ -171,7 +172,11 @@ class CapabilitiesMixin:
             capability.setdefault("id", f"cap_{int(time.time())}")
             capability.setdefault("created_at", datetime.now().isoformat())
             capability.setdefault("usage_count", 0)
-            capability.setdefault("confidence", 0.6)
+            # v0.9.4: 置信度脱钩 LLM 自评 —— 新建能力一律从未验证基线起步，
+            #         忽略 payload 里可能带的自报值；只有 _apply_capability_feedback
+            #         （真实使用反馈）能把它提上去。usage>0 的合并更新不走这里。
+            baseline = float(self.config.get("capability_initial_confidence", 0.3))
+            capability["confidence"] = baseline
             capability.setdefault("corrections", [])
             # default_register_as_independent_tool：未显式标记时，按全局默认决定
             if "register_as_independent_tool" not in capability:
@@ -212,8 +217,10 @@ class CapabilitiesMixin:
             "【我的个人技能与方法论】",
             "以下这些是我通过自己的经历、研究和思考，一点一点学会并创造出来的工具和方法。",
             "我更倾向于使用自己真正理解和掌握的东西，因为它们属于我自己。"
+            "遇到合适的场景，我会主动调用其中最贴合的那一个。"
         ]
-        for cap in sorted(capabilities, key=lambda x: x.get("confidence", 0), reverse=True)[:6]:
+        # v0.9.4: 按价值分排序（真实用过的优先），而非自封置信度
+        for cap in sorted(capabilities, key=self._capability_value_score, reverse=True)[:6]:
             name = cap.get("name", "未命名能力")
             desc = cap.get("description", "")[:140]
             how = cap.get("how_to_use", "")[:110]
@@ -302,14 +309,38 @@ class CapabilitiesMixin:
         except Exception as e:
             logger.warning(f"[Anima] 动态注册独立工具 {safe_tool_name} 失败: {e}")
 
+    def _resolve_capability(self, capability_name: str, caps_list: list) -> dict:
+        """v0.9.4: 解析能力名到具体能力（降低使用门槛）。
+        优先级：精确名 → 不区分大小写子串 → 文本相似度最高且达阈值。找不到返回 None。"""
+        if not capability_name or not caps_list:
+            return None
+        # 1. 精确
+        for c in caps_list:
+            if c.get("name") == capability_name:
+                return c
+        # 2. 不区分大小写子串（双向）
+        low = capability_name.lower()
+        for c in caps_list:
+            cn = (c.get("name", "") or "").lower()
+            if cn and (low in cn or cn in low):
+                return c
+        # 3. 文本相似度最高且达阈值
+        try:
+            from ..capability_dedup import text_similarity as _ext_text_sim
+            threshold = float(self.config.get("capability_dedup_text_threshold", 0.6))
+            best, best_sim = None, 0.0
+            for c in caps_list:
+                sim = _ext_text_sim(capability_name, c.get("name", "") or "")
+                if sim >= threshold and sim > best_sim:
+                    best, best_sim = c, sim
+            return best
+        except Exception:
+            return None
+
     async def _execute_single_capability(self, capability_name: str, query_or_args: str):
         """被动态注册的独立能力工具调用的统一执行入口（复用主逻辑）。"""
         caps = self._read_personal_capabilities()
-        target = None
-        for c in caps.get("capabilities", []):
-            if c.get("name") == capability_name:
-                target = c
-                break
+        target = self._resolve_capability(capability_name, caps.get("capabilities", []))
         if not target:
             return ToolExecResult(result=f"未找到能力「{capability_name}」")
 
@@ -342,14 +373,75 @@ class CapabilitiesMixin:
 
         return ToolExecResult(result="能力执行失败（请查看日志）")
 
+    def _capability_value_score(self, cap: dict, now=None) -> float:
+        """v0.9.4: 能力价值分（不含自封 confidence）。
+        用于超总数上限时的淘汰排序与注入排序。
+        = 使用次数*2 + 修正数*0.5 + 新近度(90 天线性衰减到 0)。"""
+        now = now or datetime.now()
+        usage = cap.get("usage_count", 0) or 0
+        corr = len(cap.get("corrections", []) or [])
+        try:
+            days = (now - datetime.fromisoformat(cap.get("last_updated", ""))).days
+        except Exception:
+            days = 999
+        recency = max(0.0, 1.0 - days / 90.0)
+        return usage * 2.0 + corr * 0.5 + recency
+
+    def _migrate_capabilities_v094(self):
+        """v0.9.4: 存量迁移 —— 把历史"自封高分但 0 使用"的能力置信度归正到基线。
+        幂等（写 migrated_v094 标记）；不删任何能力；usage>0 的保留原值。
+        受 capability_system_enabled 控制。"""
+        if not self.config.get("capability_system_enabled", True):
+            return
+        try:
+            caps = self._read_personal_capabilities()
+            if caps.get("migrated_v094"):
+                return
+            baseline = float(self.config.get("capability_initial_confidence", 0.3))
+            changed = 0
+            for c in caps.get("capabilities", []):
+                if c.get("usage_count", 0) == 0 and c.get("confidence", 0) > baseline:
+                    c["confidence"] = baseline
+                    changed += 1
+            caps["migrated_v094"] = True
+            self._write_personal_capabilities(caps)
+            if changed:
+                logger.info(
+                    f"[Anima] v0.9.4 能力存量迁移：{changed} 条 0 使用能力置信度归正为 {baseline}"
+                )
+        except Exception as e:
+            logger.debug(f"[Anima] 能力存量迁移异常: {e}")
+
+    def _audit_capabilities(self) -> dict:
+        """v0.9.4: 只读体检 —— 找出可疑能力（0 使用 / 疑似自封高分）。不调 LLM、不改数据。"""
+        caps = self._read_personal_capabilities().get("capabilities", [])
+        baseline = float(self.config.get("capability_initial_confidence", 0.3))
+        zero_use = [c for c in caps if c.get("usage_count", 0) == 0]
+        inflated = [c for c in zero_use if c.get("confidence", 0) > baseline]
+        total = len(caps)
+        return {
+            "total": total,
+            "avg_conf": (sum(c.get("confidence", 0) for c in caps) / total) if total else 0.0,
+            "total_usage": sum(c.get("usage_count", 0) for c in caps),
+            "total_corrections": sum(len(c.get("corrections", [])) for c in caps),
+            "zero_use": len(zero_use),
+            "inflated": len(inflated),
+            "inflated_samples": [c.get("name", "") for c in inflated[:8]],
+            "max_total": int(self.config.get("capability_max_total", 40)),
+        }
+
     def _maintain_capabilities_health(self):
         """
-        能力系统健康管理（彻底版）。
-        规则：
-        - 极低置信 + 极少使用 + 陈旧 → 放弃
-        - 名字/描述高度相似 → 合并（保留最好的）
-        - 长期未用（>60天）且置信一般 → 温和降权
-        - 记录所有健康操作到日记和演化日志
+        能力系统健康管理（v0.9.4 重构）。
+        规则顺序：
+        1. 未使用超期（无视自封置信度）：usage==0 且 days>drop → 淘汰；
+           usage==0 且 days>decay → 置信度 *0.9（下限 0.05）
+        2. 旧规则保留：极低置信 + 极少使用 + 陈旧 → 淘汰
+        3. 去重合并：复用创建期 _find_similar_capability（不再用 name[:12] 前缀），
+           合并时累计 usage + 合并 corrections
+        4. 硬上限：剩余数 > capability_max_total 时，按价值分（不含自封置信度）
+           升序淘汰最差者到上限
+        5. 持久化 + 演化日志
         """
         caps = self._read_personal_capabilities()
         original = caps.get("capabilities", [])
@@ -357,80 +449,88 @@ class CapabilitiesMixin:
             return
 
         now = datetime.now()
-        # 第一遍：按 similar_key 聚合，每个 key 保留单一最佳 cap，并累计使用次数与修正历史
-        name_to_cap: dict = {}
+        decay_days = int(self.config.get("capability_unused_decay_days", 14))
+        drop_days = int(self.config.get("capability_unused_drop_days", 30))
         dropped_count = 0
-        any_decayed = False  # 标记是否有"长期闲置降权"
+        any_decayed = False
 
+        # 第一遍：未使用超期 + 旧低价值规则 → 过滤；幸存者做去重合并
+        survivors: list = []
         for cap in original:
-            name = cap.get("name", "未命名")
             conf = cap.get("confidence", 0.5)
-            usage = cap.get("usage_count", 0)
+            usage = cap.get("usage_count", 0) or 0
             last = cap.get("last_updated", "")
-
             try:
                 last_dt = datetime.fromisoformat(last) if last else now
                 days = (now - last_dt).days
             except Exception:
                 days = 999
 
-            # 规则1: 极低价值 → 放弃
-            if conf < 0.2 and usage <= 1 and days > 25:
-                self._append_capabilities_diary(f"健康管理：我放弃了几乎没用过的低价值能力「{name}」")
+            # 规则1a: 未使用且超过淘汰天数 → 放弃（无视置信度）
+            if usage == 0 and days > drop_days:
+                self._append_capabilities_diary(
+                    f"健康管理：我放弃了创造后从没用过、已经放了 {days} 天的能力「{cap.get('name','')}」"
+                )
                 dropped_count += 1
                 continue
 
-            # 规则2: 长期闲置降权
-            if days > 60 and conf < 0.7:
-                new_conf = max(0.2, conf * 0.92)
+            # 规则2: 极低价值 → 放弃（旧规则保留）
+            if conf < 0.2 and usage <= 1 and days > 25:
+                self._append_capabilities_diary(
+                    f"健康管理：我放弃了几乎没用过的低价值能力「{cap.get('name','')}」"
+                )
+                dropped_count += 1
+                continue
+
+            # 规则1b: 未使用且超过降权天数 → 降权（无视置信度）
+            if usage == 0 and days > decay_days:
+                new_conf = max(0.05, conf * 0.9)
                 if new_conf != conf:
                     cap["confidence"] = new_conf
                     any_decayed = True
 
-            # 规则3: 相似性合并
-            similar_key = name.lower()[:12]
-            if similar_key in name_to_cap:
-                existing = name_to_cap[similar_key]
-                # 选 confidence 更高者作为主体
-                if cap.get("confidence", 0) > existing.get("confidence", 0):
-                    winner, loser = cap, existing
-                else:
-                    winner, loser = existing, cap
-                # 累计使用次数
+            # 规则3: 去重合并 —— 复用创建期语义+文本去重
+            idx = self._find_similar_capability(cap, survivors)
+            if idx >= 0:
+                winner = survivors[idx]
+                loser = cap
+                # 选价值分更高者作为主体（不依赖自封置信度）
+                if self._capability_value_score(loser, now) > self._capability_value_score(winner, now):
+                    winner, loser = loser, winner
                 winner["usage_count"] = winner.get("usage_count", 0) + loser.get("usage_count", 0)
-                # 合并修正历史
-                merged_corr = winner.get("corrections", []) + loser.get("corrections", [])
+                merged_corr = (winner.get("corrections", []) or []) + (loser.get("corrections", []) or [])
                 if merged_corr:
                     winner["corrections"] = merged_corr
-                name_to_cap[similar_key] = winner
+                survivors[idx] = winner
                 continue
 
-            name_to_cap[similar_key] = cap
+            survivors.append(cap)
 
-        kept = list(name_to_cap.values())
+        # 第四遍：硬上限，按价值分升序淘汰最差者
+        max_total = int(self.config.get("capability_max_total", 40))
+        capped_count = 0
+        if len(survivors) > max_total:
+            survivors.sort(key=lambda c: self._capability_value_score(c, now), reverse=True)
+            capped_count = len(survivors) - max_total
+            survivors = survivors[:max_total]
 
-        # 任何修剪/合并/降权都需要持久化（之前漏掉了"仅降权"的场景）
+        kept = survivors
+
         if len(kept) != len(original) or any_decayed:
             caps["capabilities"] = kept
             self._write_personal_capabilities(caps)
             self._append_evolution_log(
                 trigger="capability_health_maintenance",
                 old_summary=f"维护前 {len(original)}",
-                new_content=f"维护后 {len(kept)}（修剪/合并/降权，丢弃 {dropped_count}，降权 {'有' if any_decayed else '无'}）",
+                new_content=(
+                    f"维护后 {len(kept)}（丢弃 {dropped_count}，超上限淘汰 {capped_count}，"
+                    f"降权 {'有' if any_decayed else '无'}）"
+                ),
             )
-            # 尝试提示清理动态注册的旧工具（AstrBot 当前工具管理对运行时删除支持有限）
-            logger.info("[Anima] 能力健康管理完成，建议重载插件以完全清理已放弃能力的独立工具")
-            # 尝试主动注销已放弃能力的独立工具（尽力而为）
-            try:
-                tool_mgr = self.context.get_llm_tool_manager()
-                kept_names = {k.get("name") for k in kept}
-                for cap in original:
-                    if cap.get("name") not in kept_names:
-                        safe_name = "my_" + re.sub(r'[^a-z0-9_]', '_', cap.get("name", "").lower())[:40]
-                        if any(t.name == safe_name for t in tool_mgr.func_list):
-                            logger.info(f"[Anima] 检测到已放弃能力对应独立工具 {safe_name}，请重载插件清理")
-            except Exception as e:
-                logger.debug(f"[Anima] 工具列表清理提示异常: {e}")
+            logger.info(
+                f"[Anima] 能力健康维护：{len(original)} → {len(kept)} "
+                f"（丢弃 {dropped_count} / 超限淘汰 {capped_count}）"
+            )
 
     def _apply_capability_feedback(self, capability_name: str, success: bool, reflection: str = ""):
         """

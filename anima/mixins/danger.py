@@ -848,7 +848,7 @@ class DangerMixin:
                             "name": cap_data.get("name", f"自发学会：{reason[:20]}"),
                             "description": cap_data.get("description", ""),
                             "how_to_use": cap_data.get("how_to_use", ""),
-                            "confidence": float(cap_data.get("confidence", 0.55)),
+                            # v0.9.4: 忽略 LLM 自报置信度，新能力从未验证基线起步
                             "category": cap_data.get("category", "self_discovered"),
                             "source_research": reason,
                         }
@@ -962,7 +962,7 @@ class DangerMixin:
                             "name": cap_data.get("name", "未命名研究成果"),
                             "description": cap_data.get("description", ""),
                             "how_to_use": cap_data.get("how_to_use", ""),
-                            "confidence": float(cap_data.get("confidence", 0.6)),
+                            # v0.9.4: 忽略 LLM 自报置信度，新能力从未验证基线起步
                             "category": cap_data.get("category", "general"),
                             "source_research": desire_content,
                             "research_summary": result_text[:300],
@@ -983,15 +983,14 @@ class DangerMixin:
                         self._append_evolution_log(
                             trigger="autonomous_capability_creation",
                             old_summary=desire_content[:100],
-                            new_content=f"角色自主创造个人能力「{cap_name}」| 置信度 {cap_data.get('confidence', 0.6)}",
+                            new_content=f"角色自主创造个人能力「{cap_name}」（置信度从未验证基线起步，待真实使用校正）",
                         )
 
                         # 写第一人称成长日记
                         diary_entry = (
                             f"我因为「{desire_content}」去研究了。\n"
                             f"我把这次研究成果整理成了自己的工具：「{cap_name}」。\n"
-                            f"目前置信度 {cap_data.get('confidence', 0.6)}。\n"
-                            "下次遇到类似情况我应该会直接用它。"
+                            "它还没经过实战检验，等我真正用过几次，才知道它到底靠不靠谱。"
                         )
                         self._append_capabilities_diary(diary_entry)
 

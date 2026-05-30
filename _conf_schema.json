@@ -296,6 +296,36 @@
     "default": true,
     "hint": "⚪ Token 无（合并/修剪走相似度计算，不调 LLM）"
   },
+  "capability_initial_confidence": {
+    "description": "新建个人能力的未验证基线置信度",
+    "type": "float",
+    "default": 0.3,
+    "hint": "⚪ Token 无。v0.9.4：LLM 自报的置信度被忽略，新能力一律从此基线起步，只有真实使用反馈（_apply_capability_feedback）能提升。调低=更保守，避免没用过的能力虚高占榜"
+  },
+  "capability_unused_decay_days": {
+    "description": "能力未使用降权天数阈值",
+    "type": "int",
+    "default": 14,
+    "hint": "⚪ Token 无。v0.9.4：能力 0 使用且距上次更新超过此天数 → 健康维护时降权（无视自封置信度）"
+  },
+  "capability_unused_drop_days": {
+    "description": "能力未使用淘汰天数阈值",
+    "type": "int",
+    "default": 30,
+    "hint": "⚪ Token 无。v0.9.4：能力 0 使用且距上次更新超过此天数 → 健康维护时淘汰"
+  },
+  "capability_max_total": {
+    "description": "个人能力总数硬上限",
+    "type": "int",
+    "default": 40,
+    "hint": "⚪ Token 无。v0.9.4：能力总数超出时按价值分（使用次数/修正/新近度，不含自封置信度）淘汰最差者，防止增殖失控"
+  },
+  "capability_dedup_text_threshold": {
+    "description": "能力去重的通用文本相似度阈值",
+    "type": "float",
+    "default": 0.6,
+    "hint": "⚪ Token 无。v0.9.4：能力名+描述的字符 2-gram Jaccard 相似度 ≥ 此值视为同概念合并（覆盖无核心语义槽位的中文长名）。调高=更不易合并"
+  },
 
   "allow_capability_code_execution": {
     "description": "允许能力卡中包含并执行代码片段",

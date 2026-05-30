@@ -64,6 +64,31 @@ def _split_camelcase(s: str) -> str:
     return s
 
 
+def _char_ngrams(text: str, n: int = 2) -> Set[str]:
+    """字符级 n-gram 集合（v0.9.4）。对中文长名稳健，不依赖分词。
+    剥掉空白与常见标点噪音后再切。"""
+    if not text:
+        return set()
+    cleaned = re.sub(r'[\s\(\)\[\]【】「」『』，。、:：;；,\.\-_/\\]+', '', text.lower())
+    if len(cleaned) < n:
+        return {cleaned} if cleaned else set()
+    return {cleaned[i:i + n] for i in range(len(cleaned) - n + 1)}
+
+
+def text_similarity(a: str, b: str) -> float:
+    """两段文本的字符 2-gram Jaccard 相似度（v0.9.4，0.0–1.0）。
+    用于无核心语义槽位的中文长名能力去重兜底。出错返回 0.0（视为不相似）。"""
+    try:
+        ga, gb = _char_ngrams(a, 2), _char_ngrams(b, 2)
+        if not ga or not gb:
+            return 0.0
+        inter = len(ga & gb)
+        union = len(ga | gb)
+        return inter / union if union else 0.0
+    except Exception:
+        return 0.0
+
+
 def normalize_capability_signature(name: str, description: str = "") -> Set[str]:
     """把能力名 + 描述归一化成关键词集合，用于近似去重。
 
@@ -111,7 +136,9 @@ def normalize_capability_signature(name: str, description: str = "") -> Set[str]
     return normalized - _STOP
 
 
-def find_similar_capability(name: str, description: str, others: List[dict]) -> int:
+def find_similar_capability(
+    name: str, description: str, others: List[dict], text_threshold: float = 0.6
+) -> int:
     """在已有能力列表里找一个语义近似的，返回索引；没找到返回 -1。
 
     v0.7.1 调严的分级门槛：
@@ -120,21 +147,33 @@ def find_similar_capability(name: str, description: str, others: List[dict]) -> 
     - 新签名 ≥ 4 槽位：要求 ≥ 2 个 overlap 且占新签名 ≥ 30%（之前 40%）
     - 新签名 2-3 槽位：要求 ov ≥ 2（之前要求 ov==n）
     - 新签名 1 槽位：仅在该槽位是核心同义槽位时合并
+
+    v0.9.4 泛化：语义槽位匹配未命中时，追加**通用文本相似度兜底**（名+描述的字符
+    2-gram Jaccard ≥ text_threshold 即视为同概念）。覆盖无核心槽位的中文长名能力，
+    且阈值偏高（默认 0.6）以保证不相关能力不被误合并。
     """
     new_sig = normalize_capability_signature(name, description)
-    if not new_sig:
-        return -1
-
     new_core = new_sig & _CORE_SLOTS
+    new_text = (name or "") + " " + (description or "")
 
     best_idx = -1
     best_overlap = 0
+    # 文本相似度兜底的最佳候选（独立于槽位重叠的打分）
+    best_text_idx = -1
+    best_text_sim = 0.0
 
     for i, c in enumerate(others):
+        c_text = (c.get("name", "") or "") + " " + (c.get("description", "") or "")
+        # 通用文本相似度兜底候选（无论是否有签名都算）
+        sim = text_similarity(new_text, c_text)
+        if sim >= text_threshold and sim > best_text_sim:
+            best_text_sim = sim
+            best_text_idx = i
+
         old_sig = normalize_capability_signature(
             c.get("name", ""), c.get("description", "")
         )
-        if not old_sig:
+        if not new_sig or not old_sig:
             continue
         overlap = new_sig & old_sig
         ov = len(overlap)
@@ -161,4 +200,7 @@ def find_similar_capability(name: str, description: str, others: List[dict]) -> 
             best_overlap = ov
             best_idx = i
 
-    return best_idx
+    # 语义槽位匹配优先；未命中则用文本相似度兜底
+    if best_idx >= 0:
+        return best_idx
+    return best_text_idx

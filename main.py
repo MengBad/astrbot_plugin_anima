@@ -72,7 +72,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "0.9.3",
+    "0.9.4",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -307,6 +307,12 @@ class AnimaPlugin(
             except Exception as e:
                 logger.warning(f"[Anima] 独立端口仪表盘启动失败: {e}")
 
+        # v0.9.4: 个人能力存量迁移（把历史自封高分但 0 使用的能力归正到基线，幂等）
+        try:
+            self._migrate_capabilities_v094()
+        except Exception as e:
+            logger.debug(f"[Anima] 能力存量迁移调用失败: {e}")
+
     async def _editor_sync_loop(self):
         """后台轮询：检测 WebUI 配置中 self_notes_editor 的变化并同步到 self_notes.md。
         这是 README 宣称的"WebUI 保存即生效"的真正接通点。
@@ -376,11 +382,8 @@ class AnimaPlugin(
                     return ToolExecResult(result="内部错误：能力系统未正确初始化")
 
                 caps = plugin._read_personal_capabilities()
-                target = None
-                for c in caps.get("capabilities", []):
-                    if c.get("name") == capability_name or capability_name.lower() in c.get("name", "").lower():
-                        target = c
-                        break
+                # v0.9.4: 用统一的模糊解析（精确 → 子串 → 文本相似度），降低使用门槛
+                target = plugin._resolve_capability(capability_name, caps.get("capabilities", []))
 
                 if not target:
                     return ToolExecResult(result=f"[我的能力系统] 我目前没有叫「{capability_name}」的个人工具。")
@@ -1054,6 +1057,39 @@ class AnimaPlugin(
         with open(export_path, "w", encoding="utf-8") as f:
             f.write(pretty)
         yield event.plain_result(f"[Anima] 能力树已导出（含统计）：{export_path}\n\n统计: {stats}\n\n前 600 字预览：\n{pretty[:600]}...")
+
+    @filter.command("anima_capabilities_audit")
+    async def cmd_anima_capabilities_audit(self, event: AstrMessageEvent):
+        """v0.9.4 管理员：体检个人能力库健康状况（只读，不调 LLM）。
+        快速看出 0 使用能力数、疑似自封高分数，判断是否需要清理。"""
+        a = self._audit_capabilities()
+        if a["total"] == 0:
+            yield event.plain_result("[Anima] 能力库为空，暂无可体检的个人能力。")
+            return
+        lines = [
+            "【Anima 能力库体检】",
+            "",
+            f"■ 总能力数: {a['total']}（硬上限 {a['max_total']}）",
+            f"■ 平均置信度: {a['avg_conf']:.1%}",
+            f"■ 总使用次数: {a['total_usage']}",
+            f"■ 总修正次数: {a['total_corrections']}",
+            "",
+            f"■ 0 使用能力: {a['zero_use']} / {a['total']}",
+            f"■ 疑似自封高分（0 使用且置信高于基线）: {a['inflated']}",
+        ]
+        if a["inflated_samples"]:
+            lines.append("   样本：")
+            for n in a["inflated_samples"]:
+                lines.append(f"     · {n}")
+        lines.append("")
+        if a["zero_use"] > 0:
+            lines.append(
+                "提示：0 使用能力会随健康维护按 capability_unused_decay_days/"
+                "drop_days 自然降权与淘汰；也可 /anima_reset 清空重来。"
+            )
+        else:
+            lines.append("提示：能力库健康，所有能力都被真实使用过。")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command("anima_scan_rejects")
     async def cmd_anima_scan_rejects(self, event: AstrMessageEvent):

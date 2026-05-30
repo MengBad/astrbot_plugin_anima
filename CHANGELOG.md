@@ -1,5 +1,50 @@
 ﻿# Changelog
 
+## v0.9.4 - 个人能力系统闭环修复（解开"只增不减"的死锁）
+
+生产仪表盘暴露：**105 个能力 / 平均置信度 93.2% / 总使用 0 次 / 总修正 0 次**。这是一条**从未闭合的自我修正闭环**——系统只生产、不验证、不修剪。
+
+### 根因
+
+1. 能力合成直接采用 LLM **自报的** confidence（自封 0.9+）。
+2. 健康修剪所有规则都以"低置信度"为前提，自封高分让它们**永不触发** → 只增不减。
+3. `usage_count` 只在模型精确调用晦涩能力名时 +1 → 永远 0 次 → 置信度永远得不到校正。
+4. 创建期去重（语义槽位）与维护期去重（`name[:12]` 前缀）两套不一致，且为单一"戉系"家族过拟合。
+
+### P0 — 解死锁
+
+- **置信度脱钩自评**：新建能力一律从未验证基线 `capability_initial_confidence`（默认 0.3）起步，**忽略 LLM 自报值**；只有 `_apply_capability_feedback`（真实使用反馈）能提升。`danger.py` 两处合成不再写自报 confidence。
+- **修剪对"未使用"敏感**：`usage_count==0` 且超过 `capability_unused_decay_days`（14）→ 降权；超过 `capability_unused_drop_days`（30）→ 淘汰。**无视自封置信度**，没用过的能力自然老化退场。
+
+### P1 — 防再增殖
+
+- **总数硬上限** `capability_max_total`（40）：超限按**价值分**（使用次数/修正/新近度，不含自封置信度）升序淘汰最差者。
+- **去重统一 + 泛化**：维护期改用创建期的 `_find_similar_capability`；去重新增**通用文本相似度兜底**（名+描述的字符 2-gram Jaccard ≥ `capability_dedup_text_threshold` 默认 0.6），覆盖无核心语义槽位的中文长名能力。既有"不相关能力不误合并"断言全部保持。
+
+### P2 — 让闭环可闭合
+
+- **体检命令 `/anima_capabilities_audit`**：只读，输出总数/平均置信/总使用/总修正/0 使用数/疑似自封高分数及样本。
+- **存量迁移**：升级后首次加载把所有 `usage_count==0 且 confidence>基线` 的能力归正到基线（幂等、不删数据、用过的保留原值），让修复立即对现有 105 个能力生效。
+- **降低使用门槛**：能力注入上下文按价值分排序（真实用过的优先）；`use_my_personal_capability` 与独立工具的能力名解析加模糊匹配（精确 → 子串 → 文本相似度）。
+
+### 新配置项
+
+`capability_initial_confidence`(0.3) / `capability_unused_decay_days`(14) / `capability_unused_drop_days`(30) / `capability_max_total`(40) / `capability_dedup_text_threshold`(0.6)，全部 ⚪ 零 token。
+
+### 新命令
+
+- `/anima_capabilities_audit`：能力库健康体检。
+
+### 验证
+
+- 新增 16 个测试（6 条 Correctness Property 用 Hypothesis 覆盖：置信度脱钩 / 未使用退场 / 硬上限 / 去重泛化 / 迁移幂等 / 价值分不含自封置信度；外加体检、模糊解析、配置项）。
+- **236/236 测试全过**（v0.9.3 是 220），既有 `test_capability_dedup.py` 全部断言继续通过（去重泛化不提高误合并率）。
+
+### 部署
+
+覆盖重启。升级后 `initialize()` 自动跑一次存量迁移：0 使用的历史能力置信度归正为基线，随后健康维护会按未使用规则逐步降权淘汰，能力数会从 105 自然回落。用 `/anima_capabilities_audit` 随时查看健康状况。若觉得这套自创能力系统价值不大，也可直接关 `capability_system_enabled`。
+
+---
 ## v0.9.3 - 独立端口仪表盘升级为多页（运行仪表盘 + 能力树）
 
 v0.9.2 的独立端口只搬了"运行仪表盘"一个页面。本版把 AstrBot WebUI 里能看的页面**全部**搬上独立端口，并加顶部导航在多页间切换。
