@@ -150,6 +150,10 @@ class _Host(StorageMixin):
     async def _ensure_kb(self):
         return True
 
+    async def _store_memory(self, text: str, event=None, role: str = "in"):
+        await super()._store_memory(text, event, role)
+        await self._flush_all_remaining()
+
 
 def _run(coro):
     return asyncio.run(coro)

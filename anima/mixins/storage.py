@@ -114,18 +114,11 @@ class StorageMixin:
                 attempt += 1
 
     async def _store_memory(self, text: str, event: Optional[AstrMessageEvent] = None, role: str = "in"):
-        """将文本存入知识库。
+        """将文本存入内存缓冲区，触发后台批处理写入。
 
-        v0.8.2 防线 1：拒答内容（"I can't discuss that" / "对此我无法" 等）不入库，
-        避免历史拒答被检索回来 prime 模型继续拒答（自我强化循环）。
-
-        v0.8.5 防线：prompt 注入 / 越狱文本不入库。
-
-        v0.8.7 防线：框架/运行时错误文本不入库；存入前剥掉 Markdown 反引号。
-
-        v0.8.5 限流修复：限流 key 按 (user_id, role) 区分，避免同一轮对话里
-        用户消息先存入后刷新时间戳、紧接着把 bot 回复挤掉的问题（导致 bot
-        "记不住自己说过的话"）。role="in" 为用户消息，role="out" 为 bot 回复。
+        - 缓冲窗口：3 秒防抖动延迟
+        - 批次上限：15 条/次
+        - 内存保护：当缓冲区 >= 100 条时强制紧急写入（Emergency Flush）
         """
         if not await self._ensure_kb():
             return
@@ -139,9 +132,6 @@ class StorageMixin:
             logger.warning(f"[Anima] 跳过疑似注入/越狱内容入库: {text[:60]}")
             return
         # v0.8.7: 框架/运行时错误文本过滤 —— 命中就跳过
-        # （框架会把 "Error occurred during AI execution..." / traceback /
-        #  "database is locked" 当成 bot 回复，Anima 不能把它当记忆存进去，
-        #  否则下次检索被当成"我说过的话"注入 prompt 污染上下文）
         if self._is_error_artifact(text):
             logger.warning(f"[Anima] 跳过框架错误文本入库: {text[:60]}")
             return
@@ -162,28 +152,115 @@ class StorageMixin:
         if self._is_sensitive(text):
             return
         try:
-            kb = await self.context.kb_manager.get_kb_by_name("anima_memory")
-            if kb:
-                # 加时间戳，让 bot 知道这条记忆是什么时候的
-                # v0.8.7: 剥掉反引号/代码块，避免格式污染 + 自我强化模仿
-                clean_text = self._strip_markdown(text)
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-                text_with_time = f"[{timestamp}] {clean_text}"
-                await self._kb_call_with_retry(
-                    lambda: kb.upload_document(
-                        file_name=f"memory_{int(time.time())}",
-                        file_content=None,
-                        file_type="txt",
-                        pre_chunked_text=[text_with_time],
-                    ),
-                    op_name="记忆存储",
-                )
-                if hasattr(self, "_stat_bump"):
-                    self._stat_bump(f"store.{role}")
-                if self.config.get("log_level") == "debug":
-                    logger.debug(f"[Anima] 存储记忆: {text_with_time[:50]}...")
+            # v0.8.7: 剥掉反引号/代码块，避免格式污染 + 自我强化模仿
+            clean_text = self._strip_markdown(text)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            text_with_time = f"[{timestamp}] {clean_text}"
+
+            # 懒加载初始化缓冲区和触发器（以防未被主类 __init__ 初始化）
+            if not hasattr(self, "_write_buffer"):
+                self._write_buffer = []
+            if not hasattr(self, "_worker_trigger"):
+                self._worker_trigger = asyncio.Event()
+
+            # 将文本送入内存 Buffer，完全非阻塞
+            self._write_buffer.append(text_with_time)
+
+            # 内存溢出保护：如果积压的任务超过 100 条，立即强制唤醒 worker 进行 emergency flush
+            if len(self._write_buffer) >= 100:
+                self._worker_trigger.set()
+            # 正常积攒到防抖动阈值（如 10 条）直接唤醒 worker 执行写入
+            elif len(self._write_buffer) >= 10:
+                self._worker_trigger.set()
+            # 零启动触发：加入首条数据时，唤醒以启动 3 秒窗口定时器
+            elif len(self._write_buffer) == 1:
+                self._worker_trigger.set()
+
+            if hasattr(self, "_stat_bump"):
+                self._stat_bump(f"store.{role}")
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 记忆已推入缓冲队列 ({len(self._write_buffer)} 条): {text_with_time[:50]}...")
         except Exception as e:
-            logger.warning(f"[Anima] 向量存储失败: {e}")
+            logger.warning(f"[Anima] 向量存储入队失败: {e}")
+
+    async def _batch_write_worker(self):
+        """SQLite 记忆批量写入的后台守护协程。"""
+        # 兜底初始化
+        if not hasattr(self, "_write_buffer"):
+            self._write_buffer = []
+        if not hasattr(self, "_worker_trigger"):
+            self._worker_trigger = asyncio.Event()
+
+        while True:
+            try:
+                # 1. 缓冲区为空：无限期挂起等待新任务注入
+                if not self._write_buffer:
+                    self._worker_trigger.clear()
+                    await self._worker_trigger.wait()
+                elif len(self._write_buffer) < 10:
+                    # 2. 缓冲数量少于 10 条：进入防抖动等待窗口（3秒），等待更多数据聚合
+                    try:
+                        self._worker_trigger.clear()
+                        await asyncio.wait_for(self._worker_trigger.wait(), timeout=3.0)
+                    except asyncio.TimeoutError:
+                        pass  # 3秒缓冲窗口到期，进行写入
+
+                # 3. 提取批次上限 15 条进行批量执行
+                batch = self._write_buffer[:15]
+                self._write_buffer = self._write_buffer[15:]
+
+                if batch:
+                    await self._flush_batch(batch)
+
+            except asyncio.CancelledError:
+                # 4. 插件卸载或 Bot 退出时，安全清空并写入所有剩余记忆（Flush）
+                await self._flush_all_remaining()
+                raise
+            except Exception as e:
+                logger.error(f"[Anima] SQLite 记忆批处理写入任务发生异常: {e}")
+                await asyncio.sleep(1.0)  # 避免异常情况下的死循环
+
+    async def _flush_batch(self, batch: list[str]):
+        """执行批次写入操作，采用 _kb_call_with_retry 承载 SQLite 重试。"""
+        if not batch:
+            return
+
+        try:
+            kb = await self.context.kb_manager.get_kb_by_name("anima_memory")
+            if not kb:
+                logger.warning("[Anima] 知识库未就绪，批次存储已跳过")
+                return
+
+            await self._kb_call_with_retry(
+                lambda: kb.upload_document(
+                    file_name=f"memory_batch_{int(time.time())}_{random.randint(1000, 9999)}",
+                    file_content=None,
+                    file_type="txt",
+                    pre_chunked_text=batch,
+                ),
+                op_name="批量记忆存储",
+            )
+            if self.config.get("log_level") == "debug":
+                logger.debug(f"[Anima] 批次记忆写入成功，写入数: {len(batch)}")
+        except Exception as e:
+            logger.error(f"[Anima] 批次记忆写入彻底失败: {e}")
+
+    async def _flush_all_remaining(self):
+        """强制写入当前内存中积压的所有记忆条目。"""
+        # 兜底检查
+        if not hasattr(self, "_write_buffer") or not self._write_buffer:
+            return
+        
+        logger.info(f"[Anima] 正在清空并强制写入剩余的 {len(self._write_buffer)} 条记忆...")
+        while self._write_buffer:
+            batch = self._write_buffer[:15]
+            self._write_buffer = self._write_buffer[15:]
+            if batch:
+                try:
+                    await self._flush_batch(batch)
+                except Exception as e:
+                    logger.error(f"[Anima] 写入剩余记忆子批次失败: {e}")
+                    break
 
     async def _query_memory(self, query: str, n_results: int = 3) -> list:
         """从知识库检索相关记忆。

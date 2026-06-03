@@ -73,7 +73,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.0.1",
+    "1.0.2",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -178,6 +178,10 @@ class AnimaPlugin(
 
         # 沉淀锁，防止并发写入
         self._sediment_lock = asyncio.Lock()
+
+        # SQLite 批处理缓冲队列
+        self._write_buffer = []
+        self._worker_trigger = asyncio.Event()
 
         # 身份稳定度（身份危机模块，持久化）
         self._identity_stability = self._load_state().get("identity_stability", 1.0)
@@ -289,6 +293,9 @@ class AnimaPlugin(
         """异步初始化钩子。AstrBot 在事件循环就绪后自动调用。
         把所有需要 running loop 的注册（如定时任务）放在这里，避免 __init__ 同步阶段崩溃。
         """
+        # 启动 SQLite 记忆批处理写入后台任务
+        self._batch_write_task = asyncio.create_task(self._batch_write_worker())
+        logger.info("[Anima] SQLite 记忆批处理写入后台任务已启动")
         # 注册离线反刍定时任务
         if self.config.get("rumination_enabled", False):
             try:
@@ -1384,6 +1391,17 @@ class AnimaPlugin(
 
     async def terminate(self):
         """插件卸载时清理资源"""
+        # 取消 SQLite 记忆批处理写入后台任务，并等待余波写入完毕
+        try:
+            if hasattr(self, "_batch_write_task") and self._batch_write_task:
+                self._batch_write_task.cancel()
+                try:
+                    await self._batch_write_task
+                except asyncio.CancelledError:
+                    pass
+        except Exception as e:
+            logger.debug(f"[Anima] 取消批处理写入 task 失败: {e}")
+
         # 取消 WebUI 编辑器同步轮询
         try:
             if hasattr(self, "_editor_poll_task") and self._editor_poll_task:
