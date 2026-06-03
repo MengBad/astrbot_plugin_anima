@@ -133,11 +133,20 @@ from pydantic import ConfigDict
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 
+class BackgroundTaskSet(set):
+    def append(self, item):
+        self.add(item)
+    def remove(self, item):
+        self.discard(item)
+    def extend(self, items):
+        self.update(items)
+
+
 @register(
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.5",
+    "1.1.6",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -376,7 +385,7 @@ class AnimaPlugin(
 
         # 会话管理：session_key → SylanneAlphaHost 映射
         self._hosts = BoundedDict(maxsize=200)
-        self._background_tasks = set()
+        self._background_tasks = BackgroundTaskSet()
         # 流式回复相关缓冲区
         self._unfinished_replies = BoundedDict(maxsize=200)
         self._stream_buffers = BoundedDict(maxsize=200)
