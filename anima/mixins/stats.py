@@ -28,6 +28,8 @@ from datetime import datetime
 
 from astrbot.api import logger
 
+from ..ui_labels import label_stat_key, config_label
+
 
 class StatsMixin:
     """运行计数器 mixin。依赖宿主类的 self._atomic_update_state / self._load_state。"""
@@ -164,7 +166,10 @@ class StatsMixin:
     def _render_stats(self) -> str:
         """渲染 /anima_stats 文本。"""
         if getattr(self, "config", None) and not self.config.get("dashboard_enabled", True):
-            return "[Anima] 运行仪表盘已在配置中禁用（dashboard_enabled=false）。开启后可查看今日统计。"
+            return (
+                f"[Anima] 运行仪表盘已在配置中禁用（{config_label('dashboard_enabled')}=false）。"
+                "开启后可查看今日统计。"
+            )
         self._ensure_stats_loaded()
         c = self._stats["counts"]
         if not c:
@@ -187,7 +192,7 @@ class StatsMixin:
 
         lines.append(f"■ 内部 LLM 调用：共 {llm_total} 次")
         for name, v in llm_items:
-            lines.append(f"   · {name}: {v}")
+            lines.append(f"   · {label_stat_key('llm.' + name)}: {v}")
 
         lines.append("")
         lines.append("■ 沉淀流程")
@@ -204,7 +209,7 @@ class StatsMixin:
         lines.append(f"   · 实际发出: {c.get('stance.sent', 0)}")
         lines.append(f"   · 被防线拦截: {stance_blocked_total}")
         for name, v in stance_blocked:
-            lines.append(f"      - {name}: {v}")
+            lines.append(f"      - {label_stat_key('stance.blocked.' + name)}: {v}")
 
         lines.append("")
         lines.append("■ 记忆存储")

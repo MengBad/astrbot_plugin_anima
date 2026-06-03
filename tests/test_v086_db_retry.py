@@ -101,7 +101,8 @@ class _Host(StorageMixin):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
+
 
 
 class TestV086IsDbLockedError:
@@ -130,7 +131,7 @@ class TestV086StoreRetry:
         host = _Host(kb=kb)
         # _store_memory 自身有 try/except 包住，最终不应抛异常
         _run(host._store_memory("永远锁住的记忆", _FakeEvent("u1"), role="in"))
-        assert kb.calls == 4  # 1 初次 + 3 次重试
+        assert kb.calls == 7  # 1 初次 + 6 次重试
         assert kb.uploaded == []
 
     def test_store_non_lock_error_not_retried(self):
@@ -155,7 +156,7 @@ class TestV086QueryRetry:
         mgr = _FlakyKBManager(kb=object(), fail_times=99)
         host = _Host(kb_manager=mgr)
         results = _run(host._query_memory("查点啥", n_results=3))
-        assert mgr.calls == 4  # 1 初次 + 3 次重试
+        assert mgr.calls == 7  # 1 初次 + 6 次重试
         assert results == []
 
     def test_query_non_lock_error_not_retried(self):

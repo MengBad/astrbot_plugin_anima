@@ -75,21 +75,20 @@ class StorageMixin:
         """
         return "database is locked" in str(exc).lower()
 
-    async def _kb_call_with_retry(self, coro_factory, op_name: str, max_retries: int = 3):
+    async def _kb_call_with_retry(self, coro_factory, op_name: str, max_retries: int = 6):
         """对 kb 调用做 'database is locked' 退避重试的通用包装。
 
         v0.8.6：kb.db 是多插件共享的 SQLite，高并发瞬时写锁会让单次调用失败。
-        命中锁错误时按 50ms / 150ms / 300ms（带 jitter）递增退避重试，
-        既保证 Anima 自己读写不因偶发锁失败，又错开并发写入时间点，
-        间接降低框架层 'database is locked' 被当回复发出的概率。
+        重构升级：最大重试 6 次，使用递增的指数退避延迟序列，并配合随机抖动（Jitter），
+        错开多方并发的写盘周期。
 
         - coro_factory: 一个 0 参可调用对象，每次重试都重新调用它生成新的协程
           （协程不能复用，必须每次重新构造）。
         - op_name: 用于日志的操作名（如 "记忆存储" / "记忆检索"）。
         - 非锁异常立即抛出，由调用方原有的 try/except 处理（保持行为不变）。
         """
-        # 退避梯度（秒）：命中第 i 次锁后等待 backoffs[i] 再重试
-        backoffs = [0.05, 0.15, 0.3]
+        # 指数退避延迟序列（秒）
+        backoffs = [0.1, 0.3, 0.6, 1.2, 2.0, 3.0]
         attempt = 0
         while True:
             try:
@@ -104,8 +103,8 @@ class StorageMixin:
                     )
                     raise
                 base = backoffs[min(attempt, len(backoffs) - 1)]
-                # 加 jitter 错开多方并发的重试时间点，避免重试风暴再次撞锁
-                delay = base + random.uniform(0, base)
+                # 随机抖动（Jitter）逻辑：实际延迟时间 = 基准退避时间 + random.uniform(0, 基准时间 * 0.5)
+                delay = base + random.uniform(0, base * 0.5)
                 if self.config.get("log_level") == "debug":
                     logger.debug(
                         f"[Anima] {op_name}遇到 database is locked，"

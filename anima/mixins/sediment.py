@@ -68,9 +68,9 @@ class SedimentMixin:
                 # v0.8.5: 用户消息(in)和 bot 回复(out)独立限流，确保 bot 回复也能入库
                 user_text = event.message_str or ""
                 if user_text:
-                    await self._store_memory(user_text, event, role="in")
+                    asyncio.create_task(self._store_memory(user_text, event, role="in"))
                 if response_text:
-                    await self._store_memory(response_text, event, role="out")
+                    asyncio.create_task(self._store_memory(response_text, event, role="out"))
 
                 # 2. 评估情绪强度（伤痕维度放大）
                 # v0.9.2: 合并路径在此一次性取得情绪/关系/欲望三类结果（单次 LLM 调用）；

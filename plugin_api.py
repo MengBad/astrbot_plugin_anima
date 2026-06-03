@@ -24,6 +24,7 @@ class PluginAPI:
             ("/events", "handle_get_events", ["GET"]),
             ("/stats", "handle_get_stats", ["GET"]),
             ("/runtime_stats", "handle_get_runtime_stats", ["GET"]),
+            ("/stats_history", "handle_get_stats_history", ["GET"]),
             ("/export", "handle_export", ["GET"]),
             ("/config", "handle_get_autonomy_config", ["GET"]),
         ]
@@ -112,12 +113,27 @@ class PluginAPI:
                 return jsonify({
                     "success": False,
                     "disabled": True,
-                    "error": "运行仪表盘已在插件配置中禁用（dashboard_enabled=false）",
+                    "error": "运行仪表盘已在插件配置中禁用（请开启「运行仪表盘」）",
                 })
             snap = self.plugin._stats_snapshot()
             return jsonify({"success": True, "stats": snap})
         except Exception as e:
             logger.error(f"[Anima] 获取运行统计失败: {e}")
+            return jsonify({"success": False, "error": str(e)})
+
+    async def handle_get_stats_history(self):
+        """v1.0.0: 返回历史趋势归档（供 WebUI 仪表盘 apiGet('stats_history')）。"""
+        try:
+            if not self.plugin.config.get("dashboard_enabled", True):
+                return jsonify({
+                    "success": False,
+                    "disabled": True,
+                    "error": "运行仪表盘已在插件配置中禁用（请开启「运行仪表盘」）",
+                })
+            history = self.plugin._get_stats_history()
+            return jsonify({"success": True, "history": history})
+        except Exception as e:
+            logger.error(f"[Anima] 获取历史统计失败: {e}")
             return jsonify({"success": False, "error": str(e)})
 
     async def handle_export(self):

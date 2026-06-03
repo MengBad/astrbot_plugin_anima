@@ -168,4 +168,17 @@ h1 {
 
 .no-data { color: var(--text-secondary); font-size: 13px; }
 
+.history-chart { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.history-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.history-date { flex: 0 0 120px; color: var(--text); }
+.history-track {
+  flex: 1; background: var(--border); border-radius: 6px; height: 18px; overflow: hidden;
+}
+.history-fill {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #10b981, #34d399);
+  transition: width 0.3s;
+}
+.history-value { flex: 0 0 44px; text-align: right; font-weight: 600; color: var(--text-secondary); }
+
 footer { margin-top: 24px; }

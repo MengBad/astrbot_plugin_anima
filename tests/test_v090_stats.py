@@ -105,8 +105,8 @@ class TestRenderStats:
         assert "记忆存储" in out
         # LLM 总数 = 5+2 = 7
         assert "共 7 次" in out
-        # 拦截分项
-        assert "irrelevant" in out
+        # 拦截分项（中文标签）
+        assert "话题不相关拦截" in out
 
 
 class TestStatsSnapshot:

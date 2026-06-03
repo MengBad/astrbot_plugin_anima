@@ -78,7 +78,17 @@ class DangerMixin:
             return "core_beliefs" in data
         except ImportError:
             # 无 PyYAML：退化为基础结构检查
-            return "core_beliefs:" in text
+            if not text or "core_beliefs:" not in text:
+                return False
+            if text.count('[') != text.count(']') or text.count('{') != text.count('}'):
+                return False
+            for line in text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(":") or "::" in line:
+                    return False
+            return True
         except Exception:
             return False
 

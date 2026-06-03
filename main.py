@@ -39,6 +39,7 @@ from .anima.valence import (
     estimate_memory_valence as _ext_estimate_valence,
     rerank_memories_by_emotion as _ext_rerank_memories,
 )
+from .anima.ui_labels import config_label, render_help_text
 from .anima.mixins.state_io import StateIOMixin
 from .anima.mixins.personality import PersonalityMixin
 from .anima.mixins.relations import RelationsMixin
@@ -671,9 +672,11 @@ class AnimaPlugin(
             injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
 
         # Phase 3: 人格向量注入（5维倾向）
-        pv_text = self._get_personality_injection_text()
-        if pv_text:
-            injection_parts.append(f"[内部状态] {pv_text}")
+        # v1.0.0: 与 Sylanne 的 5 维人格系统重叠，Sylanne 的 Dual-EMA + 每关系覆盖层
+        # 更精确且驱动所有表达阈值，此处注入已禁用以避免冗余。
+        # pv_text = self._get_personality_injection_text()
+        # if pv_text:
+        #     injection_parts.append(f"[内部状态] {pv_text}")
 
         # 压抑话题注入：想说但没说出口的事
         suppressed_text = self._get_suppressed_injection(event)
@@ -783,6 +786,11 @@ class AnimaPlugin(
 
     # ==================== Commands ====================
 
+    @filter.command("anima_help")
+    async def cmd_anima_help(self, event: AstrMessageEvent):
+        """列出全部 Anima 指令（按日常 / 运维 / 能力 / 高级分组）"""
+        yield event.plain_result(render_help_text())
+
     @filter.command("anima_notes")
     async def cmd_anima_notes(self, event: AstrMessageEvent):
         """查看当前自我认知摘要"""
@@ -864,7 +872,7 @@ class AnimaPlugin(
         if not self.config.get("dashboard_standalone_enabled", False):
             yield event.plain_result(
                 "[Anima] 独立端口仪表盘未启用。\n"
-                "在 AstrBot 插件配置里把 dashboard_standalone_enabled 设为 true 并重载插件后，"
+                f"在 AstrBot 插件配置里开启「{config_label('dashboard_standalone_enabled')}」并重载插件后，"
                 "再用本命令获取访问地址。\n"
                 "（提示：仪表盘也可直接在 AstrBot WebUI 左侧的 Anima 页面查看，无需独立端口。）"
             )
@@ -874,16 +882,18 @@ class AnimaPlugin(
             yield event.plain_result(
                 "[Anima] 独立端口仪表盘已启用但当前未在运行。\n"
                 "常见原因：端口被占用、或插件刚重载尚未启动。请检查后台日志中"
-                "「独立端口仪表盘」相关行，必要时更换 dashboard_standalone_port 后重载。"
+                "「独立端口仪表盘」相关行，必要时更换"
+                f"「{config_label('dashboard_standalone_port')}」后重载。"
             )
             return
         yield event.plain_result(
-            "[Anima] 独立端口仪表盘访问地址（含 token，请妥善保管）：\n\n"
+            "[Anima] 独立端口仪表盘访问地址（含访问口令，请妥善保管）：\n\n"
             f"{server.url()}\n\n"
             f"绑定：{server.host}:{server.port}\n"
             "· 默认仅本机可访问（127.0.0.1）。\n"
-            "· 如需远程访问，把 dashboard_standalone_host 改为 0.0.0.0 并重载，"
-            "但请注意这是明文 HTTP + token 鉴权，仅建议在可信网络使用。"
+            "· 如需远程访问，把"
+            f"「{config_label('dashboard_standalone_host')}」改为 0.0.0.0 并重载，"
+            "但请注意这是明文 HTTP + 口令鉴权，仅建议在可信网络使用。"
         )
 
     @filter.command("anima_world")
@@ -1035,7 +1045,8 @@ class AnimaPlugin(
 
         lines = [
             f"【这是它真正属于自己的东西】 {header_extra}",
-            "以下能力是这个角色通过自己的好奇、研究、失败、修正，一步步建立起来的个人方法论。\n"
+            "（详情列表；概览见 /anima_autonomy，体检见 /anima_capabilities_audit）",
+            "以下能力是这个角色通过自己的好奇、研究、失败、修正，一步步建立起来的个人方法论。\n",
         ]
         for cap in page_caps:
             name = cap.get("name", "未知能力")
@@ -1070,7 +1081,7 @@ class AnimaPlugin(
         caps = self._read_personal_capabilities()
         capabilities = caps.get("capabilities", [])
 
-        lines = ["【Anima 自主演化仪表盘】\n"]
+        lines = ["【Anima 自主演化概览】（速览；逐条详情见 /anima_capabilities，体检见 /anima_capabilities_audit）\n"]
 
         # 能力树概览
         if capabilities:
@@ -1098,7 +1109,7 @@ class AnimaPlugin(
         else:
             lines.append("暂无明显的自主演化事件记录。")
 
-        lines.append("\n提示：使用 /anima_capabilities 查看完整能力详情，/anima_log 看完整演化历史。")
+        lines.append("\n提示：/anima_capabilities 查看完整能力详情，/anima_capabilities_audit 做健康体检，/anima_log 看演化历史。")
         yield event.plain_result("\n".join(lines))
 
     @filter.command("anima_export_capabilities")
@@ -1129,7 +1140,7 @@ class AnimaPlugin(
             yield event.plain_result("[Anima] 能力库为空，暂无可体检的个人能力。")
             return
         lines = [
-            "【Anima 能力库体检】",
+            "【Anima 能力库体检】（运维诊断；列表见 /anima_capabilities，概览见 /anima_autonomy）",
             "",
             f"■ 总能力数: {a['total']}（硬上限 {a['max_total']}）",
             f"■ 平均置信度: {a['avg_conf']:.1%}",
@@ -1146,8 +1157,9 @@ class AnimaPlugin(
         lines.append("")
         if a["zero_use"] > 0:
             lines.append(
-                "提示：0 使用能力会随健康维护按 capability_unused_decay_days/"
-                "drop_days 自然降权与淘汰；也可 /anima_reset 清空重来。"
+                f"提示：0 使用能力会随健康维护按「{config_label('capability_unused_decay_days')}」/"
+                f"「{config_label('capability_unused_drop_days')}」自然降权与淘汰；"
+                "也可 /anima_reset 清空重来。"
             )
         else:
             lines.append("提示：能力库健康，所有能力都被真实使用过。")

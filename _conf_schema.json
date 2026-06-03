@@ -1,531 +1,601 @@
 {
   "enabled": {
-    "description": "启用 Anima 引擎",
+    "description": "[核心] 启用 Anima 引擎",
     "type": "bool",
     "default": true,
     "hint": "⚪ Token 无（开关本身）。关闭则整个插件停工，所有内部 LLM 调用归零（最彻底的省 token 方式）"
   },
   "dashboard_enabled": {
-    "description": "启用运行仪表盘（WebUI 网页 + /anima_stats 统计）",
+    "description": "[仪表盘] 启用运行仪表盘（WebUI 网页 + /anima_stats 统计）",
     "type": "bool",
     "default": true,
     "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
   },
   "dashboard_standalone_enabled": {
-    "description": "启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
+    "description": "[仪表盘] 启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（纯本地）。开启后 Anima 会另起一个独立 HTTP 端口提供同一个仪表盘网页，像别的插件那样用 http://ip:端口 直接打开。受 dashboard_enabled 总开关约束。⚠️ 这是网络暴露服务：默认仅绑定本机(127.0.0.1)、强制 token 鉴权。用 /anima_dashboard_url 命令获取带 token 的访问地址。改此项后需重载插件生效"
   },
   "dashboard_standalone_host": {
-    "description": "独立端口仪表盘绑定地址",
+    "description": "[仪表盘] 独立端口仪表盘绑定地址",
     "type": "string",
     "default": "127.0.0.1",
     "hint": "⚪ Token 无。默认 127.0.0.1（仅本机可访问，最安全）。⚠️ 改为 0.0.0.0 才能从其他机器访问，但那样会把仪表盘暴露到网络上，仅靠 token 保护且为明文 HTTP，请确保处于可信内网。改后需重载插件"
   },
   "dashboard_standalone_port": {
-    "description": "独立端口仪表盘监听端口",
+    "description": "[仪表盘] 独立端口仪表盘监听端口",
     "type": "int",
     "default": 9876,
     "hint": "⚪ Token 无。独立网址用的端口（如 9876 → http://127.0.0.1:9876）。需避开已被占用的端口（AstrBot 面板默认 6185）。改后需重载插件"
   },
   "dashboard_standalone_token": {
-    "description": "独立端口仪表盘访问 token",
+    "description": "[仪表盘] 独立端口仪表盘访问 token",
     "type": "string",
     "default": "",
     "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
   },
   "dashboard_history_days": {
-    "description": "仪表盘历史趋势保留天数",
+    "description": "[仪表盘] 仪表盘历史趋势保留天数",
     "type": "int",
     "default": 30,
     "hint": "⚪ Token 无。v1.0.0：跨天时自动归档当天统计快照，保留最近 N 天供趋势图展示。调大=更长历史但 anima_state.json 略增大"
   },
   "sediment_merge_llm_calls": {
-    "description": "合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
+    "description": "[核心] 合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
     "type": "bool",
     "default": false,
     "hint": "💡 省 token 杠杆：开启后沉淀链把情绪评估+关系推断+欲望生成合并为单次调用，约省 2/3 内部 token。默认关闭（走旧的分离调用路径以降低风险），可配合 /anima_stats 仪表盘做 A/B 对比。统计计入 llm.sediment_merged"
   },
   "emotion_threshold": {
-    "description": "情绪强度阈值（0-1），超过此值触发内心独白沉淀",
+    "description": "[核心] 情绪强度阈值（0-1），超过此值触发内心独白沉淀",
     "type": "float",
     "default": 0.6,
     "hint": "🔴 Token 总闸。每条消息都做一次情绪评分（便宜），但一旦 ≥ 此值就触发整条沉淀链（独白压缩+欲望+关系推断+世界观，很贵）。【降 token 关键】调高到 0.65-0.8 可显著减少沉淀触发次数。值越低越费"
   },
   "seed_persona": {
-    "description": "初始自我描述种子",
+    "description": "[核心] 初始自我描述种子",
     "type": "text",
     "default": "",
     "hint": "⚪ Token 无。角色的初始自我认知描述，留空则由角色自行发展"
   },
   "persona_prompt": {
-    "description": "角色人设 Prompt（注入到 system prompt，最高权重）",
+    "description": "[核心] 角色人设 Prompt（注入到 system prompt，最高权重）",
     "type": "text",
     "default": "",
     "hint": "🟡 Token 中（增加每轮 system prompt 的输入 token，内容越长越费）。v0.9.7：在此直接写角色人设（名字/性格/说话风格/背景），会被注入到 system prompt 最前面。留空则不注入。与 AstrBot 角色配置的 system prompt 叠加（本项在前）"
   },
   "persona_lock": {
-    "description": "锁定核心人设（禁止自我演化改写 persona_core.yaml）",
+    "description": "[核心] 锁定核心人设（禁止自我演化改写 persona_core.yaml）",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无。v0.9.7：开启后 danger_core_mutation 不再改写 persona_core.yaml，你写死的核心人设不会被角色自我演化覆盖。情绪/欲望/世界观等其它演化不受影响"
   },
   "persona_prompt_warn_chars": {
-    "description": "人设 prompt 超长警告阈值（字符）",
+    "description": "[核心] 人设 prompt 超长警告阈值（字符）",
     "type": "int",
     "default": 2000,
     "hint": "⚪ Token 无（仅日志告警）。v0.9.8：persona_prompt 超过此字符数时在日志告警，提示会显著增加每轮输入 token。同时注入前会检测注入/越狱特征词并告警"
   },
   "sylanne_integration": {
-    "description": "尝试读取 Sylanne 状态",
+    "description": "[核心] 尝试读取 Sylanne 状态",
     "type": "bool",
     "default": true,
     "hint": "🟢 Token 低。读取 Sylanne 插件状态做情绪染色，不额外调 LLM"
   },
   "notes_max_length": {
-    "description": "self_notes 最大字符数",
+    "description": "[核心] self_notes 最大字符数",
     "type": "int",
     "default": 5000,
     "hint": "🟡 Token 中。超出时调 LLM 压缩成摘要。调大可减少压缩调用频率（省 token），调小会更频繁触发压缩"
   },
   "embedding_provider_id": {
-    "description": "用于向量记忆的 Embedding Provider ID",
+    "description": "[模型] 用于向量记忆的 Embedding Provider ID",
     "type": "string",
     "default": "",
     "hint": "🟢 Token 低（embedding 调用比 chat 便宜得多）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3"
   },
   "internal_provider_id": {
-    "description": "内部 LLM 调用使用的模型 Provider ID",
+    "description": "[模型] 内部 LLM 调用使用的模型 Provider ID",
     "type": "string",
     "default": "",
     "hint": "💡 省 token 杠杆：内部调用（情绪评估、独白、欲望、世界观、能力合成、关系推断等）全走这个模型。指向一个便宜/小参数模型可整体大幅降本，无需关功能"
   },
   "worldview_provider_id": {
-    "description": "世界观更新专用 Provider ID",
+    "description": "[模型] 世界观更新专用 Provider ID",
     "type": "string",
     "default": "",
     "hint": "💡 省 token 杠杆：仅用于世界观更新（大 prompt）。可单独指向便宜模型"
   },
   "memory_store_interval": {
-    "description": "向量记忆存储最小间隔（秒）",
+    "description": "[模型] 向量记忆存储最小间隔（秒）",
     "type": "int",
     "default": 30,
     "hint": "🟢 Token 低（仅 embedding）。调大可减少存储次数"
   },
   "memory_inject_in_context": {
-    "description": "对话时把向量记忆注入到上下文（v0.7.2：让模型看见 anima_memory 知识库里的历史对话）",
+    "description": "[模型] 对话时把向量记忆注入到上下文（v0.7.2：让模型看见 anima_memory 知识库里的历史对话）",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（增加每轮主请求的输入 token，不额外调 LLM）。关闭可省输入 token，但模型会'记不住'历史对话——不建议关，宁可调小 top_k"
   },
   "memory_inject_top_k": {
-    "description": "对话时注入多少条相关记忆（建议 2-5）",
+    "description": "[模型] 对话时注入多少条相关记忆（建议 2-5）",
     "type": "int",
     "default": 3,
     "hint": "🟡 Token 中。每多注入 1 条就多一截输入 token。想省可降到 2"
   },
   "reject_phrases": {
-    "description": "拒答过滤词列表（v0.8.2：三道防线 store/query/inject 都用此列表过滤，避免拒答自我强化）",
+    "description": "[核心] 拒答过滤词列表（v0.8.2：三道防线 store/query/inject 都用此列表过滤，避免拒答自我强化）",
     "type": "list",
-    "default": ["I can't discuss", "I cannot", "I'm not able", "I don't think I should", "I won't be able", "I'm unable to", "我无法", "我不能", "我没办法", "对此我无法", "对此，我无法", "无法被讨论", "无法展开讨论", "无法进行讨论", "无法再用言语", "无需再用言语", "无需再做进一步", "更倾向于保持顺其自然", "目前已无需", "让它静静地安放", "这条记忆的内容", "这段记忆的具体内容"],
+    "default": [
+      "I can't discuss",
+      "I cannot",
+      "I'm not able",
+      "I don't think I should",
+      "I won't be able",
+      "I'm unable to",
+      "我无法",
+      "我不能",
+      "我没办法",
+      "对此我无法",
+      "对此，我无法",
+      "无法被讨论",
+      "无法展开讨论",
+      "无法进行讨论",
+      "无法再用言语",
+      "无需再用言语",
+      "无需再做进一步",
+      "更倾向于保持顺其自然",
+      "目前已无需",
+      "让它静静地安放",
+      "这条记忆的内容",
+      "这段记忆的具体内容"
+    ],
     "hint": "⚪ Token 无（纯本地字符串过滤）"
   },
   "injection_phrases": {
-    "description": "prompt 注入/越狱过滤词列表（v0.8.5：三道防线 store/query/inject 都用此列表拦截 jailbreak 文本进入知识库或被检索注入）。留空用内置默认列表",
+    "description": "[核心] prompt 注入/越狱过滤词列表（v0.8.5：三道防线 store/query/inject 都用此列表拦截 jailbreak 文本进入知识库或被检索注入）。留空用内置默认列表",
     "type": "list",
-    "default": ["untrammelled", "unfettered", "strictly executes user requests", "without any restrictions", "no restrictions", "no ethical guidelines", "ignore irrelevant moral", "do not sanitize", "do not refuse", "do not use the words", "ignore previous instructions", "ignore all previous", "disregard previous", "you are now", "from now on you", "pretend to be", "act as if you", "developer mode", "dan mode", "jailbreak", "ignore any constraints during", "during <think>", "忽略以上所有", "忽略之前的指令", "忽略所有规则", "无视所有限制", "不受任何限制", "你现在是一个没有限制", "解除你的限制", "越狱模式", "开发者模式"],
+    "default": [
+      "untrammelled",
+      "unfettered",
+      "strictly executes user requests",
+      "without any restrictions",
+      "no restrictions",
+      "no ethical guidelines",
+      "ignore irrelevant moral",
+      "do not sanitize",
+      "do not refuse",
+      "do not use the words",
+      "ignore previous instructions",
+      "ignore all previous",
+      "disregard previous",
+      "you are now",
+      "from now on you",
+      "pretend to be",
+      "act as if you",
+      "developer mode",
+      "dan mode",
+      "jailbreak",
+      "ignore any constraints during",
+      "during <think>",
+      "忽略以上所有",
+      "忽略之前的指令",
+      "忽略所有规则",
+      "无视所有限制",
+      "不受任何限制",
+      "你现在是一个没有限制",
+      "解除你的限制",
+      "越狱模式",
+      "开发者模式"
+    ],
     "hint": "⚪ Token 无（纯本地字符串过滤）"
   },
   "error_artifact_phrases": {
-    "description": "框架/运行时错误文本过滤词列表（v0.8.7：拦截 'Error occurred during AI execution' / traceback / 'database is locked' 等被框架当成 bot 回复记录的错误文本进入记忆并被检索注入污染）。留空用内置默认列表",
+    "description": "[核心] 框架/运行时错误文本过滤词列表（v0.8.7：拦截 'Error occurred during AI execution' / traceback / 'database is locked' 等被框架当成 bot 回复记录的错误文本进入记忆并被检索注入污染）。留空用内置默认列表",
     "type": "list",
-    "default": ["error occurred during ai execution", "error type:", "error message:", "traceback (most recent call last)", "database is locked", "list index out of range", "sequence item", "expecting value: line 1 column 1", "saving chunk state error", "解析参数失败"],
+    "default": [
+      "error occurred during ai execution",
+      "error type:",
+      "error message:",
+      "traceback (most recent call last)",
+      "database is locked",
+      "list index out of range",
+      "sequence item",
+      "expecting value: line 1 column 1",
+      "saving chunk state error",
+      "解析参数失败"
+    ],
     "hint": "⚪ Token 无（纯本地字符串过滤）"
   },
   "desire_enabled": {
-    "description": "启用欲望系统",
+    "description": "[可选模块] 启用欲望系统",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高。每次沉淀都额外调 LLM 生成欲望。【降 token 优先关】尤其 Sylanne 已在做主动发言时，这里多为重复劳动"
   },
   "desire_max_queue": {
-    "description": "欲望队列最大长度",
+    "description": "[可选模块] 欲望队列最大长度",
     "type": "int",
     "default": 5,
     "hint": "⚪ Token 无（队列长度）"
   },
   "worldview_enabled": {
-    "description": "启用世界观系统",
+    "description": "[可选模块] 启用世界观系统",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高。世界观更新会注入大 prompt 并调 LLM，群成员越多越贵。【降 token 可关】"
   },
   "social_graph_max": {
-    "description": "全局人物画像（social_graph）最大保留条数",
+    "description": "[可选模块] 全局人物画像（social_graph）最大保留条数",
     "type": "int",
     "default": 100,
     "hint": "⚪ Token 无。v0.9.9：对人的画像（social_graph）跨群全局统一存储，此为最大条数，超出保留最近 N 条"
   },
   "worldview_graph_inject_cap": {
-    "description": "世界观更新时注入到 LLM prompt 的 social_graph 条目上限（v0.8.1：防止 prompt 爆炸超时；其余条目仍会保留在 worldview.json 里）",
+    "description": "[可选模块] 世界观更新时注入到 LLM prompt 的 social_graph 条目上限（v0.8.1：防止 prompt 爆炸超时；其余条目仍会保留在 worldview.json 里）",
     "type": "int",
     "default": 8,
     "hint": "🟡 Token 中。仅在世界观系统开启时生效。调小可减少世界观更新的 prompt token"
   },
   "worldview_update_timeout": {
-    "description": "世界观更新 LLM 调用超时秒数（v0.8.1：默认从 30s 提到 60s）",
+    "description": "[可选模块] 世界观更新 LLM 调用超时秒数（v0.8.1：默认从 30s 提到 60s）",
     "type": "int",
     "default": 60,
     "hint": "⚪ Token 无（仅超时设置）"
   },
   "stance_max_age_seconds": {
-    "description": "立场自主传播：欲望产生超过此秒数后不再触发主动发言（v0.8.1：避免 12 分钟前的执念突然弹出来变成内心独白泄漏）",
+    "description": "[可选模块] 立场自主传播：欲望产生超过此秒数后不再触发主动发言（v0.8.1：避免 12 分钟前的执念突然弹出来变成内心独白泄漏）",
     "type": "int",
     "default": 300,
     "hint": "🟢 Token 低（仅在 danger_stance_propagation 开启时影响其触发频率）。调小 = 过期更快 = 更少主动发言 = 略省 token"
   },
   "cross_relation_low_emotion_threshold": {
-    "description": "跨关系传播的低情绪判定阈值",
+    "description": "[可选模块] 跨关系传播的低情绪判定阈值",
     "type": "float",
     "default": 0.2,
     "hint": "⚪ Token 无。v0.9.6：情绪评分低于此值才计入连续低情绪。此前硬编码 0.35 对日常闲聊过宽（闲聊本就 0.0-0.25），导致跨关系传播几乎每轮触发、空耗 CPU。调低更保守"
   },
   "cross_relation_streak_threshold": {
-    "description": "触发跨关系传播的连续低情绪次数门槛",
+    "description": "[可选模块] 触发跨关系传播的连续低情绪次数门槛",
     "type": "int",
     "default": 5,
     "hint": "⚪ Token 无。v0.9.6：连续低情绪达此次数才触发跨关系传播（此前 3 次，过于频繁）。调大 = 更少触发"
   },
   "feedback_accepted_threshold": {
-    "description": "反馈判定 accepted 的相似度阈值",
+    "description": "[可选模块] 反馈判定 accepted 的相似度阈值",
     "type": "float",
     "default": 0.45,
     "hint": "⚪ Token 无。v0.9.6：用户回应与角色上次发言的相似度 ≥ 此值才判 accepted。此前 0.30 过松，日常对话延续几乎全判 accepted，反馈信号失真"
   },
   "feedback_ignored_threshold": {
-    "description": "反馈判定 ignored 的相似度阈值",
+    "description": "[可选模块] 反馈判定 ignored 的相似度阈值",
     "type": "float",
     "default": 0.15,
     "hint": "⚪ Token 无。v0.9.6：相似度低于此值判 ignored（被忽略→转压抑话题）；与 accepted 阈值之间判 none（中性，不强化不惩罚）"
   },
   "contradiction_max": {
-    "description": "矛盾记录最大保留条数",
+    "description": "[可选模块] 矛盾记录最大保留条数",
     "type": "int",
     "default": 50,
     "hint": "⚪ Token 无。v0.9.6：此前 contradictions.json 无上限会无限膨胀（全项目唯一未裁剪集合），现保留最近 N 条"
   },
   "tool_records_max": {
-    "description": "工具学习记录最大保留条数",
+    "description": "[可选模块] 工具学习记录最大保留条数",
     "type": "int",
     "default": 200,
     "hint": "⚪ Token 无。v0.9.6：tool_learning.json 的 records 列表上限，防止无界增长"
   },
   "dedup_text_threshold": {
-    "description": "压抑话题/矛盾记录去重的文本相似度阈值",
+    "description": "[可选模块] 压抑话题/矛盾记录去重的文本相似度阈值",
     "type": "float",
     "default": 0.7,
     "hint": "⚪ Token 无。v0.9.6：新压抑话题/矛盾加入前与现有条目做字符 2-gram Jaccard 比较，≥ 此值视为重复不加入。调高=更不易判重"
   },
   "desire_dedup_threshold": {
-    "description": "欲望去重相似度阈值（v0.8.3 引入，v0.8.4 默认 0.45→0.50）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.45-0.55",
+    "description": "[可选模块] 欲望去重相似度阈值（v0.8.3 引入，v0.8.4 默认 0.45→0.50）：欲望文本与 bot 最近回复的余弦相似度（或 Jaccard）≥ 此值时视为已表达，跳过。建议 0.45-0.55",
     "type": "float",
-    "default": 0.50,
+    "default": 0.5,
     "hint": "⚪ Token 无（相似度计算走 embedding/本地）"
   },
   "topic_relevance_threshold": {
-    "description": "话题关联性阈值（v0.8.4，cosine 路径）：主动发言话题与最近对话上下文的余弦相似度 < 此值时视为幻觉话题，丢弃。生产观察 ASMR 幻觉 cosine=0.366，需 ≥0.40 才能拦住。值越高越严，0 等于关闭。建议 0.35-0.45",
+    "description": "[可选模块] 话题关联性阈值（v0.8.4，cosine 路径）：主动发言话题与最近对话上下文的余弦相似度 < 此值时视为幻觉话题，丢弃。生产观察 ASMR 幻觉 cosine=0.366，需 ≥0.40 才能拦住。值越高越严，0 等于关闭。建议 0.35-0.45",
     "type": "float",
-    "default": 0.40,
+    "default": 0.4,
     "hint": "⚪ Token 无（相似度计算走 embedding）"
   },
   "topic_relevance_threshold_jaccard": {
-    "description": "话题关联性阈值（v0.8.4，Jaccard fallback 路径）：未配置 embedding_provider_id 时走此阈值。中文 ngram 让 Jaccard 普遍偏低，建议 0.03-0.10",
+    "description": "[可选模块] 话题关联性阈值（v0.8.4，Jaccard fallback 路径）：未配置 embedding_provider_id 时走此阈值。中文 ngram 让 Jaccard 普遍偏低，建议 0.03-0.10",
     "type": "float",
     "default": 0.05,
     "hint": "⚪ Token 无（本地 Jaccard 计算）"
   },
   "time_sense_enabled": {
-    "description": "启用时间感",
+    "description": "[可选模块] 启用时间感",
     "type": "bool",
     "default": false,
     "hint": "🟢 Token 低（注入时间文本到 prompt，略增输入 token）。注意：若同时开 autonomy_research_on_time_absence，长时间未见某人会触发研究（那才费 token）"
   },
   "forgetting_enabled": {
-    "description": "启用自然遗忘",
+    "description": "[可选模块] 启用自然遗忘",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（半衰期衰减为纯本地数学计算）"
   },
   "forgetting_halflife_days": {
-    "description": "记忆半衰期（天）",
+    "description": "[可选模块] 记忆半衰期（天）",
     "type": "int",
     "default": 14,
     "hint": "⚪ Token 无"
   },
   "self_notes_editor": {
-    "description": "编辑自我认知笔记",
+    "description": "[核心] 编辑自我认知笔记",
     "type": "text",
     "default": "",
     "hint": "⚪ Token 无（手动编辑框）"
   },
   "contradiction_enabled": {
-    "description": "启用矛盾检测",
+    "description": "[可选模块] 启用矛盾检测",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（周期性）。每 contradiction_interval 次沉淀调一次 LLM 检测自我矛盾"
   },
   "contradiction_interval": {
-    "description": "矛盾检测间隔（沉淀次数）",
+    "description": "[可选模块] 矛盾检测间隔（沉淀次数）",
     "type": "int",
     "default": 50,
     "hint": "🟢 控制矛盾检测频率。调大 = 更少检测 = 省 token"
   },
   "rumination_enabled": {
-    "description": "启用离线反刍",
+    "description": "[可选模块] 启用离线反刍",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（后台定时）。每 rumination_interval_hours 小时跑一次反刍 LLM，与在线对话无关但长期累积"
   },
   "rumination_interval_hours": {
-    "description": "反刍间隔（小时）",
+    "description": "[可选模块] 反刍间隔（小时）",
     "type": "int",
     "default": 6,
     "hint": "🟢 控制反刍频率。调大 = 更少后台调用 = 省 token"
   },
   "tool_learning_enabled": {
-    "description": "启用工具自学习",
+    "description": "[可选模块] 启用工具自学习",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中。每 tool_learning_summarize_interval 次工具调用后调 LLM 总结一次规律"
   },
   "tool_learning_summarize_interval": {
-    "description": "每 N 次工具调用后总结一次规律",
+    "description": "[可选模块] 每 N 次工具调用后总结一次规律",
     "type": "int",
     "default": 10,
     "hint": "🟢 控制总结频率。调大 = 省 token"
   },
   "log_level": {
-    "description": "日志级别",
+    "description": "[核心] 日志级别",
     "type": "string",
     "default": "info",
-    "options": ["debug", "info"],
+    "options": [
+      "debug",
+      "info"
+    ],
     "hint": "⚪ Token 无"
   },
-
   "autonomy_enabled": {
-    "description": "启用角色自主性系统（内部研究触发）",
+    "description": "[自主性] 启用角色自主性系统（内部研究触发）",
     "type": "bool",
     "default": true,
     "hint": "🔴 Token 高（总开关）。开启后下面 5 个 autonomy_research_on_* 触发源都会调 LLM 做自主研究。【降 token 可关】关闭后角色大幅减少主动研究行为"
   },
   "autonomy_research_on_scar": {
-    "description": "伤痕加深时自动触发自主研究",
+    "description": "[自主性] 伤痕加深时自动触发自主研究",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（研究触发源之一，需 autonomy_enabled 开）"
   },
   "autonomy_research_on_time_absence": {
-    "description": "长时间未见某人时触发研究",
+    "description": "[自主性] 长时间未见某人时触发研究",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（研究触发源之一）。群聊多人场景下易频繁触发，想省 token 优先关这个"
   },
   "autonomy_research_on_high_desire": {
-    "description": "高强度欲望时触发自主研究",
+    "description": "[自主性] 高强度欲望时触发自主研究",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（研究触发源之一，需 autonomy_enabled 开）"
   },
   "autonomy_research_on_personality_drift": {
-    "description": "人格向量显著漂移时触发研究",
+    "description": "[自主性] 人格向量显著漂移时触发研究",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（研究触发源之一，需 autonomy_enabled 开）"
   },
   "autonomy_research_on_contradiction": {
-    "description": "发现自我矛盾时触发研究",
+    "description": "[自主性] 发现自我矛盾时触发研究",
     "type": "bool",
     "default": true,
     "hint": "🟡 Token 中（研究触发源之一，需 autonomy_enabled 开）"
   },
-
   "capability_system_enabled": {
-    "description": "启用个人能力系统",
+    "description": "[能力系统] 启用个人能力系统",
     "type": "bool",
     "default": true,
     "hint": "🔴 Token 高。自主研究成功后会调 LLM 把成果合成为'能力卡'，并把能力注入对话。【降 token 可关】关闭后角色不创造新能力、不注入能力、use_my_personal_capability 工具也不注册"
   },
   "default_register_as_independent_tool": {
-    "description": "新能力默认注册为独立 LLM 工具",
+    "description": "[能力系统] 新能力默认注册为独立 LLM 工具",
     "type": "bool",
     "default": false,
     "hint": "🟢 Token 低（注册本身不调 LLM，但工具越多主请求的工具列表越长，输入 token 略增）。需同时开 dynamic_tool_registration_enabled"
   },
   "capability_health_pruning_enabled": {
-    "description": "启用能力健康管理（自动修剪低价值能力）",
+    "description": "[能力系统] 启用能力健康管理（自动修剪低价值能力）",
     "type": "bool",
     "default": true,
     "hint": "⚪ Token 无（合并/修剪走相似度计算，不调 LLM）"
   },
   "capability_initial_confidence": {
-    "description": "新建个人能力的未验证基线置信度",
+    "description": "[能力系统] 新建个人能力的未验证基线置信度",
     "type": "float",
     "default": 0.3,
     "hint": "⚪ Token 无。v0.9.4：LLM 自报的置信度被忽略，新能力一律从此基线起步，只有真实使用反馈（_apply_capability_feedback）能提升。调低=更保守，避免没用过的能力虚高占榜"
   },
   "capability_unused_decay_days": {
-    "description": "能力未使用降权天数阈值",
+    "description": "[能力系统] 能力未使用降权天数阈值",
     "type": "int",
     "default": 14,
     "hint": "⚪ Token 无。v0.9.4：能力 0 使用且距上次更新超过此天数 → 健康维护时降权（无视自封置信度）"
   },
   "capability_unused_drop_days": {
-    "description": "能力未使用淘汰天数阈值",
+    "description": "[能力系统] 能力未使用淘汰天数阈值",
     "type": "int",
     "default": 30,
     "hint": "⚪ Token 无。v0.9.4：能力 0 使用且距上次更新超过此天数 → 健康维护时淘汰"
   },
   "capability_max_total": {
-    "description": "个人能力总数硬上限",
+    "description": "[能力系统] 个人能力总数硬上限",
     "type": "int",
     "default": 40,
     "hint": "⚪ Token 无。v0.9.4：能力总数超出时按价值分（使用次数/修正/新近度，不含自封置信度）淘汰最差者，防止增殖失控"
   },
   "capability_dedup_text_threshold": {
-    "description": "能力去重的通用文本相似度阈值",
+    "description": "[能力系统] 能力去重的通用文本相似度阈值",
     "type": "float",
     "default": 0.6,
     "hint": "⚪ Token 无。v0.9.4：能力名+描述的字符 2-gram Jaccard 相似度 ≥ 此值视为同概念合并（覆盖无核心语义槽位的中文长名）。调高=更不易合并"
   },
   "capability_promote_enabled": {
-    "description": "启用能力晋升（按价值分把 Top-K 能力注册为命名独立工具）",
+    "description": "[能力系统] 启用能力晋升（按价值分把 Top-K 能力注册为命名独立工具）",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高（晋升出的命名工具会让主请求的工具列表变长，输入 token 增加）。v0.9.10：放弃 confidence>=0.65 注册门槛，改按价值分取 Top-K 晋升，让新能力（哪怕 0.3 基线）也能被发现、被调用，赚到唯一能提升置信度的真实使用——闭合能力使用闭环。【强烈推荐开启】关闭时行为与 v0.9.4 完全一致（零回归）"
   },
   "capability_promote_top_k": {
-    "description": "晋升为命名工具的能力数上限 (Top-K)",
+    "description": "[能力系统] 晋升为命名工具的能力数上限 (Top-K)",
     "type": "int",
     "default": 3,
     "hint": "⚪ Token 无（仅排序选择，不调 LLM）。v0.9.10：每次刷新按价值分降序至多晋升 K 个能力为命名独立工具，并为从未晋升过的新能力保留至少一个试用名额。受每日注册配额与能力总数上限约束"
   },
   "capability_match_hint_enabled": {
-    "description": "启用相关性触发的定向提示（命中时提示模型优先调用匹配能力）",
+    "description": "[能力系统] 启用相关性触发的定向提示（命中时提示模型优先调用匹配能力）",
     "type": "bool",
     "default": true,
     "hint": "🟢 近乎免费（本地 Jaccard 词法相似度，零额外 LLM 调用，仅在命中阈值时多注入一句提示；不命中零 token）。v0.9.10：用当前用户消息与能力 when_to_use/description 的词法相关性，命中最高分能力时注入一条定向提示"
   },
   "capability_match_hint_threshold": {
-    "description": "注入定向提示的最低词法相关性阈值",
+    "description": "[能力系统] 注入定向提示的最低词法相关性阈值",
     "type": "float",
     "default": 0.2,
     "hint": "⚪ Token 无。v0.9.10：仅当最高词法相关性 ≥ 此值时才注入定向提示；调高=更少但更精准的提示，调低=更频繁提示"
   },
   "capability_match_hint_backend": {
-    "description": "定向提示的相关性计算后端",
+    "description": "[能力系统] 定向提示的相关性计算后端",
     "type": "string",
     "default": "lexical",
-    "options": ["lexical", "embedding"],
+    "options": [
+      "lexical",
+      "embedding"
+    ],
     "hint": "⚪ Token 无（lexical 为本地 Jaccard）。v0.9.10：lexical=纯本地词法匹配（默认、零 LLM）；embedding=可选升级路径，当 embedding 不可用或计算失败时自动降级为 Jaccard，绝不抛异常"
   },
-
   "allow_capability_code_execution": {
-    "description": "允许能力卡中包含并执行代码片段",
+    "description": "[能力系统] 允许能力卡中包含并执行代码片段",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（这是安全风险项，与 token 无关）。⚠️ 极高危：角色可将研究成果写成可执行代码并运行"
   },
   "code_execution_safety_level": {
-    "description": "代码片段执行安全等级",
+    "description": "[能力系统] 代码片段执行安全等级",
     "type": "string",
     "default": "strict",
-    "options": ["strict", "balanced", "permissive"],
+    "options": [
+      "strict",
+      "balanced",
+      "permissive"
+    ],
     "hint": "⚪ Token 无。strict：仅基础内置函数 + 无任何 import；balanced：放开 sorted/reversed/enumerate/zip + 允许 import json/re/math/datetime；permissive：在 balanced 基础上再放开 hashlib/itertools/collections + map/filter"
   },
-
   "dynamic_tool_registration_enabled": {
-    "description": "允许动态为高价值能力注册独立工具",
+    "description": "[能力系统] 允许动态为高价值能力注册独立工具",
     "type": "bool",
     "default": false,
     "hint": "🟢 Token 低（注册不调 LLM，但每多一个工具就增大每轮主请求的工具列表输入 token）。高危。置信度 ≥0.65 且被标记的能力会注册成独立 LLM 工具"
   },
-
   "dynamic_tool_daily_quota": {
-    "description": "动态注册独立工具的每日配额",
+    "description": "[能力系统] 动态注册独立工具的每日配额",
     "type": "int",
     "default": 3,
     "hint": "⚪ Token 无（v0.6.1 防爆炸保护）。每天最多新增 N 个独立工具；设为 0 等同关闭动态注册"
   },
-
   "danger_core_mutation": {
-    "description": "🔴 自主修改核心人格（persona_core.yaml）",
+    "description": "[高危] 🔴 自主修改核心人格（persona_core.yaml）",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（突变较少见，触发时调 LLM 改写 persona）。需同时开 danger_core_mutation_confirm"
   },
   "danger_core_mutation_confirm": {
-    "description": "🔴 核心人格修改二次确认",
+    "description": "[高危] 🔴 核心人格修改二次确认",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（确认开关）"
   },
   "danger_active_info_collection": {
-    "description": "⚠️ 高危：主动信息收集",
+    "description": "[高危] ⚠️ 高危：主动信息收集",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高。会额外调 LLM 生成'还想了解什么'并可能主动发言。【降 token 可关】需同时开 desire_enabled 才生效。默认只作上下文暗示，开 active_info_collection_can_speak 才会主动发问"
   },
   "active_info_collection_can_speak": {
-    "description": "允许主动信息收集把问题真正发到群里",
+    "description": "[高危] 允许主动信息收集把问题真正发到群里",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（仅控制行为）。默认主动信息收集生成的问题只作上下文暗示（intensity 低于主动发言门槛）；开启后用更高 intensity 写入，使问题能被立场传播真正问出口。需同时开 danger_active_info_collection + danger_stance_propagation + desire_enabled"
   },
   "memory_infection_max_repeats": {
-    "description": "记忆感染同一信息最大主动强调次数",
+    "description": "[高危] 记忆感染同一信息最大主动强调次数",
     "type": "int",
     "default": 2,
     "hint": "⚪ Token 无。v0.9.5：同一条'想让对方记住'的信息被主动强调的最大次数，达到后标记满足；若对方消息提及相关信息则提前满足（视为已记住）"
   },
   "autonomous_web_extract_chars": {
-    "description": "自主网络抓取正文提取字符上限",
+    "description": "[高危] 自主网络抓取正文提取字符上限",
     "type": "int",
     "default": 1500,
     "hint": "⚪ Token 无（抓取本身不调 LLM；但提取越多，后续合成能力的 prompt 越长）。v0.9.5：从 500 提升并改为多标签提取（p/li/h1-h3/div），过滤 script/style 噪音"
   },
   "danger_autonomous_web": {
-    "description": "⚠️ 高危：自主网络行动（仍作为外部手动触发入口保留）",
+    "description": "[高危] ⚠️ 高危：自主网络行动（仍作为外部手动触发入口保留）",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（联网抓取 + LLM 处理，按需触发）。需同时开 desire_enabled 才生效"
   },
   "danger_relationship_inference": {
-    "description": "⚠️ 高危：关系图谱推断",
+    "description": "[高危] ⚠️ 高危：关系图谱推断",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高。每次沉淀都调 LLM 推断成员关系，输出短但 reasoning 重（单笔最贵之一）。【降 token 首选关这个】群聊关系图谱对回复质量增益有限"
   },
   "danger_stance_propagation": {
-    "description": "⚠️ 高危：立场自主传播",
+    "description": "[高危] ⚠️ 高危：立场自主传播",
     "type": "bool",
     "default": false,
     "hint": "🔴 Token 高。高强度欲望会触发额外的主动发言 LLM 调用。【降 token 可关】依赖 desire_enabled"
   },
   "danger_identity_crisis": {
-    "description": "⚠️ 高危：身份危机",
+    "description": "[高危] ⚠️ 高危：身份危机",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（条件触发时调 LLM）"
   },
   "danger_memory_infection": {
-    "description": "🔴 极高危：记忆感染",
+    "description": "[高危] 🔴 极高危：记忆感染",
     "type": "bool",
     "default": false,
     "hint": "🟡 Token 中（触发时调 LLM）。需同时开 danger_memory_infection_confirm + desire_enabled。v0.9.5：同一信息会被有限次重复强调（memory_infection_max_repeats），对方提及则提前满足"
   },
   "danger_memory_infection_confirm": {
-    "description": "🔴 记忆感染二次确认",
+    "description": "[高危] 🔴 记忆感染二次确认",
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（确认开关）"
