@@ -45,7 +45,7 @@ class TestAnimaHelp:
         assert label_stat_key("stance.blocked.monologue") == "内心独白泄漏拦截"
 
     def test_config_friendly_names(self):
-        assert config_label("dashboard_standalone_enabled") == "独立端口仪表盘"
+        assert config_label("dashboard_enabled") == "运行仪表盘"
         assert "插件配置" in config_label("unknown_key_xyz")
 
 

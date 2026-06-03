@@ -38,6 +38,52 @@ class PluginAPI:
             )
         logger.info("[Anima] Plugin Pages API 已注册")
 
+        # ── 注册 Sylanne WebUI 路由到 AstrBot 共享端口 ───────────────────────────
+        webui_routes = getattr(self.plugin, "_webui_routes", None)
+        if webui_routes:
+            webui_mappings = [
+                ("", "page_handler", ["GET"]),
+                ("/dashboard", "dashboard_handler", ["GET"]),
+                ("/logo.png", "logo_handler", ["GET"]),
+                ("/health", "health_handler", ["GET"]),
+                ("/api/state", "state_handler", ["GET"]),
+                ("/api/settings", "settings_get_handler", ["GET"]),
+                ("/api/settings", "settings_post_handler", ["POST"]),
+                ("/api/computation_logs", "computation_logs_handler", ["GET"]),
+                ("/api/memory_pools", "memory_pools_handler", ["GET"]),
+                ("/api/memory_meltdown", "memory_meltdown_handler", ["POST"]),
+                ("/api/meltdown_nonce", "meltdown_nonce_handler", ["GET"]),
+                ("/api/memory_consolidate", "memory_consolidate_handler", ["POST"]),
+                ("/api/memory_sink", "memory_sink_handler", ["GET"]),
+                ("/api/config_presets", "config_presets_handler", ["GET"]),
+                ("/api/glossary", "glossary_handler", ["GET"]),
+                ("/api/export_data", "export_data_handler", ["GET"]),
+                ("/api/purge_data", "purge_data_handler", ["DELETE"]),
+                ("/api/webui_probe", "probe_handler", ["GET"]),
+                ("/api/error_stats", "error_stats_handler", ["GET"]),
+                ("/api/config_export", "config_export_handler", ["GET"]),
+                ("/api/config_import", "config_import_handler", ["POST"]),
+                ("/api/widget-state", "widget_state_handler", ["GET"]),
+                ("/api/proactive_feedback", "proactive_feedback_handler", ["POST"]),
+                ("/api/weekly_report", "weekly_report_handler", ["GET"]),
+                ("/api/memory/decay_curve", "memory_decay_curve_handler", ["GET"]),
+                ("/api/personality/export", "personality_export_handler", ["GET"]),
+                ("/api/personality/import", "personality_import_handler", ["POST"]),
+                ("/api/memory_settings", "memory_settings_get_handler", ["GET"]),
+                ("/api/memory_settings", "memory_settings_post_handler", ["POST"]),
+                ("/api/lineage_observatory", "lineage_observatory_handler", ["GET"]),
+            ]
+            for route, handler_name, methods in webui_mappings:
+                handler = getattr(webui_routes, handler_name, None)
+                if handler:
+                    context.register_web_api(
+                        f"/{PLUGIN_NAME}{route}",
+                        handler,
+                        methods,
+                        f"Anima WebUI: {handler_name}",
+                    )
+            logger.info("[Anima] Sylanne WebUI 路由已注册到 AstrBot 共享端口")
+
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _get_capabilities(self) -> dict:

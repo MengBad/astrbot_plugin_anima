@@ -29,7 +29,7 @@ import time
 from collections import deque
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, quote
 
 from pathlib import Path
 
@@ -249,18 +249,28 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler: Any) -> web.Response:
-        if request.path in ("/", "/favicon.ico", "/health", "/logo.png", "/assets/logo.png"):
+        if request.path in (
+            "/", "/favicon.ico", "/health", "/logo.png", "/assets/logo.png",
+            "/capability-tree", "/capability-tree/",
+            "/capability-tree/app.js", "/capability-tree/style.css",
+            "/dashboard", "/dashboard/",
+            "/dashboard/app.js", "/dashboard/style.css"
+        ):
             return await handler(request)
         # S9: /metrics requires Bearer token when auth is configured
         if request.path == "/metrics":
             if _active_token:
                 auth = request.headers.get("Authorization", "")
-                if not auth.startswith("Bearer ") or auth[7:] != _active_token:
+                token_val = auth[7:] if auth.startswith("Bearer ") else request.query.get("token", "")
+                if token_val != _active_token:
                     return web.json_response({"error": "unauthorized"}, status=401)
             return await handler(request)
+        
         auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer ") or auth[7:] != _active_token:
+        token_val = auth[7:] if auth.startswith("Bearer ") else request.query.get("token", "")
+        if token_val != _active_token:
             return web.json_response({"error": "unauthorized"}, status=401)
+            
         # Item 24: CSRF 防护 — POST/DELETE 需要 X-CSRF-Token header
         if request.method in ("POST", "DELETE"):
             csrf_header = request.headers.get("X-CSRF-Token", "")
@@ -1308,7 +1318,274 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
             pass
         return web.json_response({"topics": topics})
 
+    def _inject_shim_and_nav(html: str, active_page: str) -> str:
+        t = quote(_active_token, safe="")
+        bridge_shim_code = """
+<script>
+window.AstrBotPluginPage = {
+  ready: function () { return Promise.resolve({}); },
+  apiGet: function (path, params) {
+    var q = new URLSearchParams();
+    q.set('token', new URLSearchParams(location.search).get('token') || '');
+    if (params) { for (var k in params) { q.set(k, params[k]); } }
+    return fetch('/api/' + path + '?' + q.toString(), {
+      headers: { 'Accept': 'application/json' }
+    }).then(function (r) { return r.json(); });
+  }
+};
+</script>
+"""
+        nav_style = """
+<style>
+.anima-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  padding:10px 18px;background:#1e293b;position:sticky;top:0;z-index:999;
+  box-shadow:0 1px 4px rgba(0,0,0,.25);font-family:-apple-system,BlinkMacSystemFont,
+  "Segoe UI",Roboto,Arial,sans-serif;}
+.anima-nav .brand{color:#818cf8;font-weight:800;font-size:16px;margin-right:14px;
+  letter-spacing:.5px;}
+.anima-nav a{color:#cbd5e1;text-decoration:none;padding:6px 14px;border-radius:8px;
+  font-size:14px;transition:background .15s,color .15s;}
+.anima-nav a:hover{background:#334155;color:#fff;}
+.anima-nav a.active{background:#6366f1;color:#fff;}
+</style>
+"""
+        nav_html = f"""
+<nav class="anima-nav">
+  <span class="brand">Anima</span>
+  <a href="/?token={t}">Sylanne 意识面板</a>
+  <a href="/dashboard/?token={t}" class="{"active" if active_page == "dashboard" else ""}">Anima 运行仪表盘</a>
+  <a href="/capability-tree/?token={t}" class="{"active" if active_page == "capability-tree" else ""}">Anima 能力树</a>
+</nav>
+"""
+        head_block = bridge_shim_code + nav_style
+        if "</head>" in html:
+            html = html.replace("</head>", head_block + "</head>", 1)
+        else:
+            html = head_block + html
+
+        if "<body>" in html:
+            html = html.replace("<body>", "<body>" + nav_html, 1)
+        else:
+            html = nav_html + html
+        return html
+
+    async def handle_captree_redirect(request: web.Request) -> web.Response:
+        t = quote(_active_token, safe="")
+        raise web.HTTPFound(f"/capability-tree/?token={t}")
+
+    async def handle_captree_index(request: web.Request) -> web.Response:
+        if _active_token and request.query.get("token", "") != _active_token:
+            return web.Response(
+                status=401, text="<h1>401 Unauthorized</h1><p>Missing or invalid token.</p>", content_type="text/html"
+            )
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        index_path = pages_dir / "capability-tree" / "index.html"
+        if not index_path.exists():
+            return web.Response(status=404, text="Capability tree index.html not found.")
+        html = index_path.read_text(encoding="utf-8")
+        html = _inject_shim_and_nav(html, "capability-tree")
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
+
+    async def handle_captree_asset_js(request: web.Request) -> web.Response:
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        js_path = pages_dir / "capability-tree" / "app.js"
+        if not js_path.exists():
+            return web.Response(status=404, text="app.js not found")
+        return web.Response(text=js_path.read_text(encoding="utf-8"), content_type="application/javascript", charset="utf-8")
+
+    async def handle_captree_asset_css(request: web.Request) -> web.Response:
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        css_path = pages_dir / "capability-tree" / "style.css"
+        if not css_path.exists():
+            return web.Response(status=404, text="style.css not found")
+        return web.Response(text=css_path.read_text(encoding="utf-8"), content_type="text/css", charset="utf-8")
+
+    async def handle_dashboard_redirect(request: web.Request) -> web.Response:
+        t = quote(_active_token, safe="")
+        raise web.HTTPFound(f"/dashboard/?token={t}")
+
+    async def handle_dashboard_index(request: web.Request) -> web.Response:
+        if _active_token and request.query.get("token", "") != _active_token:
+            return web.Response(
+                status=401, text="<h1>401 Unauthorized</h1><p>Missing or invalid token.</p>", content_type="text/html"
+            )
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        index_path = pages_dir / "dashboard" / "index.html"
+        if not index_path.exists():
+            return web.Response(status=404, text="Dashboard index.html not found.")
+        html = index_path.read_text(encoding="utf-8")
+        html = _inject_shim_and_nav(html, "dashboard")
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
+
+    async def handle_dashboard_asset_js(request: web.Request) -> web.Response:
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        js_path = pages_dir / "dashboard" / "app.js"
+        if not js_path.exists():
+            return web.Response(status=404, text="app.js not found")
+        return web.Response(text=js_path.read_text(encoding="utf-8"), content_type="application/javascript", charset="utf-8")
+
+    async def handle_dashboard_asset_css(request: web.Request) -> web.Response:
+        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        css_path = pages_dir / "dashboard" / "style.css"
+        if not css_path.exists():
+            return web.Response(status=404, text="style.css not found")
+        return web.Response(text=css_path.read_text(encoding="utf-8"), content_type="text/css", charset="utf-8")
+
+    async def handle_runtime_stats(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            if not current_plugin.config.get("dashboard_enabled", True):
+                return web.json_response({
+                    "success": False,
+                    "disabled": True,
+                    "error": "运行仪表盘已在插件配置中禁用（dashboard_enabled=false）",
+                })
+            snap = current_plugin._stats_snapshot()
+            return web.json_response({"success": True, "stats": snap})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_stats(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            api = getattr(current_plugin, "plugin_api", None)
+            if api is not None and hasattr(api, "_get_capabilities"):
+                caps_data = api._get_capabilities()
+            else:
+                caps_data = current_plugin._read_personal_capabilities()
+            caps = caps_data.get("capabilities", [])
+            total = len(caps)
+            avg_conf = sum(c.get("confidence", 0) for c in caps) / total if total > 0 else 0
+            total_usage = sum(c.get("usage_count", 0) for c in caps)
+            total_corrections = sum(len(c.get("corrections", [])) for c in caps)
+            return web.json_response({
+                "success": True,
+                "stats": {
+                    "total_capabilities": total,
+                    "average_confidence": round(avg_conf, 3),
+                    "total_usage": total_usage,
+                    "total_corrections": total_corrections,
+                    "last_research": caps_data.get("last_research_ts"),
+                },
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_stats_history(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            history = current_plugin._get_stats_history()
+            return web.json_response({"success": True, "history": history})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_capabilities(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            api = getattr(current_plugin, "plugin_api", None)
+            if api is not None and hasattr(api, "_get_capabilities"):
+                data = api._get_capabilities()
+            else:
+                data = current_plugin._read_personal_capabilities()
+            from datetime import datetime
+            return web.json_response({
+                "success": True,
+                "data": data,
+                "timestamp": datetime.now().isoformat(),
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_events(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            try:
+                limit = int(request.query.get("limit", 30))
+            except (TypeError, ValueError):
+                limit = 30
+            api = getattr(current_plugin, "plugin_api", None)
+            events = []
+            if api is not None and hasattr(api, "_get_recent_events"):
+                events = api._get_recent_events(limit)
+            return web.json_response({
+                "success": True,
+                "events": events,
+                "count": len(events),
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_export(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            api = getattr(current_plugin, "plugin_api", None)
+            if api is not None and hasattr(api, "_get_capabilities"):
+                caps_data = api._get_capabilities()
+            else:
+                caps_data = current_plugin._read_personal_capabilities()
+            events = []
+            if api is not None and hasattr(api, "_get_recent_events"):
+                events = api._get_recent_events(50)
+            from datetime import datetime
+            return web.json_response({
+                "exported_at": datetime.now().isoformat(),
+                "plugin": "astrbot_plugin_anima",
+                "capabilities": caps_data,
+                "recent_autonomy_events": events,
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_config(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            cfg = current_plugin.config
+            keys_bool = [
+                "autonomy_enabled", "autonomy_research_on_scar",
+                "autonomy_research_on_time_absence", "autonomy_research_on_high_desire",
+                "autonomy_research_on_personality_drift", "autonomy_research_on_contradiction",
+                "capability_system_enabled", "default_register_as_independent_tool",
+                "capability_health_pruning_enabled", "allow_capability_code_execution",
+                "dynamic_tool_registration_enabled",
+            ]
+            autonomy_config = {k: cfg.get(k, None) for k in keys_bool}
+            autonomy_config["code_execution_safety_level"] = cfg.get(
+                "code_execution_safety_level", "strict"
+            )
+            return web.json_response({"success": True, "config": autonomy_config})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     app.router.add_get("/", handle_page)
+    app.router.add_get("/capability-tree", handle_captree_redirect)
+    app.router.add_get("/capability-tree/", handle_captree_index)
+    app.router.add_get("/capability-tree/app.js", handle_captree_asset_js)
+    app.router.add_get("/capability-tree/style.css", handle_captree_asset_css)
+    app.router.add_get("/dashboard", handle_dashboard_redirect)
+    app.router.add_get("/dashboard/", handle_dashboard_index)
+    app.router.add_get("/dashboard/app.js", handle_dashboard_asset_js)
+    app.router.add_get("/dashboard/style.css", handle_dashboard_asset_css)
+    app.router.add_get("/api/runtime_stats", handle_runtime_stats)
+    app.router.add_get("/api/stats", handle_stats)
+    app.router.add_get("/api/stats_history", handle_stats_history)
+    app.router.add_get("/api/capabilities", handle_capabilities)
+    app.router.add_get("/api/events", handle_events)
+    app.router.add_get("/api/export", handle_export)
+    app.router.add_get("/api/config", handle_config)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/metrics", handle_metrics)
     app.router.add_get("/api/state", handle_state)

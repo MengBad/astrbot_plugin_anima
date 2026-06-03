@@ -59,10 +59,6 @@ def label_stat_key(full_key: str) -> str:
 CONFIG_FRIENDLY: dict[str, str] = {
     "enabled": "插件总开关",
     "dashboard_enabled": "运行仪表盘",
-    "dashboard_standalone_enabled": "独立端口仪表盘",
-    "dashboard_standalone_host": "独立端口绑定地址",
-    "dashboard_standalone_port": "独立端口端口号",
-    "dashboard_standalone_token": "独立端口访问口令",
     "dashboard_history_days": "历史趋势保留天数",
     "desire_enabled": "欲望系统",
     "worldview_enabled": "世界观系统",

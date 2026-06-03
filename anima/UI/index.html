@@ -521,12 +521,13 @@ body::after {
   transition: max-height 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease, padding 0.3s ease;
 }
 .config-row[data-depends].visible {
-  max-height:60px;
+  max-height:160px;
   opacity:1;
   padding:10px 0;
   border-bottom:1px solid var(--card-border);
 }
 .config-label { font-size:var(--font-base); font-weight:500; }
+.config-hint { font-size:11px; color:var(--text-muted); line-height:1.4; margin-top:2px; text-align:left; word-break:break-all; }
 .config-input { font-family:var(--font-mono); font-size:var(--font-base); padding:4px 10px; border-radius:6px; border:1px solid var(--card-border); background:rgba(255,255,255,0.03); color:var(--text); width:100px; text-align:right; -moz-appearance:textfield; }
 .config-input::-webkit-outer-spin-button, .config-input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
 .config-select { font-family:var(--font-mono); font-size:var(--font-base); padding:4px 10px; border-radius:6px; border:1px solid var(--card-border); background:rgba(255,255,255,0.03); color:var(--text); }
@@ -1901,13 +1902,20 @@ function mockResponse(path) {
 async function apiFetch(path, opts) {
   opts = opts || {};
   if (isPreview) return mockResponse(path.split('?')[0]);
+  var resolvedPath = path;
+  if (resolvedPath.startsWith('/api/')) {
+    var basePath = window.location.pathname;
+    if (basePath.indexOf('/astrbot_plugin_anima') !== -1) {
+      resolvedPath = '/astrbot_plugin_anima' + path;
+    }
+  }
   var token = localStorage.getItem('sylanne_token') || '';
   var headers = {};
   if (token) headers['Authorization'] = 'Bearer ' + token;
   var method = (opts.method || 'GET').toUpperCase();
   if (csrfToken && method !== 'GET') headers['X-CSRF-Token'] = csrfToken;
   if (opts.headers) for (var k in opts.headers) headers[k] = opts.headers[k];
-  var r = await fetch(path, { method: method, headers: headers, body: opts.body || undefined });
+  var r = await fetch(resolvedPath, { method: method, headers: headers, body: opts.body || undefined });
   if (r.status === 401) {
     localStorage.removeItem('sylanne_token');
     if (pollIntervalId) { clearInterval(pollIntervalId); pollIntervalId = null; }
@@ -2827,6 +2835,9 @@ var CONFIG_GROUP_PREFIXES = [
 ];
 
 function classifyConfigKey(key) {
+  if (key === 'embedding_provider_id' || key === 'internal_provider_id' || key === 'worldview_provider_id') {
+    return 'Memory & Assessment';
+  }
   for (var i = 0; i < CONFIG_GROUP_PREFIXES.length; i++) {
     var rule = CONFIG_GROUP_PREFIXES[i];
     if (key.startsWith(rule.prefix)) return rule.group;
@@ -2902,6 +2913,7 @@ function schemaToGroups(schema, values) {
       label: meta.description || key,
       label_zh: meta.description || key,
       label_en: CONFIG_EN[meta.description] || meta.description || key,
+      hint: meta.hint || '',
       type: isProvider ? 'provider' : (meta.type === 'bool' ? 'toggle' : (meta.type === 'int' || meta.type === 'float' ? 'number' : 'string')),
       value: values[key] !== undefined ? values[key] : (meta.default !== undefined ? meta.default : ''),
       options: meta.options || null
@@ -3004,7 +3016,13 @@ function renderConfigGroup(group) {
       }
     }
     var rowClass = 'config-row' + depClass;
-    html += '<div class="' + rowClass + '"' + depAttr + '><span class="config-label">' + itemLabel + '</span>';
+    html += '<div class="' + rowClass + '"' + depAttr + '>';
+    html += '<div style="display:flex;flex-direction:column;gap:2px;max-width:70%;align-items:flex-start;">';
+    html += '<span class="config-label">' + itemLabel + '</span>';
+    if (item.hint) {
+      html += '<span class="config-hint">' + item.hint + '</span>';
+    }
+    html += '</div>';
     if (item.type === 'provider' || item.key.indexOf('provider_id') !== -1) {
       var providers = liveProviders || MOCK_PROVIDERS;
       if (item.key.indexOf('embedding') !== -1) {

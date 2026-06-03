@@ -97,7 +97,7 @@
     "description": "[模型] 用于向量记忆的 Embedding Provider ID",
     "type": "string",
     "default": "",
-    "hint": "🟢 Token 低（embedding 调用比 chat 便宜得多）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3"
+    "hint": "🟢 Token 低（embedding 调用比 chat 便宜）。🔴 强提醒：如果使用没有内置 RAG 的国内模型（如 DeepSeek-V3 等），强烈建议配置并绑定此 ID，否则角色的记忆多样性与连贯性将显著降低！"
   },
   "worldview_provider_id": {
     "description": "[模型] 世界观更新专用 Provider ID",
@@ -455,7 +455,7 @@
     "description": "[可选模块] 启用 WebUI 管理面板",
     "type": "bool",
     "default": false,
-    "hint": "启用后可通过浏览器访问记忆管理面板。"
+    "hint": "💡 启用独立的 2718 端口 WebUI 管理面板（包含 Sylanne 意识面板、Anima 运行仪表盘与能力树）。开启后，在机器人聊天中发 /anima_dashboard_url 获取带 token 的链接。"
   },
   "sylanne_webui_host": {
     "description": "[可选模块] WebUI 监听地址",
@@ -681,7 +681,7 @@
     "description": "[能力系统] 允许能力卡中包含并执行代码片段",
     "type": "bool",
     "default": false,
-    "hint": "⚪ Token 无（这是安全风险项，与 token 无关）。⚠️ 极高危：角色可将研究成果写成可执行代码并运行"
+    "hint": "⚪ Token 无。⚠️ 极高危：允许运行自创代码。已设置 3.0 秒运行超时保护，超时后自动强行强断，防止死循环耗尽服务器 CPU"
   },
   "code_execution_safety_level": {
     "description": "[能力系统] 代码片段执行安全等级",
@@ -795,30 +795,6 @@
     "type": "bool",
     "default": true,
     "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
-  },
-  "dashboard_standalone_enabled": {
-    "description": "[仪表盘] 启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
-    "type": "bool",
-    "default": false,
-    "hint": "⚪ Token 无（纯本地）。开启后 Anima 会另起一个独立 HTTP 端口提供同一个仪表盘网页，像别的插件那样用 http://ip:端口 直接打开。受 dashboard_enabled 总开关约束。⚠️ 这是网络暴露服务：默认仅绑定本机(127.0.0.1)、强制 token 鉴权。用 /anima_dashboard_url 命令获取带 token 的访问地址。改此项后需重载插件生效"
-  },
-  "dashboard_standalone_host": {
-    "description": "[仪表盘] 独立端口仪表盘绑定地址",
-    "type": "string",
-    "default": "127.0.0.1",
-    "hint": "⚪ Token 无。默认 127.0.0.1（仅本机可访问，最安全）。⚠️ 改为 0.0.0.0 才能从其他机器访问，但那样会把仪表盘暴露到网络上，仅靠 token 保护且为明文 HTTP，请确保处于可信内网。改后需重载插件"
-  },
-  "dashboard_standalone_port": {
-    "description": "[仪表盘] 独立端口仪表盘监听端口",
-    "type": "int",
-    "default": 9876,
-    "hint": "⚪ Token 无。独立网址用的端口（如 9876 → http://127.0.0.1:9876）。需避开已被占用的端口（AstrBot 面板默认 6185）。改后需重载插件"
-  },
-  "dashboard_standalone_token": {
-    "description": "[仪表盘] 独立端口仪表盘访问 token",
-    "type": "string",
-    "default": "",
-    "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
   },
   "dashboard_history_days": {
     "description": "[仪表盘] 仪表盘历史趋势保留天数",

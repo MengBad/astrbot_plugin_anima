@@ -121,11 +121,12 @@ class WebUIRoutes:
     async def page_handler(self) -> Any:
         """Return the full WebUI HTML page."""
         from quart import Response
+        from pathlib import Path
 
-        # WEBUI_HTML is a module-level constant in main.py; access via plugin module
-        import main as _main_mod
-
-        html = getattr(_main_mod, "WEBUI_HTML", "<html><body>unavailable</body></html>")
+        dashboard_path = Path(self._plugin_dir) / "UI" / "index.html"
+        if not dashboard_path.exists():
+            return Response("Dashboard not found", status=404)
+        html = dashboard_path.read_text(encoding="utf-8")
         return Response(html, content_type="text/html; charset=utf-8")
 
     async def state_handler(self) -> dict[str, Any]:
