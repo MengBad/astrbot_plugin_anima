@@ -254,7 +254,8 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
             "/capability-tree", "/capability-tree/",
             "/capability-tree/app.js", "/capability-tree/style.css",
             "/dashboard", "/dashboard/",
-            "/dashboard/app.js", "/dashboard/style.css"
+            "/dashboard/app.js", "/dashboard/style.css",
+            "/sylanne", "/sylanne/"
         ):
             return await handler(request)
         # S9: /metrics requires Bearer token when auth is configured
@@ -278,8 +279,20 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
                 return web.json_response({"error": "csrf_token_mismatch"}, status=403)
         return await handler(request)
 
-    # Serve the dashboard HTML from UI/index.html
+    # Serve the portal and dashboard HTML
     plugin_root = Path(__file__).resolve().parent.parent
+    
+    portal_path = plugin_root / "UI" / "portal.html"
+    if portal_path.exists():
+        portal_html = portal_path.read_text(encoding="utf-8")
+        logger.info(
+            f"Sylanne WebUI: loaded portal from {portal_path} ({len(portal_html)} bytes)"
+        )
+    else:
+        portal_html = (
+            "<html><body><h1>Portal unavailable</h1></body></html>"
+        )
+
     dashboard_path = plugin_root / "UI" / "index.html"
     if dashboard_path.exists():
         dashboard_html = dashboard_path.read_text(encoding="utf-8")
@@ -293,10 +306,22 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
 
     app = web.Application(middlewares=[auth_middleware])
 
-    async def handle_page(request: web.Request) -> web.Response:
+    async def handle_portal(request: web.Request) -> web.Response:
         return web.Response(
-            text=dashboard_html, content_type="text/html", charset="utf-8"
+            text=portal_html, content_type="text/html", charset="utf-8"
         )
+
+    async def handle_sylanne_redirect(request: web.Request) -> web.Response:
+        t = quote(_active_token, safe="")
+        raise web.HTTPFound(f"/sylanne/?token={t}")
+
+    async def handle_sylanne_index(request: web.Request) -> web.Response:
+        if _active_token and request.query.get("token", "") != _active_token:
+            return web.Response(
+                status=401, text="<h1>401 Unauthorized</h1><p>Missing or invalid token.</p>", content_type="text/html"
+            )
+        html = _inject_shim_and_nav(dashboard_html, "sylanne")
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
 
     async def handle_state(request: web.Request) -> web.Response:
         global _last_diag_request
@@ -1333,6 +1358,13 @@ window.AstrBotPluginPage = {
     }).then(function (r) { return r.json(); });
   }
 };
+if (window.self !== window.top) {
+  var css = '.anima-nav { display: none !important; } body { padding-top: 0 !important; margin-top: 0 !important; }';
+  var style = document.createElement('style');
+  style.type = 'text/css';
+  style.appendChild(document.createTextNode(css));
+  (document.head || document.documentElement).appendChild(style);
+}
 </script>
 """
         nav_style = """
@@ -1352,7 +1384,8 @@ window.AstrBotPluginPage = {
         nav_html = f"""
 <nav class="anima-nav">
   <span class="brand">Anima</span>
-  <a href="/?token={t}">Sylanne 意识面板</a>
+  <a href="/?token={t}">全景控制台</a>
+  <a href="/sylanne/?token={t}" class="{"active" if active_page == "sylanne" else ""}">Sylanne 意识面板</a>
   <a href="/dashboard/?token={t}" class="{"active" if active_page == "dashboard" else ""}">Anima 运行仪表盘</a>
   <a href="/capability-tree/?token={t}" class="{"active" if active_page == "capability-tree" else ""}">Anima 能力树</a>
 </nav>
@@ -1570,7 +1603,9 @@ window.AstrBotPluginPage = {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
-    app.router.add_get("/", handle_page)
+    app.router.add_get("/", handle_portal)
+    app.router.add_get("/sylanne", handle_sylanne_redirect)
+    app.router.add_get("/sylanne/", handle_sylanne_index)
     app.router.add_get("/capability-tree", handle_captree_redirect)
     app.router.add_get("/capability-tree/", handle_captree_index)
     app.router.add_get("/capability-tree/app.js", handle_captree_asset_js)

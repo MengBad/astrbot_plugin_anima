@@ -119,7 +119,18 @@ class WebUIRoutes:
     # ------------------------------------------------------------------
 
     async def page_handler(self) -> Any:
-        """Return the full WebUI HTML page."""
+        """Return the portal page."""
+        from quart import Response
+        from pathlib import Path
+
+        portal_path = Path(self._plugin_dir) / "UI" / "portal.html"
+        if not portal_path.exists():
+            return Response("Portal not found", status=404)
+        html = portal_path.read_text(encoding="utf-8")
+        return Response(html, content_type="text/html; charset=utf-8")
+
+    async def sylanne_page_handler(self) -> Any:
+        """Return the original Sylanne Consciousness page."""
         from quart import Response
         from pathlib import Path
 
