@@ -8,13 +8,22 @@ import ast
 import json
 import math
 import os
+import sys
+
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+if _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
+_ANIMA_DIR = os.path.join(_PLUGIN_DIR, "anima")
+if _ANIMA_DIR not in sys.path:
+    sys.path.insert(0, _ANIMA_DIR)
+
 import re
 import threading
 import time
 import urllib.parse
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
-from typing import Optional
+from typing import Optional, Any
 
 import aiohttp
 
@@ -73,7 +82,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.0.2",
+    "1.1.0",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -289,6 +298,105 @@ class AnimaPlugin(
         # v0.9.2: 独立端口仪表盘（默认关，在 async initialize() 中按配置启动）
         self._standalone_server = StandaloneDashboardServer(self)
 
+        # --- SylannEngine Integration ---
+        # Ensure sys.path contains the plugin directory so we can import sylanne_alpha absolutely
+        _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+        import sys
+        if _PLUGIN_DIR not in sys.path:
+            sys.path.insert(0, _PLUGIN_DIR)
+        
+        # Now import SylannEngine classes
+        from sylanne_alpha.session_context import SessionContext
+        from sylanne_alpha.state_persistence import StatePersistence
+        from sylanne_alpha.realtime_dispatch import RealtimeDispatch
+        from sylanne_alpha.background_queue import BackgroundPostQueue
+        from sylanne_alpha.webui_routes import WebUIRoutes
+        from sylanne_alpha.assessor_async import AsyncAssessor
+        from sylanne_alpha.llm_response_pipeline import LLMResponsePipeline
+        from sylanne_alpha.llm_request_pipeline import LLMRequestPipeline
+        from sylanne_alpha.public_api import PublicAPI
+        from sylanne_alpha.proactive_scheduler import ProactiveScheduler
+        from sylanne_alpha import webui_server as _sylanne_webui_server
+        from sylanne_alpha.bounded_dict import BoundedDict
+        from sylanne_alpha.rhythm_learner import RhythmLearner
+        from sylanne_alpha.social_field import SocialFieldCollector
+        from collections import deque
+
+        self._config = self.config
+        self._MAX_HOSTS = 50
+        self._shared_encoder = None
+
+        # 会话管理：session_key → SylanneAlphaHost 映射
+        self._hosts = BoundedDict(maxsize=200)
+        self._background_tasks = set()
+        # 流式回复相关缓冲区
+        self._unfinished_replies = BoundedDict(maxsize=200)
+        self._stream_buffers = BoundedDict(maxsize=200)
+        self._stream_first_sent = BoundedDict(maxsize=200)
+        self._segmented_tasks = BoundedDict(maxsize=200)
+        # 请求/响应诊断缓存
+        self._last_request_budgets = BoundedDict(maxsize=200)
+        self._last_understanding_closed_loop = BoundedDict(maxsize=200)
+        self._last_bot_expression_time = BoundedDict(maxsize=200)
+        # 计算日志环形缓冲区（供 WebUI 实时显示，限制最大容量以防止内存泄漏）
+        self._computation_logs = deque(maxlen=2000)
+        # WebUI 运行时标识（用于探针验证实例一致性）
+        self._webui_runtime_id = f"{int(time.time() * 1000)}-{id(self):x}"
+        # 节律学习器：学习用户的节奏
+        self._rhythm_learner = RhythmLearner(intimacy_threshold=0.6)
+        
+        # 三层记忆系统
+        self._memory_systems = BoundedDict(maxsize=100)
+        # 对话缓冲区：用于 flush 到 L1 记忆池
+        self._conversation_buffers = BoundedDict(maxsize=100)
+        self._meltdown_nonces = BoundedDict(maxsize=50, ttl=300)
+        self._last_user_texts = BoundedDict(maxsize=200)
+        self._last_bot_texts = BoundedDict(maxsize=200)
+        # 社交场收集器：群聊氛围感知
+        self._social_field = SocialFieldCollector(config=self._config)
+        self._conversation_input_epoch = BoundedDict(maxsize=200)
+        self._last_request_text = BoundedDict(maxsize=200)
+        self._user_message_withdrawals = BoundedDict(maxsize=200)
+        
+        # 后台投递队列：异步发送主动消息/分段回复
+        self._background_post_queues = BoundedDict(maxsize=200)
+        self._background_post_dead_letters = BoundedDict(maxsize=200)
+        self._background_post_sequence = BoundedDict(maxsize=200)
+        self._background_post_latest_enqueued = BoundedDict(maxsize=200)
+        self._background_post_last_committed = BoundedDict(maxsize=200)
+        self._background_post_recovered_sessions = set()
+        self._background_post_active = BoundedDict(maxsize=200)
+        self._background_post_checkpoint_tasks = {}
+        self._background_post_worker_state = BoundedDict(maxsize=200)
+        self._internal_assessor_llm_inflight = 0
+        self._pending_outreach_context = BoundedDict(maxsize=50)
+        self._amnesia_sessions = set()
+        self._proactive_candidate_sessions = BoundedDict(maxsize=100)
+        self._proactive_scheduler_locks = {}
+        self._last_user_message_time = BoundedDict(maxsize=200)
+        self._sylanne_memory_cache = BoundedDict(maxsize=200)
+        self._conversation_pending_response_epochs = BoundedDict(maxsize=200)
+        self._group_atmosphere_injection_snapshot_cache = BoundedDict(maxsize=200)
+        self._realtime_ordinary_history_backfills = BoundedDict(maxsize=200)
+        self._realtime_chat_active_dispatches = BoundedDict(maxsize=200)
+        self._session_locks = {}
+
+        # 子系统初始化
+        self._session_ctx = SessionContext(self)
+        self._state_persistence = StatePersistence(self)
+        self._realtime_dispatch = RealtimeDispatch(self)
+        self._background_queue = BackgroundPostQueue(self)
+        self._webui_routes = WebUIRoutes(self)
+        self._memory_system = self._memory_system_for_session("default")
+        self._async_assessor = AsyncAssessor(config=self._config)
+        self._llm_response_pipeline = LLMResponsePipeline(self)
+        self._llm_request_pipeline = LLMRequestPipeline(self)
+        self._public_api = PublicAPI(self)
+        self._proactive_scheduler = ProactiveScheduler(self)
+
+        # WebUI 生命控制
+        self._webui_lifecycle = _sylanne_webui_server.WebUILifecycle(self)
+
     async def initialize(self):
         """异步初始化钩子。AstrBot 在事件循环就绪后自动调用。
         把所有需要 running loop 的注册（如定时任务）放在这里，避免 __init__ 同步阶段崩溃。
@@ -318,6 +426,14 @@ class AnimaPlugin(
                 await self._standalone_server.start()
             except Exception as e:
                 logger.warning(f"[Anima] 独立端口仪表盘启动失败: {e}")
+
+        # Boot SylannEngine WebUI Lifecycle
+        try:
+            self._webui_lifecycle.publish_active_plugin()
+            self._webui_lifecycle.start_if_enabled()
+            self._webui_lifecycle.schedule_listener_takeover()
+        except Exception as e:
+            logger.warning(f"[Anima] SylannEngine WebUI 启动失败: {e}")
 
         # v0.9.4: 个人能力存量迁移（把历史自封高分但 0 使用的能力归正到基线，幂等）
         try:
@@ -560,6 +676,38 @@ class AnimaPlugin(
         if not self.config.get("enabled", True):
             return
 
+        if hasattr(self, "_hosts"):
+            # 运行 SylannEngine 请求处理
+            await self._on_llm_request_inner(event, req)
+
+            # 注入 Anima 独有的能力系统（Phase 6+）
+            try:
+                caps_injection = self._get_personal_capabilities_injection()
+                if caps_injection:
+                    injection_parts = [caps_injection]
+                    if self.config.get("capability_match_hint_enabled", True):
+                        caps = self._read_personal_capabilities().get("capabilities", [])
+                        if caps:
+                            user_text = event.message_str if (event is not None and hasattr(event, "message_str")) else ""
+                            threshold = float(self.config.get("capability_match_hint_threshold", 0.2))
+                            backend = self.config.get("capability_match_hint_backend", "lexical")
+                            hint = self._build_capability_hint(user_text, caps, threshold, backend=backend, embed_fn=None)
+                            if hint:
+                                injection_parts.append(hint)
+                    
+                    caps_text = (
+                        "<anima_capabilities>\n"
+                        + "\n".join(injection_parts)
+                        + "\n</anima_capabilities>"
+                    )
+                    from astrbot.api.provider import TextPart
+                    req.extra_user_content_parts.append(
+                        TextPart(text=caps_text).mark_as_temp()
+                    )
+            except Exception as e:
+                logger.warning(f"[Anima] 能力系统注入异常: {e}")
+            return
+
         # v0.9.7: 人设 prompt 注入 system prompt（最高权重，独立于下方用户消息块）
         # v0.9.8: 注入前做轻量校验（注入文本检测 + 超长警告，一次性日志防刷屏）
         try:
@@ -576,15 +724,13 @@ class AnimaPlugin(
         # 时间感更新
         self._update_time_sense(event)
 
-        # 记录最近活跃的 umo（用于离线反刍）
-        # v0.8.8: 仅在 umo 真正变化时落盘，避免每条群消息都全量读改写 anima_state.json
+        # 记录最近活跃前台 UMO（用于离线反刍）
         new_umo = event.unified_msg_origin
         if new_umo != self._last_active_umo:
             self._last_active_umo = new_umo
             self._save_state()
 
-        # v0.8.8: 整个请求只读一次 state，下游复用（此前 last_emotion_score /
-        #         mutation_history 各独立 _load_state 一次，单请求重复读盘 3 次）
+        # v0.8.8: 整个请求只读一次 state，下游复用
         state = self._load_state()
 
         # WebUI 编辑器同步：只有当内容与上次插件同步的不同时，才认为是用户手动编辑
@@ -611,18 +757,17 @@ class AnimaPlugin(
         # 构建注入内容
         injection_parts = []
 
-        # 注入 persona_core（最高优先级）
+        # 注入 persona_core
         if os.path.exists(self.persona_core_path):
             with open(self.persona_core_path, "r", encoding="utf-8") as f:
                 persona_core = f.read()
             if persona_core.strip():
                 injection_parts.append(f"[核心规则]\n{persona_core}")
 
-        # Phase 6+: 注入角色自己创造和学会的个人工具/能力（极高优先级 — 这是它作为独立存在的延伸）
+        # Phase 6+: 注入个人能力
         caps_injection = self._get_personal_capabilities_injection()
         if caps_injection:
             injection_parts.append(caps_injection)
-            # v0.9.10 (Layer 2): 相关性触发的定向提示（命中阈值才注入，不命中零 token）
             try:
                 if self.config.get("capability_match_hint_enabled", True):
                     caps = self._read_personal_capabilities().get("capabilities", [])
@@ -639,7 +784,7 @@ class AnimaPlugin(
 
         injection_parts.append(f"[Anima] 当前自我认知：\n{notes}")
 
-        # 欲望注入（v0.8.0：按 umo 隔离，避免跨群泄漏）
+        # 欲望注入
         desires_text = self._get_active_desires_text(event)
         if desires_text:
             injection_parts.append(desires_text)
@@ -659,11 +804,11 @@ class AnimaPlugin(
         if identity_text:
             injection_parts.append(identity_text)
 
-        # 矛盾注入：让角色意识到自己的矛盾
+        # 矛盾注入
         if self.config.get("contradiction_enabled", False):
             contradictions = self._read_contradictions()
             if contradictions:
-                recent = contradictions[-3:]  # 最多注入3条
+                recent = contradictions[-3:]
                 c_lines = [c.get("description", "") for c in recent if c.get("description")]
                 if c_lines:
                     injection_parts.append(
@@ -671,29 +816,18 @@ class AnimaPlugin(
                         + "\n".join(f"- {c}" for c in c_lines)
                     )
 
-        # 情绪强度注入：让主模型感知当前情绪状态
-        # v0.8.8: 复用开头读到的 state，避免重复读盘
+        # 情绪强度注入
         last_emotion = state.get("last_emotion_score", 0)
         if last_emotion > 0.3:
             level = "极高" if last_emotion > 0.8 else "高" if last_emotion > 0.6 else "中等"
             injection_parts.append(f"[内部状态] 当前情绪强度：{last_emotion:.1f}（{level}）")
 
-        # Phase 3: 人格向量注入（5维倾向）
-        # v1.0.0: 与 Sylanne 的 5 维人格系统重叠，Sylanne 的 Dual-EMA + 每关系覆盖层
-        # 更精确且驱动所有表达阈值，此处注入已禁用以避免冗余。
-        # pv_text = self._get_personality_injection_text()
-        # if pv_text:
-        #     injection_parts.append(f"[内部状态] {pv_text}")
-
-        # 压抑话题注入：想说但没说出口的事
+        # 压抑话题注入
         suppressed_text = self._get_suppressed_injection(event)
         if suppressed_text:
             injection_parts.append(suppressed_text)
 
-        # 工具学习：注入工具偏好规律 + 工具日记
-        # v0.8.8: 工具日记注入此前被错误地嵌套在 danger_core_mutation 块内，
-        #         导致未开核心突变的用户永远看不到工具日记。工具日记属于
-        #         tool_learning 体系，移到这里正确归属。
+        # 工具学习
         if self.config.get("tool_learning_enabled", False):
             tl = self._read_tool_learning()
             tool_rules = []
@@ -705,40 +839,31 @@ class AnimaPlugin(
             if tool_rules:
                 injection_parts.append("工具使用经验：" + "；".join(tool_rules))
 
-            # 注入工具日记（最近 500 字）
             diary = self._read_tool_diary()
             if diary:
                 diary_snippet = diary[-500:] if len(diary) > 500 else diary
                 injection_parts.append(f"[工具日记]\n{diary_snippet}")
 
-        # Phase 5: 最近核心突变记录（如果有，提醒角色自己发生过深刻变化）
+        # Phase 5: 最近核心突变记录
         if self.config.get("danger_core_mutation", False):
             mut_hist = state.get("mutation_history", [])
             if mut_hist:
                 last = mut_hist[-1]
                 recent_ts = last.get("timestamp", "")
-                # 只在 48h 内注入，防止永久刷屏
                 try:
                     if (datetime.now() - datetime.fromisoformat(recent_ts)).total_seconds() < 48*3600:
                         injection_parts.append(f"[内部状态] 最近核心突变：{last.get('type','')} - {last.get('description','')[:60]}")
                 except Exception:
                     pass
 
-        # v0.7.2: 注入向量记忆（让 anima_memory 知识库里的对话历史真正在对话时可用）
-        # 之前 _query_memory 只在沉淀阶段被调用，结果只用来生成内心独白写进 self_notes，
-        # 模型在回答用户时根本看不到具体的对话历史。这是"不记得发过的东西"的根因。
-        # v0.8.2: 三道防线避免历史拒答自我强化（store/query/inject 都过滤）
+        # 注入向量记忆
         if self.config.get("memory_inject_in_context", True):
             try:
                 user_text = (event.message_str or "").strip()
-                # 太短的消息（比如 "嗯"、"OK"）跳过，没意义且容易误命中
                 if user_text and len(user_text) >= 4:
                     n_mem = int(self.config.get("memory_inject_top_k", 3))
                     related = await self._query_memory(user_text, n_results=n_mem)
                     if related:
-                        # v0.8.2 防线 3：注入前再过滤一次拒答内容（兜底）
-                        # v0.8.5: 同时过滤 prompt 注入 / 越狱文本（兜底）
-                        # v0.8.7: 同时过滤框架错误文本（兜底）
                         related = [
                             m for m in related
                             if not self._is_rejected(m)
@@ -746,11 +871,8 @@ class AnimaPlugin(
                             and not self._is_error_artifact(m)
                         ]
                     if related:
-                        # 用最近一次情绪做染色重排（高情绪优先温暖记忆，低情绪优先冲突记忆）
-                        # v0.8.8: 复用开头读到的 state，避免重复读盘
                         last_emotion = float(state.get("last_emotion_score", 0.5))
                         related = self._rerank_memories_by_emotion(related, last_emotion)
-                        # 每条裁到 200 字，避免上下文爆炸
                         mem_lines = "\n".join(f"- {m[:200]}" for m in related[:n_mem] if m)
                         if mem_lines:
                             injection_parts.append(
@@ -776,6 +898,11 @@ class AnimaPlugin(
     async def on_llm_response(self, event: AstrMessageEvent, resp: LLMResponse):
         """LLM 回复后，异步触发沉淀流程"""
         if not self.config.get("enabled", True):
+            return
+
+        if hasattr(self, "_hosts"):
+            # 运行 SylannEngine 的 llm_response_pipeline
+            await self._on_llm_response_inner(event, resp)
             return
 
         response_text = ""
@@ -1258,6 +1385,13 @@ class AnimaPlugin(
         except Exception as e:
             yield event.plain_result(f"[Anima] 扫描失败: {e}")
 
+    @filter.llm_tool(name="query_agent_state")
+    async def _llm_tool_query_agent_state(self, event: Any) -> Any:
+        """查询当前角色的情感与认知状态"""
+        if hasattr(self, "_public_api"):
+            return await self._public_api._llm_tool_query_agent_state(event)
+        return "SylannEngine not initialized."
+
     # ==================== Phase 6+: 让个人能力真正“可被模型调用”（可执行化） ====================
     #
     # 根据 AstrBot 官方文档（plugin-new + ai guide）：
@@ -1416,6 +1550,13 @@ class AnimaPlugin(
         except Exception as e:
             logger.debug(f"[Anima] 停止独立端口仪表盘失败: {e}")
 
+        # Stop SylannEngine WebUI server
+        try:
+            from sylanne_alpha import webui_server as _sylanne_webui_server
+            await _sylanne_webui_server.stop_webui_server()
+        except Exception as e:
+            logger.debug(f"[Anima] SylannEngine WebUI 停止失败: {e}")
+
         # 移除反刍定时任务
         if self.config.get("rumination_enabled", False):
             try:
@@ -1427,3 +1568,195 @@ class AnimaPlugin(
             except Exception as e:
                 logger.debug(f"[Anima] 移除反刍定时任务异常: {e}")
         logger.info("[Anima] 插件正在卸载...")
+
+    # ==================== SylannEngine Delegates ====================
+
+    # Config helpers
+    def _cfg(self, key: str, default: Any = "") -> Any:
+        return self._config.get(key, default)
+
+    def _cfg_bool(self, key: str, default: bool = False) -> bool:
+        val = self._config.get(key, default)
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ("true", "1", "yes")
+        return bool(val)
+
+    def _cfg_float(self, key: str, default: float = 0.0, *, min: float | None = None, max: float | None = None) -> float:
+        val = self._config.get(key, default)
+        try:
+            result = float(val)
+        except (TypeError, ValueError):
+            return default
+        if min is not None and result < min:
+            return default
+        if max is not None and result > max:
+            return default
+        return result
+
+    def _cfg_int(self, key: str, default: int = 0, *, min: int | None = None, max: int | None = None) -> int:
+        val = self._config.get(key, default)
+        try:
+            result = int(val)
+        except (TypeError, ValueError):
+            return default
+        if min is not None and result < min:
+            return default
+        if max is not None and result > max:
+            return default
+        return result
+
+    # Dynamic delegates for SylannEngine context
+    def _host(self, session_key: str) -> Any:
+        return self._session_ctx.host(session_key)
+
+    def _memory_system_for_session(self, session_key: str) -> Any:
+        return self._session_ctx.memory_system_for_session(session_key)
+
+    def _memory_system_has_content(self, memory_system: Any) -> bool:
+        return self._session_ctx.memory_system_has_content(memory_system)
+
+    def _hydrate_memory_system_from_body_traces(self, session_key: str, memory_system: Any, traces: Any) -> None:
+        return self._session_ctx.hydrate_memory_system_from_body_traces(session_key, memory_system, traces)
+
+    def _known_webui_sessions(self, requested: str = "") -> list[str]:
+        return self._session_ctx.known_webui_sessions(requested)
+
+    def _session_key(self, event: Any = None, session_key: str = "") -> str:
+        return self._session_ctx.session_key(event, session_key)
+
+    def _start_webui_if_enabled(self) -> None:
+        return self._webui_lifecycle.start_if_enabled()
+
+    def _webui_runtime_info(self) -> dict[str, Any]:
+        return self._webui_lifecycle.runtime_info()
+
+    def _iter_loaded_webui_server_modules(self) -> list[tuple[str, Any]]:
+        return self._webui_lifecycle.iter_loaded_server_modules()
+
+    async def _stop_stale_webui_server_modules(self, *, include_current: bool = False) -> list[str]:
+        return await self._webui_lifecycle.stop_stale_server_modules(include_current=include_current)
+
+    def _observed_now(self) -> float:
+        cfg = self.config or {}
+        if cfg.get("benchmark_enable_simulated_time"):
+            return time.time() + float(cfg.get("benchmark_time_offset_seconds", 0.0))
+        return time.time()
+
+    def _append_temp_text_part(self, request: Any, text: str, source: str = "", budget: Any | None = None) -> bool:
+        return self._llm_response_pipeline._append_temp_text_part(request, text, source, budget)
+
+    def _normalize_claude_request_payload(self, request: Any, budget: Any | None = None) -> None:
+        return self._llm_response_pipeline._normalize_claude_request_payload(request, budget)
+
+    def _state_injection_budget_for_request(self, session_key: str, request: Any, model_hint: str = "") -> Any:
+        return self._llm_response_pipeline._state_injection_budget_for_request(session_key, request, model_hint)
+
+    def _has_conversation_manager(self) -> bool:
+        return False
+
+    def _has_persona_manager(self) -> bool:
+        return False
+
+    async def _sync_message_to_conv_mgr(self, session_key: str, role: str, text: str) -> None:
+        pass
+
+    def _sync_personality_to_persona_mgr(self, session_key: str) -> None:
+        pass
+
+    async def observe_response(self, session_key: str, *, text: str = "", confidence: float = 0.0, flags: list[str] | None = None, now: float = 0.0) -> dict[str, Any]:
+        return await self._public_api.observe_response(session_key, text=text, confidence=confidence, flags=flags, now=now)
+
+    async def observe_request(self, session_key: str, *, text: str = "", confidence: float = 0.0, flags: list[str] | None = None, now: float = 0.0) -> dict[str, Any]:
+        return await self._public_api.observe_request(session_key, text=text, confidence=confidence, flags=flags, now=now)
+
+    async def _on_llm_request_inner(self, event: Any, request: Any) -> None:
+        return await self._llm_request_pipeline._on_llm_request_inner(event, request)
+
+    async def _on_llm_response_inner(self, event: Any, response: Any) -> None:
+        return await self._llm_response_pipeline._on_llm_response_inner(event, response)
+
+    async def persist_kernel(self, session_key: str, host: Any) -> None:
+        await self._state_persistence.persist_kernel(session_key, host)
+
+    def persist_kernel_sync(self, session_key: str, host: Any) -> None:
+        self._state_persistence.persist_kernel_sync(session_key, host)
+
+    async def persist_buffer(self, session_key: str, host: Any, buf_dict: Any) -> None:
+        await self._state_persistence.persist_buffer(session_key, host, buf_dict)
+
+    async def load_buffer_data(self, session_key: str, host: Any) -> Any:
+        return await self._state_persistence.load_buffer_data(session_key, host)
+
+    async def load_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_state(session_key)
+
+    async def load_psychological_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_psychological_state(session_key)
+
+    async def load_humanlike_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_humanlike_state(session_key)
+
+    async def load_lifelike_learning_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_lifelike_learning_state(session_key)
+
+    async def load_personality_drift_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_personality_drift_state(session_key)
+
+    async def load_moral_repair_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_moral_repair_state(session_key)
+
+    async def load_fallibility_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_fallibility_state(session_key)
+
+    async def save_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_state(session_key, state)
+
+    async def delete_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_state(session_key)
+
+    async def delete_humanlike_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_humanlike_state(session_key)
+
+    async def delete_lifelike_learning_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_lifelike_learning_state(session_key)
+
+    async def delete_personality_drift_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_personality_drift_state(session_key)
+
+    async def delete_moral_repair_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_moral_repair_state(session_key)
+
+    async def delete_fallibility_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_fallibility_state(session_key)
+
+    async def save_humanlike_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_humanlike_state(session_key, state)
+
+    async def save_psychological_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_psychological_state(session_key, state)
+
+    async def save_moral_repair_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_moral_repair_state(session_key, state)
+
+    async def save_lifelike_learning_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_lifelike_learning_state(session_key, state)
+
+    async def save_fallibility_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_fallibility_state(session_key, state)
+
+    async def save_personality_drift_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_personality_drift_state(session_key, state)
+
+    async def load_group_atmosphere_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_group_atmosphere_state(session_key)
+
+    async def delete_psychological_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_psychological_state(session_key)
+
+    def _schedule_buffer_persist(self, session_key: str) -> None:
+        self._state_persistence.schedule_buffer_persist(session_key)
+
+    async def _do_buffer_persist(self, session_key: str) -> None:
+        await self._state_persistence._do_buffer_persist(session_key)

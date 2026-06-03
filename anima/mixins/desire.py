@@ -203,6 +203,8 @@ class DesireMixin:
         v0.8.3：写入前过滤跟 response_text（bot 刚刚回复）语义相似的欲望，
         避免主动发言重复 bot 已经说过的话。
         """
+        if hasattr(self, "_hosts"):
+            return
         if not self.config.get("desire_enabled", False):
             return
         logger.debug("[Anima] 尝试生成欲望...")
@@ -435,6 +437,8 @@ class DesireMixin:
         v0.8.0：仅返回当前 umo 可见的欲望（target_umo 匹配或为空）。
         当 event=None（如反刍流程）时返回所有 desires。
         """
+        if hasattr(self, "_hosts"):
+            return ""
         if not self.config.get("desire_enabled", False):
             return ""
         desires = self._read_desires_for_event(event)

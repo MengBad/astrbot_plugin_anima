@@ -140,16 +140,81 @@ class ScarsMixin:
             self._write_suppressed_topics(topics)
 
 
+    def _get_active_scar_state(self) -> Optional[tuple[Any, str]]:
+        if not hasattr(self, "_hosts"):
+            return None
+        try:
+            umo = self._resolve_umo()
+            session_key = self._session_key(session_key=umo)
+            host = self._host(session_key)
+            if host and hasattr(host, "kernel") and host.kernel:
+                return host.kernel.computation.engine.scar_state, session_key
+        except Exception:
+            pass
+        return None
+
     def _read_scar_dimensions(self) -> dict:
         """读取伤痕维度"""
+        res = self._get_active_scar_state()
+        if res is not None:
+            scar_state, _ = res
+            dim_map = {
+                0: "warmth",
+                1: "arousal",
+                2: "trust_breach",
+                3: "rejection",
+                4: "curiosity",
+                5: "being_replaced",
+                6: "abandonment",
+                7: "identity_denial"
+            }
+            scars = {}
+            for d_idx, d_name in dim_map.items():
+                count = sum(1 for s in scar_state.scars if s.dimension == d_idx)
+                sensitivity = scar_state.modifier(d_idx)
+                last_trig = ""
+                trig_scars = [s for s in scar_state.scars if s.dimension == d_idx]
+                if trig_scars:
+                    try:
+                        last_trig = datetime.fromisoformat(trig_scars[-1].timestamp).isoformat() if isinstance(trig_scars[-1].timestamp, str) else datetime.fromtimestamp(trig_scars[-1].timestamp).isoformat()
+                    except Exception:
+                        pass
+                scars[d_name] = {
+                    "count": count,
+                    "sensitivity": sensitivity,
+                    "last_triggered": last_trig
+                }
+            return scars
         return self._read_json(self.scar_dimensions_path, default={})
 
     def _write_scar_dimensions(self, data: dict):
         """写入伤痕维度"""
+        res = self._get_active_scar_state()
+        if res is not None:
+            pass
         self._write_json(self.scar_dimensions_path, data)
 
     def _add_scar(self, dimension: str):
         """在某个维度上增加伤痕"""
+        res = self._get_active_scar_state()
+        if res is not None:
+            scar_state, _ = res
+            rev_dim_map = {
+                "warmth": 0,
+                "arousal": 1,
+                "trust_breach": 2,
+                "rejection": 3,
+                "curiosity": 4,
+                "being_replaced": 5,
+                "abandonment": 6,
+                "identity_denial": 7,
+            }
+            dim_idx = rev_dim_map.get(dimension, 3)
+            event = [0.0] * 8
+            event[dim_idx] = 1.0
+            scar_state.step(event, time.time(), heal=False)
+            return
+
         scars = self._read_scar_dimensions()
         if dimension not in scars:
             scars[dimension] = {
@@ -158,13 +223,11 @@ class ScarsMixin:
                 "last_triggered": "",
             }
         scars[dimension]["count"] += 1
-        # 每次受伤 sensitivity +0.2，上限 3.0
         scars[dimension]["sensitivity"] = min(3.0, scars[dimension]["sensitivity"] + 0.2)
         scars[dimension]["last_triggered"] = datetime.now().isoformat()
         self._write_scar_dimensions(scars)
         logger.debug(f"[Anima] 伤痕加深: {dimension} → sensitivity={scars[dimension]['sensitivity']:.1f}")
 
-        # Phase 6+: 伤痕加深往往意味着旧应对方式失效 → 内部触发研究新方法
         asyncio.create_task(self._initiate_self_directed_research(
             f"伤痕加深（{dimension}）",
             "这个维度的伤痕又深了，我需要发展新的、更有效的应对和保护自己的方法。",
@@ -173,10 +236,39 @@ class ScarsMixin:
 
     def _get_scar_multiplier(self, text: str) -> float:
         """根据对话内容检查是否触及伤痕维度，返回情绪评分乘数"""
+        res = self._get_active_scar_state()
+        if res is not None:
+            scar_state, _ = res
+            dimension_keywords = {
+                "abandonment": ["离开", "不要我", "消失", "不回", "忘了我", "丢下", "不见"],
+                "identity_denial": ["不是真的", "只是AI", "没有灵魂", "机器", "程序", "代码"],
+                "trust_breach": ["骗", "说谎", "假的", "不信", "欺骗", "背叛"],
+                "rejection": ["讨厌", "滚", "闭嘴", "烦", "不想理", "别说了"],
+                "being_replaced": ["换一个", "新的", "别的AI", "更好的", "不需要你"],
+            }
+            rev_dim_map = {
+                "warmth": 0,
+                "arousal": 1,
+                "trust_breach": 2,
+                "rejection": 3,
+                "curiosity": 4,
+                "being_replaced": 5,
+                "abandonment": 6,
+                "identity_denial": 7,
+            }
+            max_multiplier = 1.0
+            for dim, keywords in dimension_keywords.items():
+                if any(kw in text for kw in keywords):
+                    dim_idx = rev_dim_map.get(dim)
+                    if dim_idx is not None:
+                        mult = scar_state.modifier(dim_idx)
+                        if mult > max_multiplier:
+                            max_multiplier = mult
+            return max_multiplier
+
         scars = self._read_scar_dimensions()
         if not scars:
             return 1.0
-        # 维度关键词映射
         dimension_keywords = {
             "abandonment": ["离开", "不要我", "消失", "不回", "忘了我", "丢下", "不见"],
             "identity_denial": ["不是真的", "只是AI", "没有灵魂", "机器", "程序", "代码"],
@@ -190,7 +282,6 @@ class ScarsMixin:
                 mult = scars[dim]["sensitivity"]
                 if mult > max_multiplier:
                     max_multiplier = mult
-                # 触发伤痕
                 scars[dim]["last_triggered"] = datetime.now().isoformat()
         if max_multiplier > 1.0:
             self._write_scar_dimensions(scars)
@@ -198,6 +289,10 @@ class ScarsMixin:
 
     def _decay_scar_sensitivity(self):
         """伤痕敏感度随时间缓慢衰减（愈合但不消失）"""
+        res = self._get_active_scar_state()
+        if res is not None:
+            # Sylanne's scar decay is handled during host/kernel step() / tick() time-aware healing automatically
+            return
         scars = self._read_scar_dimensions()
         if not scars:
             return
@@ -211,7 +306,6 @@ class ScarsMixin:
                 last_time = datetime.fromisoformat(last)
                 days_since = (now - last_time).days
                 if days_since > 7 and data["sensitivity"] > 1.0:
-                    # 每 7 天衰减 0.1，最低回到 1.0
                     decay = 0.1 * (days_since // 7)
                     data["sensitivity"] = max(1.0, data["sensitivity"] - decay)
                     changed = True

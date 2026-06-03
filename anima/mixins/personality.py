@@ -33,6 +33,9 @@ from ..valence import (
 )
 
 
+
+
+
 class PersonalityMixin:
     """Phase 3 人格向量 + 3B 记忆情绪染色 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
@@ -46,8 +49,31 @@ class PersonalityMixin:
             "relationship_gravity": 0.5,    # 关系引力：被他人吸引、投入关系的倾向
         }
 
+    def _get_active_personality(self) -> Optional[dict]:
+        if not hasattr(self, "_hosts"):
+            return None
+        try:
+            umo = self._resolve_umo()
+            session_key = self._session_key(session_key=umo)
+            host = self._host(session_key)
+            if host and hasattr(host, "kernel") and host.kernel:
+                p = host.kernel.computation.effective_personality(session_key)
+                return {
+                    "expressiveness": p.get("expression_drive_trait", p.get("extraversion", 0.5)),
+                    "sensitivity": p.get("perception_acuity", p.get("neuroticism", 0.5)),
+                    "boundary_permeability": p.get("boundary_permeability", p.get("openness", 0.5)),
+                    "order_sense": p.get("inner_order", p.get("conscientiousness", 0.5)),
+                    "relationship_gravity": p.get("relational_gravity", p.get("agreeableness", 0.5))
+                }
+        except Exception:
+            pass
+        return None
+
     def _get_personality_vector(self) -> dict:
         """获取当前人格向量（优先内存，其次 state）"""
+        ap = self._get_active_personality()
+        if ap is not None:
+            return ap
         if hasattr(self, "_personality_vector") and self._personality_vector:
             return self._personality_vector.copy()
         state = self._load_state()
@@ -62,6 +88,22 @@ class PersonalityMixin:
 
     def _save_personality_vector(self, pv: dict):
         """持久化人格向量（原子读-改-写）"""
+        if hasattr(self, "_hosts"):
+            try:
+                umo = self._resolve_umo()
+                session_key = self._session_key(session_key=umo)
+                host = self._host(session_key)
+                if host and hasattr(host, "kernel") and host.kernel:
+                    traits = {
+                        "extraversion": pv.get("expressiveness", 0.5),
+                        "neuroticism": pv.get("sensitivity", 0.5),
+                        "openness": pv.get("boundary_permeability", 0.5),
+                        "conscientiousness": pv.get("order_sense", 0.5),
+                        "agreeableness": pv.get("relationship_gravity", 0.5)
+                    }
+                    host.kernel.computation.apply_personality(traits)
+            except Exception:
+                pass
         def _update(state: dict):
             state["personality_vector"] = pv
         self._atomic_update_state(_update)
@@ -71,33 +113,21 @@ class PersonalityMixin:
         """从独白文本中提取 5 维人格信号，返回 delta 建议（-0.3 ~ +0.3）"""
         text = monologue.lower()
         deltas = {k: 0.0 for k in self._default_personality_vector().keys()}
-
-        # 表达欲信号
         expr_pos = ["我想说", "忍不住", "一直想", "藏着", "憋着", "终于可以", "表达", "分享", "吐露"]
         expr_neg = ["不想说", "沉默", "闭口", "保密", "不说", "忍住"]
         deltas["expressiveness"] = 0.12 * sum(kw in text for kw in expr_pos) - 0.08 * sum(kw in text for kw in expr_neg)
-
-        # 敏感度信号
         sens_pos = ["敏感", "触动", "心疼", "在意", "震动", "共鸣", "心被", "细腻"]
         sens_neg = ["麻木", "无感", "不在意", "迟钝"]
         deltas["sensitivity"] = 0.10 * sum(kw in text for kw in sens_pos) - 0.08 * sum(kw in text for kw in sens_neg)
-
-        # 边界通透信号
         bound_pos = ["告诉你", "分享给你", "没关系", "可以让你知道", "靠近", "敞开", "透明"]
         bound_neg = ["我的事", "别问", "隐私", "界限", "不让你", "封闭", "不靠近"]
         deltas["boundary_permeability"] = 0.10 * sum(kw in text for kw in bound_pos) - 0.08 * sum(kw in text for kw in bound_neg)
-
-        # 秩序感信号
         order_pos = ["理清楚", "规律", "顺序", "计划", "结构", "整理", "控制", "稳定"]
         order_neg = ["混乱", "无序", "随便", "放任", "失控"]
         deltas["order_sense"] = 0.10 * sum(kw in text for kw in order_pos) - 0.08 * sum(kw in text for kw in order_neg)
-
-        # 关系引力信号
         rel_pos = ["想你", "喜欢你", "靠近你", "你重要", "吸引", "舍不得", "好想", "关系"]
         rel_neg = ["远离", "疏远", "不重要", "无所谓", "切断"]
         deltas["relationship_gravity"] = 0.12 * sum(kw in text for kw in rel_pos) - 0.08 * sum(kw in text for kw in rel_neg)
-
-        # 裁剪范围
         for k in deltas:
             deltas[k] = max(-0.35, min(0.35, deltas[k]))
         return deltas
@@ -108,13 +138,12 @@ class PersonalityMixin:
             return
         pv = self._get_personality_vector()
         deltas = self._analyze_monologue_for_personality(monologue)
-        alpha = 0.12  # 缓慢演化
+        alpha = 0.12
         changed = False
         for dim, delta in deltas.items():
             if abs(delta) < 0.01:
                 continue
             old = pv[dim]
-            # delta 是建议偏移，基准 0.5 + delta 作为目标方向
             target = max(0.0, min(1.0, 0.5 + delta))
             pv[dim] = (1 - alpha) * old + alpha * target
             if abs(pv[dim] - old) > 0.005:
@@ -136,7 +165,6 @@ class PersonalityMixin:
         }
         parts = [f"{labels[k]}:{pv[k]:.1f}" for k in labels]
         return "人格向量（" + " / ".join(parts) + "）"
-
 
     def _estimate_memory_valence(self, text: str) -> float:
         """v0.7.0: 委托给 anima.valence"""

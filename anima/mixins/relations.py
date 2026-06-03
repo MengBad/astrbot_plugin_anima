@@ -103,6 +103,43 @@ class RelationsMixin:
         """跨关系传播：低情绪连续 → 相似关系用户的伤痕敏感度微调。
         v0.9.8：worldview 按 umo 隔离（umo 为空时回退最近活跃会话）。"""
         try:
+            if hasattr(self, "_hosts"):
+                # Resolve the session key for this UMO
+                session_key = self._session_key(session_key=umo)
+                host = self._host(session_key)
+                if host and hasattr(host, "kernel") and host.kernel:
+                    # Access the scar state and perform micro-propagation
+                    scar_state = host.kernel.computation.engine.scar_state
+                    # rejection is index 3, abandonment is 6, trust_breach is 2
+                    dim_idx = 3
+                    wv = self._read_worldview(umo)
+                    sg = wv.get("social_graph", {})
+                    low_desc = sg.get(low_uid, "")
+                    if "信任" in low_desc or "背叛" in low_desc:
+                        dim_idx = 2
+                    elif "离开" in low_desc or "不要" in low_desc:
+                        dim_idx = 6
+
+                    event = [0.0] * 8
+                    event[dim_idx] = 0.04  # micro-propagation
+                    scar_state.step(event, time.time(), heal=False)
+                    logger.info(f"[Anima][Relations] SylannEngine scar micro-propagation dimension {dim_idx} by +0.04")
+                    
+                    # 记录传播历史（原子读-改-写）
+                    entry = {
+                        "ts": datetime.now().isoformat(),
+                        "source_user": low_uid,
+                        "target_similar": "",
+                        "scar_dim": str(dim_idx),
+                        "delta": 0.04,
+                    }
+                    def _update(state: dict):
+                        hist = state.get("cross_propagations", [])
+                        hist.append(entry)
+                        state["cross_propagations"] = hist[-30:]
+                    self._atomic_update_state(_update)
+                    return
+
             wv = self._read_worldview(umo)
             sg = wv.get("social_graph", {})
             if not sg or len(sg) < 2:

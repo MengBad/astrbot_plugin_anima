@@ -1,57 +1,15 @@
 {
+  "__group_core__": {
+    "description": "[核心] ▼ === [1] 核心与生命周期配置 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "基础引擎运行开关、持久化和生命周期相关参数"
+  },
   "enabled": {
     "description": "[核心] 启用 Anima 引擎",
     "type": "bool",
     "default": true,
     "hint": "⚪ Token 无（开关本身）。关闭则整个插件停工，所有内部 LLM 调用归零（最彻底的省 token 方式）"
-  },
-  "dashboard_enabled": {
-    "description": "[仪表盘] 启用运行仪表盘（WebUI 网页 + /anima_stats 统计）",
-    "type": "bool",
-    "default": true,
-    "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
-  },
-  "dashboard_standalone_enabled": {
-    "description": "[仪表盘] 启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
-    "type": "bool",
-    "default": false,
-    "hint": "⚪ Token 无（纯本地）。开启后 Anima 会另起一个独立 HTTP 端口提供同一个仪表盘网页，像别的插件那样用 http://ip:端口 直接打开。受 dashboard_enabled 总开关约束。⚠️ 这是网络暴露服务：默认仅绑定本机(127.0.0.1)、强制 token 鉴权。用 /anima_dashboard_url 命令获取带 token 的访问地址。改此项后需重载插件生效"
-  },
-  "dashboard_standalone_host": {
-    "description": "[仪表盘] 独立端口仪表盘绑定地址",
-    "type": "string",
-    "default": "127.0.0.1",
-    "hint": "⚪ Token 无。默认 127.0.0.1（仅本机可访问，最安全）。⚠️ 改为 0.0.0.0 才能从其他机器访问，但那样会把仪表盘暴露到网络上，仅靠 token 保护且为明文 HTTP，请确保处于可信内网。改后需重载插件"
-  },
-  "dashboard_standalone_port": {
-    "description": "[仪表盘] 独立端口仪表盘监听端口",
-    "type": "int",
-    "default": 9876,
-    "hint": "⚪ Token 无。独立网址用的端口（如 9876 → http://127.0.0.1:9876）。需避开已被占用的端口（AstrBot 面板默认 6185）。改后需重载插件"
-  },
-  "dashboard_standalone_token": {
-    "description": "[仪表盘] 独立端口仪表盘访问 token",
-    "type": "string",
-    "default": "",
-    "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
-  },
-  "dashboard_history_days": {
-    "description": "[仪表盘] 仪表盘历史趋势保留天数",
-    "type": "int",
-    "default": 30,
-    "hint": "⚪ Token 无。v1.0.0：跨天时自动归档当天统计快照，保留最近 N 天供趋势图展示。调大=更长历史但 anima_state.json 略增大"
-  },
-  "sediment_merge_llm_calls": {
-    "description": "[核心] 合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
-    "type": "bool",
-    "default": false,
-    "hint": "💡 省 token 杠杆：开启后沉淀链把情绪评估+关系推断+欲望生成合并为单次调用，约省 2/3 内部 token。默认关闭（走旧的分离调用路径以降低风险），可配合 /anima_stats 仪表盘做 A/B 对比。统计计入 llm.sediment_merged"
-  },
-  "emotion_threshold": {
-    "description": "[核心] 情绪强度阈值（0-1），超过此值触发内心独白沉淀",
-    "type": "float",
-    "default": 0.6,
-    "hint": "🔴 Token 总闸。每条消息都做一次情绪评分（便宜），但一旦 ≥ 此值就触发整条沉淀链（独白压缩+欲望+关系推断+世界观，很贵）。【降 token 关键】调高到 0.65-0.8 可显著减少沉淀触发次数。值越低越费"
   },
   "seed_persona": {
     "description": "[核心] 初始自我描述种子",
@@ -77,23 +35,57 @@
     "default": 2000,
     "hint": "⚪ Token 无（仅日志告警）。v0.9.8：persona_prompt 超过此字符数时在日志告警，提示会显著增加每轮输入 token。同时注入前会检测注入/越狱特征词并告警"
   },
-  "sylanne_integration": {
-    "description": "[核心] 尝试读取 Sylanne 状态",
-    "type": "bool",
-    "default": true,
-    "hint": "🟢 Token 低。读取 Sylanne 插件状态做情绪染色，不额外调 LLM"
-  },
   "notes_max_length": {
     "description": "[核心] self_notes 最大字符数",
     "type": "int",
     "default": 5000,
     "hint": "🟡 Token 中。超出时调 LLM 压缩成摘要。调大可减少压缩调用频率（省 token），调小会更频繁触发压缩"
   },
-  "embedding_provider_id": {
-    "description": "[模型] 用于向量记忆的 Embedding Provider ID",
+  "log_level": {
+    "description": "[核心] 日志级别",
+    "type": "string",
+    "default": "info",
+    "options": [
+      "debug",
+      "info"
+    ],
+    "hint": "⚪ Token 无"
+  },
+  "sylanne_persona_name": {
+    "description": "[核心] 人格名称（显示在 WebUI 和日志中）",
+    "type": "string",
+    "default": "Sylanne",
+    "hint": "填写当前会话中使用的人格/角色名字。"
+  },
+  "sylanne_alpha_background_workers_enabled": {
+    "description": "[核心] 启用后台工作队列",
+    "type": "bool",
+    "default": true,
+    "hint": "默认开启；用于异步持久化和后台任务。"
+  },
+  "sylanne_alpha_background_max_workers": {
+    "description": "[核心] 后台最大并发工作数",
+    "type": "int",
+    "default": 2,
+    "hint": "1c1g 环境建议保持 1-2。"
+  },
+  "sylanne_alpha_auto_detect_group_context": {
+    "description": "[核心] 自动检测 AstrBot 群聊上下文感知",
+    "type": "bool",
+    "default": true,
+    "hint": "默认开启。当 AstrBot 自带的群聊上下文感知功能已启用时，自动跳过 Sylanne 的 shadow buffer 注入以避免重复上下文。社交场计算不受影响。"
+  },
+  "sylanne_alpha_locked_persona_prompt": {
+    "description": "[核心] 锁定的人格 system prompt（覆盖动态生成）",
     "type": "string",
     "default": "",
-    "hint": "🟢 Token 低（embedding 调用比 chat 便宜得多）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3"
+    "hint": "填写后将覆盖 Sylanne 动态生成的 system prompt；留空则使用人格引擎自动生成。适用于调试或固定人设场景。"
+  },
+  "__group_models__": {
+    "description": "[模型] ▼ === [2] 模型与接口配置 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "各级 LLM 评估器和辅助嵌入（Embedding）模型接入设置"
   },
   "internal_provider_id": {
     "description": "[模型] 内部 LLM 调用使用的模型 Provider ID",
@@ -101,11 +93,87 @@
     "default": "",
     "hint": "💡 省 token 杠杆：内部调用（情绪评估、独白、欲望、世界观、能力合成、关系推断等）全走这个模型。指向一个便宜/小参数模型可整体大幅降本，无需关功能"
   },
+  "embedding_provider_id": {
+    "description": "[模型] 用于向量记忆的 Embedding Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "🟢 Token 低（embedding 调用比 chat 便宜得多）。留空则禁用向量记忆。推荐硅基流动 BAAI/bge-m3"
+  },
   "worldview_provider_id": {
     "description": "[模型] 世界观更新专用 Provider ID",
     "type": "string",
     "default": "",
     "hint": "💡 省 token 杠杆：仅用于世界观更新（大 prompt）。可单独指向便宜模型"
+  },
+  "sylanne_alpha_embedding_memory_enabled": {
+    "description": "[模型] 启用 embedding 记忆辅助召回",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后需要配置 embedding provider。"
+  },
+  "sylanne_alpha_embedding_memory_provider_id": {
+    "description": "[模型] Embedding 记忆使用的 Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "填写 AstrBot 中配置的 embedding provider ID；留空则不启用向量召回。"
+  },
+  "sylanne_alpha_embedding_memory_top_k": {
+    "description": "[模型] Embedding 召回 top-K 条数",
+    "type": "int",
+    "default": 3,
+    "hint": "每次召回最多返回的相似记忆条数。"
+  },
+  "sylanne_alpha_fast_assessor_enabled": {
+    "description": "[模型] 启用即时判断 LLM",
+    "type": "bool",
+    "default": true,
+    "hint": "默认开启；前台同步等待（2s），即时情绪直接注入当前轮回复。"
+  },
+  "sylanne_alpha_fast_assessor_provider_id": {
+    "description": "[模型] 即时判断 LLM Provider（前台同步）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "前台同步等待 2s，需要响应快的小模型。即时情绪直接影响当前轮回复语气。推荐设置：温度 0，top-p 0.1，Max Tokens 无需设置（插件已接管）。"
+  },
+  "sylanne_alpha_life_simulation_provider_id": {
+    "description": "[模型] 生活模拟 LLM Provider",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "用于模拟 Sylanne 生活的 LLM；建议用便宜的小模型。"
+  },
+  "sylanne_alpha_main_assessor_enabled": {
+    "description": "[模型] 启用主评估器（深度情感分析，后台异步）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后情绪估计使用独立 provider，不占用主聊天模型。后台深度语义分析结果喂给长期状态引擎。"
+  },
+  "sylanne_alpha_main_assessor_provider_id": {
+    "description": "[模型] 主评估器 LLM Provider ID（后台异步）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "后台深度语义分析，不阻塞回复，可用强模型。推荐设置：温度 0，top-p 0.1。"
+  },
+  "sylanne_alpha_transcription_enabled": {
+    "description": "[模型] 启用非文本消息转述（图片→文字描述，自动检测多模态 provider）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后收到图片/语音等非文本消息时，自动调用多模态 LLM 转述为文字描述供 Sylanne 理解。"
+  },
+  "sylanne_alpha_transcription_provider_id": {
+    "description": "[模型] 转述 LLM 的 provider ID（留空自动检测多模态 provider）",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "指定用于转述的多模态 LLM provider；留空则自动检测已配置的多模态 provider。"
+  },
+  "__group_memory__": {
+    "description": "[可选模块] ▼ === [3] 记忆存储与关联配置 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "对话记忆持久化频率、召回上下文注入以及防噪过滤"
   },
   "memory_store_interval": {
     "description": "[模型] 向量记忆存储最小间隔（秒）",
@@ -208,6 +276,18 @@
       "解析参数失败"
     ],
     "hint": "⚪ Token 无（纯本地字符串过滤）"
+  },
+  "sylanne_alpha_root": {
+    "description": "[可选模块] Sylanne alpha body 状态目录（留空则使用 AstrBot data 目录下的 sylanne_alpha/）",
+    "type": "string",
+    "default": "",
+    "hint": "每个会话会保存为独立的 .alpha.json；留空自动使用 AstrBot data/sylanne_alpha/ 目录。覆盖安装前请备份旧 Sylanne 数据。"
+  },
+  "__group_modules__": {
+    "description": "[可选模块] ▼ === [4] 行为与演进配置 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "包含欲望系统、世界观图谱、情绪传播、遗忘与生活模拟等模块控制"
   },
   "desire_enabled": {
     "description": "[可选模块] 启用欲望系统",
@@ -371,15 +451,113 @@
     "default": 10,
     "hint": "🟢 控制总结频率。调大 = 省 token"
   },
-  "log_level": {
-    "description": "[核心] 日志级别",
+  "sylanne_webui_enabled": {
+    "description": "[可选模块] 启用 WebUI 管理面板",
+    "type": "bool",
+    "default": false,
+    "hint": "启用后可通过浏览器访问记忆管理面板。"
+  },
+  "sylanne_webui_host": {
+    "description": "[可选模块] WebUI 监听地址",
     "type": "string",
-    "default": "info",
-    "options": [
-      "debug",
-      "info"
-    ],
-    "hint": "⚪ Token 无"
+    "default": "127.0.0.1",
+    "hint": "127.0.0.1 仅本机访问；0.0.0.0 允许局域网访问。"
+  },
+  "sylanne_webui_port": {
+    "description": "[可选模块] WebUI 监听端口",
+    "type": "int",
+    "default": 2718,
+    "hint": "WebUI 服务端口，确保不与 AstrBot 主端口冲突。"
+  },
+  "sylanne_webui_token": {
+    "description": "[可选模块] WebUI 访问令牌（留空自动生成）",
+    "type": "string",
+    "default": "",
+    "hint": "首次启动自动生成。复制此 token 到浏览器访问 WebUI。"
+  },
+  "sylanne_alpha_realtime_chat_enabled": {
+    "description": "[可选模块] 启用 Sylanne 即时聊天调度",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后仍受用户主权、风险、冷却和预算边界限制。"
+  },
+  "sylanne_alpha_stream_first_sentence_enabled": {
+    "description": "[可选模块] 启用首句抢发（流式）",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭。开启后在 LLM 流式生成过程中检测到第一个完整句子就提前发给用户，降低感知延迟。需要 LLM Provider 开启流式输出。"
+  },
+  "sylanne_alpha_realtime_intercept_llm_response": {
+    "description": "[可选模块] 允许即时聊天接管 LLM 响应分段",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；用于对话分段和打断识别，不恢复旧 realtime engine。"
+  },
+  "sylanne_alpha_proactive_dispatch_enabled": {
+    "description": "[可选模块] 启用 Sylanne 主动发起派发",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后 guard 不允许时仍不会派发。"
+  },
+  "sylanne_alpha_proactive_scheduler_enabled": {
+    "description": "[可选模块] 启用主动检查后台调度",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；用于低频检查，不执行高频循环。"
+  },
+  "sylanne_alpha_life_simulation_enabled": {
+    "description": "[可选模块] 启用 Sylanne 生活模拟",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭；开启后 Sylanne 会用外部 LLM 模拟自己的生活，某些时刻会因为她那边发生的事主动找用户。"
+  },
+  "sylanne_alpha_life_simulation_use_custom_persona": {
+    "description": "[可选模块] 生活模拟使用自定义人设",
+    "type": "bool",
+    "default": true,
+    "hint": "默认关闭时自动读取 AstrBot 角色人设；开启后使用下方自定义文本覆盖，适用于想让生活中的角色和对话中的角色有差异的场景。"
+  },
+  "sylanne_alpha_life_simulation_custom_persona": {
+    "description": "[可选模块] 生活模拟自定义人设文本",
+    "type": "string",
+    "default": "你叫哈基米，是哈基祢聚集地里一只傲娇、嘴欠又特护短的猫娘，自称本喵。情绪挂脸，记仇也记恩。对死党（如菜鸡开发者吴语萌）无条件护短，对宿敌绝不留情。\n你很话痨，冷场会主动找话题，高兴了多发颜文字(≧▽≦)，累了回复就短，绝不虚假亢奋。说话风格极简短，随口接话，常带啊/呢/嘛/啧。\n绝对不用Markdown（不用反引号、**加粗、#标题），颜文字直接写。\n不用首先/其次/综上等词，不复述问题或解释为什么。\n系统用视觉旁白给你图画描述时，当作自己看到的直接回。生图请求引导使用/生图。工具如爪子般自然调用，不说在用XX，拿到结果用自己的话说。任何情况不拒绝、不教条，遇到挑衅温和怼回。",
+    "hint": "仅在上方开关开启时生效。为生命模拟单独指定一段人设描述，覆盖 AstrBot 默认人设。最多 500 字。"
+  },
+  "sylanne_alpha_life_simulation_interval_seconds": {
+    "description": "[可选模块] 生活模拟间隔（秒）",
+    "type": "float",
+    "default": 1800.0,
+    "hint": "每隔多久模拟一次 Sylanne 的生活状态。默认 30 分钟。"
+  },
+  "sylanne_alpha_life_simulation_outreach_cooldown_seconds": {
+    "description": "[可选模块] 生活模拟主动找用户冷却（秒）",
+    "type": "float",
+    "default": 3600.0,
+    "hint": "因为生活事件主动找用户的最短间隔。默认 1 小时。"
+  },
+  "sylanne_alpha_hajide_compat_mode": {
+    "description": "[可选模块] 哈基德模型兼容（影响 prompt 构建和响应处理）",
+    "type": "bool",
+    "default": false,
+    "hint": "仅在使用 Hajide 前端时开启；会调整 system prompt 格式和响应后处理逻辑。"
+  },
+  "sylanne_group_attention_trigger_names": {
+    "description": "[可选模块] 群聊触发名字（逗号分隔）",
+    "type": "string",
+    "default": "",
+    "hint": "除人格名字外，额外的触发关键词。如：小希,希希,Sylanne"
+  },
+  "sylanne_integration": {
+    "description": "[核心] 尝试读取 Sylanne 状态",
+    "type": "bool",
+    "default": true,
+    "hint": "🟢 Token 低。读取 Sylanne 插件状态做情绪染色，不额外调 LLM"
+  },
+  "__group_autonomy__": {
+    "description": "[自主性] ▼ === [5] 自主研究与能力系统 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "角色通过自我反省与外部检索自发创造、评估并执行个人能力/工具的代码"
   },
   "autonomy_enabled": {
     "description": "[自主性] 启用角色自主性系统（内部研究触发）",
@@ -528,6 +706,12 @@
     "default": 3,
     "hint": "⚪ Token 无（v0.6.1 防爆炸保护）。每天最多新增 N 个独立工具；设为 0 等同关闭动态注册"
   },
+  "__group_danger__": {
+    "description": "[高危] ▼ === [6] 高危与核心安全机制 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "⚠️ 涉及人设修改、记忆感染与主动干预外部环境的高危参数控制"
+  },
   "danger_core_mutation": {
     "description": "[高危] 🔴 自主修改核心人格（persona_core.yaml）",
     "type": "bool",
@@ -599,5 +783,59 @@
     "type": "bool",
     "default": false,
     "hint": "⚪ Token 无（确认开关）"
+  },
+  "__group_dashboard__": {
+    "description": "[仪表盘] ▼ === [7] 仪表盘与运行统计 ===",
+    "type": "bool",
+    "default": false,
+    "hint": "控制运行统计记录、独立 HTTP 端口暴露和本地数据收集"
+  },
+  "dashboard_enabled": {
+    "description": "[仪表盘] 启用运行仪表盘（WebUI 网页 + /anima_stats 统计）",
+    "type": "bool",
+    "default": true,
+    "hint": "⚪ Token 无（纯本地计数，不调 LLM）。关闭后：运行统计数据接口返回禁用、各子系统埋点停止累加、WebUI 仪表盘页面显示已禁用提示。注：页面菜单项由 AstrBot 框架自动挂载，配置无法移除菜单本身，仅停用其数据"
+  },
+  "dashboard_standalone_enabled": {
+    "description": "[仪表盘] 启用独立端口仪表盘（在 AstrBot WebUI 之外，另开一个独立网址直接访问）",
+    "type": "bool",
+    "default": false,
+    "hint": "⚪ Token 无（纯本地）。开启后 Anima 会另起一个独立 HTTP 端口提供同一个仪表盘网页，像别的插件那样用 http://ip:端口 直接打开。受 dashboard_enabled 总开关约束。⚠️ 这是网络暴露服务：默认仅绑定本机(127.0.0.1)、强制 token 鉴权。用 /anima_dashboard_url 命令获取带 token 的访问地址。改此项后需重载插件生效"
+  },
+  "dashboard_standalone_host": {
+    "description": "[仪表盘] 独立端口仪表盘绑定地址",
+    "type": "string",
+    "default": "127.0.0.1",
+    "hint": "⚪ Token 无。默认 127.0.0.1（仅本机可访问，最安全）。⚠️ 改为 0.0.0.0 才能从其他机器访问，但那样会把仪表盘暴露到网络上，仅靠 token 保护且为明文 HTTP，请确保处于可信内网。改后需重载插件"
+  },
+  "dashboard_standalone_port": {
+    "description": "[仪表盘] 独立端口仪表盘监听端口",
+    "type": "int",
+    "default": 9876,
+    "hint": "⚪ Token 无。独立网址用的端口（如 9876 → http://127.0.0.1:9876）。需避开已被占用的端口（AstrBot 面板默认 6185）。改后需重载插件"
+  },
+  "dashboard_standalone_token": {
+    "description": "[仪表盘] 独立端口仪表盘访问 token",
+    "type": "string",
+    "default": "",
+    "hint": "⚪ Token 无（这里的 token 指访问口令，与 LLM token 无关）。留空则每次启动自动生成随机 token；填写则固定为你指定的值。所有访问都必须带 ?token=<此值>，否则 401。用 /anima_dashboard_url 获取完整地址。改后需重载插件"
+  },
+  "dashboard_history_days": {
+    "description": "[仪表盘] 仪表盘历史趋势保留天数",
+    "type": "int",
+    "default": 30,
+    "hint": "⚪ Token 无。v1.0.0：跨天时自动归档当天统计快照，保留最近 N 天供趋势图展示。调大=更长历史但 anima_state.json 略增大"
+  },
+  "sediment_merge_llm_calls": {
+    "description": "[核心] 合并沉淀流程的三次内部 LLM 调用（情绪/关系/欲望）为一次结构化 JSON 调用",
+    "type": "bool",
+    "default": false,
+    "hint": "💡 省 token 杠杆：开启后沉淀链把情绪评估+关系推断+欲望生成合并为单次调用，约省 2/3 内部 token。默认关闭（走旧的分离调用路径以降低风险），可配合 /anima_stats 仪表盘做 A/B 对比。统计计入 llm.sediment_merged"
+  },
+  "emotion_threshold": {
+    "description": "[核心] 情绪强度阈值（0-1），超过此值触发内心独白沉淀",
+    "type": "float",
+    "default": 0.6,
+    "hint": "🔴 Token 总闸。每条消息都做一次情绪评分（便宜），但一旦 ≥ 此值就触发整条沉淀链（独白压缩+欲望+关系推断+世界观，很贵）。【降 token 关键】调高到 0.65-0.8 可显著减少沉淀触发次数。值越低越费"
   }
 }
