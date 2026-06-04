@@ -206,7 +206,7 @@ class TimeArmor(dict):
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.10",
+    "1.1.11",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -1825,79 +1825,157 @@ class AnimaPlugin(
     async def persist_kernel(self, session_key: str, host: Any) -> None:
         await self._state_persistence.persist_kernel(session_key, host)
 
+    async def _persist_kernel(self, session_key: str, host: Any) -> None:
+        await self._state_persistence.persist_kernel(session_key, host)
+
     def persist_kernel_sync(self, session_key: str, host: Any) -> None:
+        self._state_persistence.persist_kernel_sync(session_key, host)
+
+    def _persist_kernel_sync(self, session_key: str, host: Any) -> None:
         self._state_persistence.persist_kernel_sync(session_key, host)
 
     async def persist_buffer(self, session_key: str, host: Any, buf_dict: Any) -> None:
         await self._state_persistence.persist_buffer(session_key, host, buf_dict)
 
+    async def _persist_buffer(self, session_key: str, host: Any, buf_dict: Any) -> None:
+        await self._state_persistence.persist_buffer(session_key, host, buf_dict)
+
     async def load_buffer_data(self, session_key: str, host: Any) -> Any:
+        return await self._state_persistence.load_buffer_data(session_key, host)
+
+    async def _load_buffer_data(self, session_key: str, host: Any) -> Any:
         return await self._state_persistence.load_buffer_data(session_key, host)
 
     async def load_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_state(session_key)
 
+    async def _load_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_state(session_key)
+
     async def load_psychological_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_psychological_state(session_key)
+
+    async def _load_psychological_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_psychological_state(session_key)
 
     async def load_humanlike_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_humanlike_state(session_key)
 
+    async def _load_humanlike_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_humanlike_state(session_key)
+
     async def load_lifelike_learning_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_lifelike_learning_state(session_key)
+
+    async def _load_lifelike_learning_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_lifelike_learning_state(session_key)
 
     async def load_personality_drift_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_personality_drift_state(session_key)
 
+    async def _load_personality_drift_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_personality_drift_state(session_key)
+
     async def load_moral_repair_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_moral_repair_state(session_key)
+
+    async def _load_moral_repair_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_moral_repair_state(session_key)
 
     async def load_fallibility_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_fallibility_state(session_key)
 
+    async def _load_fallibility_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_fallibility_state(session_key)
+
     async def save_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_state(session_key, state)
+
+    async def _save_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_state(session_key, state)
 
     async def delete_state(self, session_key: str) -> None:
         await self._state_persistence.delete_state(session_key)
 
+    async def _delete_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_state(session_key)
+
     async def delete_humanlike_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_humanlike_state(session_key)
+
+    async def _delete_humanlike_state(self, session_key: str) -> None:
         await self._state_persistence.delete_humanlike_state(session_key)
 
     async def delete_lifelike_learning_state(self, session_key: str) -> None:
         await self._state_persistence.delete_lifelike_learning_state(session_key)
 
+    async def _delete_lifelike_learning_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_lifelike_learning_state(session_key)
+
     async def delete_personality_drift_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_personality_drift_state(session_key)
+
+    async def _delete_personality_drift_state(self, session_key: str) -> None:
         await self._state_persistence.delete_personality_drift_state(session_key)
 
     async def delete_moral_repair_state(self, session_key: str) -> None:
         await self._state_persistence.delete_moral_repair_state(session_key)
 
+    async def _delete_moral_repair_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_moral_repair_state(session_key)
+
     async def delete_fallibility_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_fallibility_state(session_key)
+
+    async def _delete_fallibility_state(self, session_key: str) -> None:
         await self._state_persistence.delete_fallibility_state(session_key)
 
     async def save_humanlike_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_humanlike_state(session_key, state)
 
+    async def _save_humanlike_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_humanlike_state(session_key, state)
+
     async def save_psychological_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_psychological_state(session_key, state)
+
+    async def _save_psychological_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_psychological_state(session_key, state)
 
     async def save_moral_repair_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_moral_repair_state(session_key, state)
 
+    async def _save_moral_repair_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_moral_repair_state(session_key, state)
+
     async def save_lifelike_learning_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_lifelike_learning_state(session_key, state)
+
+    async def _save_lifelike_learning_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_lifelike_learning_state(session_key, state)
 
     async def save_fallibility_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_fallibility_state(session_key, state)
 
+    async def _save_fallibility_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_fallibility_state(session_key, state)
+
     async def save_personality_drift_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_personality_drift_state(session_key, state)
+
+    async def _save_personality_drift_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_personality_drift_state(session_key, state)
 
     async def load_group_atmosphere_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_group_atmosphere_state(session_key)
 
+    async def _load_group_atmosphere_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_group_atmosphere_state(session_key)
+
     async def delete_psychological_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_psychological_state(session_key)
+
+    async def _delete_psychological_state(self, session_key: str) -> None:
         await self._state_persistence.delete_psychological_state(session_key)
 
     def _schedule_buffer_persist(self, session_key: str) -> None:
@@ -1905,3 +1983,22 @@ class AnimaPlugin(
 
     async def _do_buffer_persist(self, session_key: str) -> None:
         await self._state_persistence._do_buffer_persist(session_key)
+
+    # Added Sylanne memory state delegate wrappers for full compatibility
+    async def save_sylanne_memory_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_sylanne_memory_state(session_key, state)
+
+    async def _save_sylanne_memory_state(self, session_key: str, state: Any) -> None:
+        await self._state_persistence.save_sylanne_memory_state(session_key, state)
+
+    async def load_sylanne_memory_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_sylanne_memory_state(session_key)
+
+    async def _load_sylanne_memory_state(self, session_key: str) -> Any:
+        return await self._state_persistence.load_sylanne_memory_state(session_key)
+
+    async def delete_sylanne_memory_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_sylanne_memory_state(session_key)
+
+    async def _delete_sylanne_memory_state(self, session_key: str) -> None:
+        await self._state_persistence.delete_sylanne_memory_state(session_key)
