@@ -174,7 +174,7 @@ class _StateInjectionBudget:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.8",
+    "1.1.9",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -1716,6 +1716,24 @@ class AnimaPlugin(
 
     def _session_key(self, event: Any = None, session_key: str = "") -> str:
         return self._session_ctx.session_key(event, session_key)
+
+    def _event_time(self, now=None):
+        """
+        🛡️ 时间对齐护甲：向下兼容旧引擎对事件时间戳的强制转换。
+        确保不管是 datetime 对象、字符串还是数字，都能平滑转换为标准 Unix 时间戳。
+        """
+        import time
+        if now is None:
+            return int(time.time())
+        if hasattr(now, "timestamp"):  # 兼容 datetime 对象
+            try:
+                return int(now.timestamp())
+            except Exception:
+                pass
+        try:
+            return int(now)  # 兼容纯数字或数字字符串
+        except (TypeError, ValueError):
+            return int(time.time())  # 极端情况保底
 
     def _start_webui_if_enabled(self) -> None:
         return self._webui_lifecycle.start_if_enabled()
