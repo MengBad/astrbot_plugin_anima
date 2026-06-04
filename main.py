@@ -206,7 +206,7 @@ class TimeArmor(dict):
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.11",
+    "1.1.12",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -232,7 +232,7 @@ class AnimaPlugin(
 ):
     _shared_encoder = None
 
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: AstrBotConfig = None):
         self.logger = logger
         super().__init__(context)
         self.config = config
@@ -1849,8 +1849,12 @@ class AnimaPlugin(
     async def load_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_state(session_key)
 
-    async def _load_state(self, session_key: str) -> Any:
-        return await self._state_persistence.load_state(session_key)
+    def _load_state(self, session_key: str = None) -> Any:
+        if session_key is None:
+            return self._read_json(self._state_path, default={})
+        async def _async_load():
+            return await self._state_persistence.load_state(session_key)
+        return _async_load()
 
     async def load_psychological_state(self, session_key: str) -> Any:
         return await self._state_persistence.load_psychological_state(session_key)
@@ -1891,8 +1895,19 @@ class AnimaPlugin(
     async def save_state(self, session_key: str, state: Any) -> None:
         await self._state_persistence.save_state(session_key, state)
 
-    async def _save_state(self, session_key: str, state: Any) -> None:
-        await self._state_persistence.save_state(session_key, state)
+    def _save_state(self, session_key: str = None, state: Any = None) -> Any:
+        if session_key is None:
+            def _update(s: dict):
+                s["sediment_count"] = self._sediment_count
+                s["identity_stability"] = self._identity_stability
+                s["last_active_umo"] = self._last_active_umo
+                if hasattr(self, "_personality_vector") and self._personality_vector:
+                    s["personality_vector"] = self._personality_vector
+            self._atomic_update_state(_update)
+            return None
+        async def _async_save():
+            await self._state_persistence.save_state(session_key, state)
+        return _async_save()
 
     async def delete_state(self, session_key: str) -> None:
         await self._state_persistence.delete_state(session_key)
