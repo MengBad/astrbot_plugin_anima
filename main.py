@@ -170,11 +170,43 @@ class _StateInjectionBudget:
         self.injected = []
 
 
+class TimeArmor(dict):
+    """
+    ⏳ 终极时间变色龙护甲：
+    同时继承 dict 拥有全套时间组件字段，并重写全部数值魔法方法。
+    完美欺骗 dict(x) 的浅拷贝行为，同时完美向下兼容任何把它当作 int/float 使用的旧组件。
+    """
+    def __init__(self, ts):
+        import time
+        tm = time.localtime(ts)
+        super().__init__({
+            "timestamp": ts,
+            "year": tm.tm_year,
+            "month": tm.tm_mon,
+            "day": tm.tm_mday,
+            "hour": tm.tm_hour,
+            "minute": tm.tm_min,
+            "second": tm.tm_sec
+        })
+        self.ts = ts
+
+    def __int__(self): return self.ts
+    def __float__(self): return float(self.ts)
+    def __index__(self): return self.ts
+    def __str__(self): return str(self.ts)
+    def __repr__(self): return repr(self.ts)
+    def __add__(self, other): return self.ts + other
+    def __sub__(self, other): return self.ts - other
+    def __radd__(self, other): return other + self.ts
+    def __rsub__(self, other): return other - self.ts
+    def __eq__(self, other): return self.ts == int(other) if hasattr(other, '__int__') else self.ts == other
+
+
 @register(
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.9",
+    "1.1.10",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -1719,21 +1751,25 @@ class AnimaPlugin(
 
     def _event_time(self, now=None):
         """
-        🛡️ 时间对齐护甲：向下兼容旧引擎对事件时间戳的强制转换。
-        确保不管是 datetime 对象、字符串还是数字，都能平滑转换为标准 Unix 时间戳。
+        🛡️ 升级版时间对齐：不再返回纯 int，而是抛出具备双重身份的 TimeArmor 实例
         """
         import time
-        if now is None:
-            return int(time.time())
-        if hasattr(now, "timestamp"):  # 兼容 datetime 对象
-            try:
-                return int(now.timestamp())
-            except Exception:
-                pass
-        try:
-            return int(now)  # 兼容纯数字或数字字符串
-        except (TypeError, ValueError):
-            return int(time.time())  # 极端情况保底
+        raw_ts = int(time.time())
+        if now is not None:
+            if hasattr(now, "timestamp"):
+                try: raw_ts = int(now.timestamp())
+                except Exception: pass
+            else:
+                try: raw_ts = int(now)
+                except (TypeError, ValueError): pass
+        return TimeArmor(raw_ts)
+
+    def _time_context_fragment(self, session_key):
+        """
+        🛡️ 兼容性空桩：彻底拍死 request_pipeline 里的 AttributeError。
+        直接返回空字符串，既不破坏提示词拼装，又能让管道安全通过。
+        """
+        return ""
 
     def _start_webui_if_enabled(self) -> None:
         return self._webui_lifecycle.start_if_enabled()
