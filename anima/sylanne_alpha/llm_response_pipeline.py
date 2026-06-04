@@ -33,12 +33,23 @@ try:
 except ImportError:
     import logging as _logging
 
-    logger = _logging.getLogger("astrbot_plugin_sylanne")  # type: ignore
+    logger = _logging.getLogger("astrbot_plugin_anima")  # type: ignore
 
 # 中国时区常量
 _CHINA_TZ = timezone(timedelta(hours=8))
 # 序列化后的请求载荷最大字符数，超过则触发裁剪
 _MAX_PAYLOAD_SERIALIZED_CHARS = 60000
+
+
+class LocalStateInjectionBudget:
+    def __init__(self, session_key: str, model_hint: str = ""):
+        self.session_key = session_key
+        self.model_hint = model_hint
+        self.max_added_chars = 2400
+        self.max_parts = 8
+        self.compat_mode = None
+        self.skipped = []
+        self.injected = []
 
 
 class LLMResponsePipeline:
@@ -604,7 +615,7 @@ class LLMResponsePipeline:
         _mod = sys.modules.get(type(self._p).__module__)
         _StateInjectionBudget = getattr(_mod, "_StateInjectionBudget", None)
         if _StateInjectionBudget is None:
-            from main import _StateInjectionBudget
+            _StateInjectionBudget = LocalStateInjectionBudget
 
         budget = _StateInjectionBudget(session_key=session_key, model_hint=model_hint)
         cfg = self._p.config or {}

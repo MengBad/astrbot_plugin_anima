@@ -36,7 +36,7 @@ from .void_scar_engine import VoidScarEngine
 if TYPE_CHECKING:
     from .social_field import SocialSignals
 
-logger = logging.getLogger("astrbot_plugin_sylanne")
+logger = logging.getLogger("astrbot_plugin_anima")
 
 _TIMING_WINDOW = 50
 # 单层执行超时告警阈值（纳秒），200ms

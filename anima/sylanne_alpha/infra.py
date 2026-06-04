@@ -21,13 +21,13 @@ try:
     from astrbot.api import logger  # type: ignore
     from astrbot.core.utils.astrbot_path import get_astrbot_data_path  # type: ignore
 except ImportError:
-    logger = logging.getLogger("astrbot_plugin_sylanne")  # type: ignore
+    logger = logging.getLogger("astrbot_plugin_anima")  # type: ignore
 
     def get_astrbot_data_path() -> Path:  # type: ignore
         return Path.home()
 
 
-_PLUGIN_NAME = "astrbot_plugin_sylanne"
+_PLUGIN_NAME = "astrbot_plugin_anima"
 _LEGACY_SUBDIR = "sylanne_alpha"
 
 

@@ -31,7 +31,7 @@ try:
 except ImportError:
     import logging as _logging
 
-    logger = _logging.getLogger("astrbot_plugin_sylanne")  # type: ignore
+    logger = _logging.getLogger("astrbot_plugin_anima")  # type: ignore
 
 
 # ---------------------------------------------------------------------------

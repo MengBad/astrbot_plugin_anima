@@ -962,7 +962,7 @@ class MemorySystem:
         """
         import logging
 
-        _logger = logging.getLogger("astrbot_plugin_sylanne")
+        _logger = logging.getLogger("astrbot_plugin_anima")
 
         # 在 L1 中查找
         for item in self._l1:

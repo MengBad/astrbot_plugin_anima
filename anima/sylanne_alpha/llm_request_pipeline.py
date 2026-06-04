@@ -30,7 +30,7 @@ try:
 except ImportError:
     import logging as _logging
 
-    logger = _logging.getLogger("astrbot_plugin_sylanne")  # type: ignore
+    logger = _logging.getLogger("astrbot_plugin_anima")  # type: ignore
 
 # 单次未完成回复注入的最大字符数，防止 prompt 过长
 _MAX_UNFINISHED_CONTEXT_CHARS = 2000

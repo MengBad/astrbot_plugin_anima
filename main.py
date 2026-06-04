@@ -142,11 +142,39 @@ class BackgroundTaskSet(set):
         self.update(items)
 
 
+class SessionLockDict(dict):
+    def __init__(self, plugin):
+        super().__init__()
+        self._p = plugin
+
+    def __missing__(self, key):
+        import asyncio
+        lock = asyncio.Lock()
+        self[key] = lock
+        return lock
+
+    def __call__(self, session_key: str):
+        if hasattr(self._p, "_session_ctx"):
+            return self._p._session_ctx.session_lock(session_key)
+        return self[session_key]
+
+
+class _StateInjectionBudget:
+    def __init__(self, session_key: str, model_hint: str = ""):
+        self.session_key = session_key
+        self.model_hint = model_hint
+        self.max_added_chars = 2400
+        self.max_parts = 8
+        self.compat_mode = None
+        self.skipped = []
+        self.injected = []
+
+
 @register(
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.7",
+    "1.1.8",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -170,6 +198,8 @@ class AnimaPlugin(
     StatsMixin,
     Star,
 ):
+    _shared_encoder = None
+
     def __init__(self, context: Context, config: AstrBotConfig):
         self.logger = logger
         super().__init__(context)
@@ -437,6 +467,7 @@ class AnimaPlugin(
         self._realtime_ordinary_history_backfills = BoundedDict(maxsize=200)
         self._realtime_chat_active_dispatches = BoundedDict(maxsize=200)
         self._session_locks = {}
+        self._session_lock = SessionLockDict(self)
 
         # 子系统初始化
         self._session_ctx = SessionContext(self)

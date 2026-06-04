@@ -18,7 +18,7 @@ from typing import Any
 from .body import SCHEMA_VERSION
 from .kernel import AlphaKernel
 
-logger = logging.getLogger("astrbot_plugin_sylanne")
+logger = logging.getLogger("astrbot_plugin_anima")
 
 
 class AlphaRuntime:

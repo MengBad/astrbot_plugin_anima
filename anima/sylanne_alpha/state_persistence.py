@@ -22,7 +22,7 @@ from sylanne_alpha.utils import safe_ensure_future
 if TYPE_CHECKING:
     from .host import SylanneAlphaHost
 
-logger = logging.getLogger("astrbot_plugin_sylanne")
+logger = logging.getLogger("astrbot_plugin_anima")
 
 # ---------------------------------------------------------------------------
 # 增量持久化 dirty-flag 机制（Item 12）

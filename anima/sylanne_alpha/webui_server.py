@@ -220,7 +220,7 @@ def _plugin(default: Any = None) -> Any:
 
 def _runtime_info(plugin: Any) -> dict[str, Any]:
     return {
-        "plugin_name": "astrbot_plugin_sylanne",
+        "plugin_name": "astrbot_plugin_anima",
         "runtime_id": str(getattr(plugin, "_webui_runtime_id", "") or ""),
         "instance_id": hex(id(plugin)) if plugin is not None else "",
         "module": str(
@@ -3505,7 +3505,7 @@ class WebUILifecycle:
 
     def runtime_info(self) -> dict[str, Any]:
         return {
-            "plugin_name": "astrbot_plugin_sylanne",
+            "plugin_name": "astrbot_plugin_anima",
             "runtime_id": str(getattr(self._p, "_webui_runtime_id", "") or ""),
             "instance_id": hex(id(self._p)),
             "module": self._p.__class__.__module__,

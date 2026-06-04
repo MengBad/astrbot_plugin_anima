@@ -21,7 +21,7 @@ from typing import Any
 
 from sylanne_alpha.utils import safe_ensure_future
 
-logger = logging.getLogger("astrbot_plugin_sylanne")
+logger = logging.getLogger("astrbot_plugin_anima")
 
 
 # ---------------------------------------------------------------------------

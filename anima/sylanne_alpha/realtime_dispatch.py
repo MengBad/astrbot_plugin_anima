@@ -851,7 +851,7 @@ class RealtimeDispatch:
             except Exception as e:
                 import logging
 
-                logging.getLogger("astrbot_plugin_sylanne").error(
+                logging.getLogger("astrbot_plugin_anima").error(
                     f"Background task '{label or 'background_task'}' failed: {e}",
                     exc_info=True,
                 )
