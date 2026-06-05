@@ -1,3 +1,17 @@
+## v1.2.1 - 修复 helper LLM 调用误拦截
+
+本次发版修复了图片转文字等辅助 LLM 调用会被自身 `on_llm_request` 钩子误判为普通聊天请求的问题。修复后，helper 调用会通过模块级 `ContextVar` 明确标记并直接放行，避免请求载荷被历史消息污染、prompt 严重膨胀，并防止在群聊场景下输出过长的内部推理内容。
+
+### 修复项
+
+- **修复辅助 LLM 调用的上下文隔离**：`safe_llm_generate` 在 `_anima_helper_call=True` 时会设置全局 `ContextVar` 标记，并在 `finally` 中可靠复位，避免协程链路中的标志位泄漏。
+- **修复 `on_llm_request` 误拦截**：拦截钩子在入口处优先检查 helper 标记，命中后直接返回，不再注入历史上下文或能力提示。
+- **确认多模态转写调用签名**：`_transcribe_non_text` 使用标准的 `chat_provider_id` 参数，并显式携带 `_anima_helper_call=True`，保证转写请求不会进入普通聊天注入管线。
+- **补充回归测试**：新增 helper LLM bypass 回归测试，覆盖标志位置位、异常复位与请求不污染三种关键路径。
+
+### 测试
+
+- `345/345` 测试全绿。
 # Changelog
 
 ## v1.1.14 - 稳定性与上下文处理问题修复

@@ -63,6 +63,10 @@ from html.parser import HTMLParser
 from typing import Optional, Any
 
 import aiohttp
+import contextvars
+
+# Global ContextVar to bypass on_llm_request hook for helper/utility LLM calls
+in_helper_llm_call = contextvars.ContextVar("anima_in_helper_llm_call", default=False)
 
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.event import filter, AstrMessageEvent
@@ -266,7 +270,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.2.0",
+    "1.2.1",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -300,39 +304,93 @@ class AnimaPlugin(
         # Proxy wrapper for Context.llm_generate to support automatic failover
         orig_llm_generate = self.context.llm_generate
         async def safe_llm_generate(*args, **kwargs):
-            try:
-                return await orig_llm_generate(*args, **kwargs)
-            except Exception as main_exc:
-                logger.warning(f"[Anima] Primary LLM call failed: {main_exc}. Trying failover...")
-                chat_provider_id = kwargs.get("chat_provider_id")
-                if not chat_provider_id and len(args) > 0:
-                    chat_provider_id = args[0]
-                
-                fallback_pids = []
-                if hasattr(self.context, "get_all_providers"):
-                    try:
-                        providers = self.context.get_all_providers()
-                        fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
-                    except Exception:
-                        pass
-                
-                if not fallback_pids:
-                    raise main_exc
+            # Check if this is a helper LLM call initiated by Anima
+            is_helper = kwargs.pop("_anima_helper_call", False)
+            if not is_helper:
+                # Fallback: inspect stack to detect if the caller is inside anima or sylanne_alpha
+                import sys
+                try:
+                    f = sys._getframe(1)
+                    while f:
+                        module_name = f.f_globals.get("__name__", "")
+                        if any(x in module_name for x in ("astrbot_plugin_anima", "anima", "sylanne_alpha")):
+                            is_helper = True
+                            break
+                        f = f.f_back
+                except Exception:
+                    pass
+
+            if is_helper:
+                token = in_helper_llm_call.set(True)
+                try:
+                    return await orig_llm_generate(*args, **kwargs)
+                except Exception as main_exc:
+                    logger.warning(f"[Anima] Primary helper LLM call failed: {main_exc}. Trying failover...")
+                    chat_provider_id = kwargs.get("chat_provider_id")
+                    if not chat_provider_id and len(args) > 0:
+                        chat_provider_id = args[0]
                     
-                for fpid in fallback_pids:
-                    try:
-                        logger.info(f"[Anima] Failover: retrying with provider {fpid}...")
-                        new_kwargs = dict(kwargs)
-                        new_args = list(args)
-                        if "chat_provider_id" in new_kwargs:
-                            new_kwargs["chat_provider_id"] = fpid
-                        elif len(args) > 0:
-                            new_args[0] = fpid
-                        return await orig_llm_generate(*new_args, **new_kwargs)
-                    except Exception as fallback_exc:
-                        logger.warning(f"[Anima] Failover provider {fpid} failed: {fallback_exc}")
-                        continue
-                raise main_exc
+                    fallback_pids = []
+                    if hasattr(self.context, "get_all_providers"):
+                        try:
+                            providers = self.context.get_all_providers()
+                            fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
+                        except Exception:
+                            pass
+                    
+                    if not fallback_pids:
+                        raise main_exc
+                        
+                    for fpid in fallback_pids:
+                        try:
+                            logger.info(f"[Anima] Failover helper: retrying with provider {fpid}...")
+                            new_kwargs = dict(kwargs)
+                            new_args = list(args)
+                            if "chat_provider_id" in new_kwargs:
+                                new_kwargs["chat_provider_id"] = fpid
+                            elif len(args) > 0:
+                                new_args[0] = fpid
+                            return await orig_llm_generate(*new_args, **new_kwargs)
+                        except Exception as fallback_exc:
+                            logger.warning(f"[Anima] Failover helper provider {fpid} failed: {fallback_exc}")
+                            continue
+                    raise main_exc
+                finally:
+                    in_helper_llm_call.reset(token)
+            else:
+                try:
+                    return await orig_llm_generate(*args, **kwargs)
+                except Exception as main_exc:
+                    logger.warning(f"[Anima] Primary LLM call failed: {main_exc}. Trying failover...")
+                    chat_provider_id = kwargs.get("chat_provider_id")
+                    if not chat_provider_id and len(args) > 0:
+                        chat_provider_id = args[0]
+                    
+                    fallback_pids = []
+                    if hasattr(self.context, "get_all_providers"):
+                        try:
+                            providers = self.context.get_all_providers()
+                            fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
+                        except Exception:
+                            pass
+                    
+                    if not fallback_pids:
+                        raise main_exc
+                        
+                    for fpid in fallback_pids:
+                        try:
+                            logger.info(f"[Anima] Failover: retrying with provider {fpid}...")
+                            new_kwargs = dict(kwargs)
+                            new_args = list(args)
+                            if "chat_provider_id" in new_kwargs:
+                                new_kwargs["chat_provider_id"] = fpid
+                            elif len(args) > 0:
+                                new_args[0] = fpid
+                            return await orig_llm_generate(*new_args, **new_kwargs)
+                        except Exception as fallback_exc:
+                            logger.warning(f"[Anima] Failover provider {fpid} failed: {fallback_exc}")
+                            continue
+                    raise main_exc
 
         self.context.llm_generate = safe_llm_generate
 
@@ -895,6 +953,10 @@ class AnimaPlugin(
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
         """对话前注入 self_notes 到上下文"""
         if not self.config.get("enabled", True):
+            return
+
+        if in_helper_llm_call.get():
+            logger.debug("[Anima] Skipping on_llm_request hook for helper/utility LLM call.")
             return
 
         if hasattr(self, "_hosts"):

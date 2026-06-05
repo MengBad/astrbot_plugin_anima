@@ -562,7 +562,8 @@ class LLMRequestPipeline:
             resp = await context.llm_generate(
                 prompt=prompt,
                 image_urls=image_urls[:1],
-                provider_id=provider_id,
+                chat_provider_id=provider_id,
+                _anima_helper_call=True,
             )
             desc = str(getattr(resp, "completion_text", "") or "").strip()
             if desc:
