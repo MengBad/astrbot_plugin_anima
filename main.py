@@ -202,11 +202,34 @@ class TimeArmor(dict):
     def __eq__(self, other): return self.ts == int(other) if hasattr(other, '__int__') else self.ts == other
 
 
+class EmbeddingProviderWrapper:
+    def __init__(self, target):
+        self.target = target
+
+    async def get_embedding(self, text: str) -> Optional[list]:
+        for method_name in ("get_embedding", "embed", "embed_text", "create_embedding"):
+            method = getattr(self.target, method_name, None)
+            if callable(method):
+                try:
+                    result = method(text)
+                    if asyncio.iscoroutine(result):
+                        result = await asyncio.wait_for(result, timeout=8.0)
+                    if isinstance(result, list) and result:
+                        if isinstance(result[0], (int, float)):
+                            return list(result)
+                        if isinstance(result[0], list):
+                            return list(result[0])
+                except Exception:
+                    pass
+        return None
+
+
+
 @register(
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.12",
+    "1.1.13",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -2017,3 +2040,14 @@ class AnimaPlugin(
 
     async def _delete_sylanne_memory_state(self, session_key: str) -> None:
         await self._state_persistence.delete_sylanne_memory_state(session_key)
+
+    def _get_embedding_provider(self, provider_id: str) -> Any:
+        try:
+            providers = self.context.get_all_embedding_providers()
+            for p in providers:
+                if p.meta().id == provider_id:
+                    return EmbeddingProviderWrapper(p)
+        except Exception as e:
+            logger.debug(f"[Anima] _get_embedding_provider error: {e}")
+        return None
+
