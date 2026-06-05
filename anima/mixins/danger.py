@@ -940,6 +940,15 @@ class DangerMixin:
             search_url = f"https://cn.bing.com/search?q={urllib.parse.quote(search_query)}"
             result_text = await asyncio.wait_for(self._fetch_url(search_url), timeout=25.0)
 
+            # DuckDuckGo HTML Fallback
+            if not result_text or len(result_text.strip()) < 150:
+                fallback_query = urllib.parse.quote(search_query)
+                fallback_url = f"https://html.duckduckgo.com/html/?q={fallback_query}"
+                try:
+                    result_text = await asyncio.wait_for(self._fetch_url(fallback_url), timeout=25.0)
+                except Exception as e:
+                    logger.debug(f"[Anima][Autonomy] DuckDuckGo fallback search failed: {e}")
+
             if result_text and not self._is_sensitive(result_text):
                 # 尝试合成能力（复用提炼逻辑的简化版）
                 synthesis_prompt = (
@@ -1037,6 +1046,15 @@ class DangerMixin:
                 self._fetch_url(search_url),
                 timeout=30.0,
             )
+
+            # DuckDuckGo HTML Fallback
+            if not result_text or len(result_text.strip()) < 150:
+                fallback_query = urllib.parse.quote(search_query)
+                fallback_url = f"https://html.duckduckgo.com/html/?q={fallback_query}"
+                try:
+                    result_text = await asyncio.wait_for(self._fetch_url(fallback_url), timeout=30.0)
+                except Exception as e:
+                    logger.debug(f"[Anima][Autonomy] DuckDuckGo fallback search failed: {e}")
 
             if not result_text or self._is_sensitive(result_text):
                 await self._record_tool_usage(event, "autonomous_research", desire_content, "", False)

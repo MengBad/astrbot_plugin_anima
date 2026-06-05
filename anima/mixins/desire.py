@@ -109,6 +109,24 @@ class DesireMixin:
         """写入欲望队列"""
         self._write_json(self.desires_path, desires)
 
+    def _is_desire_similar_to_existing(self, content: str, desires: list, threshold: float = 0.70) -> bool:
+        """检查新的欲望内容是否与队列中现有的未满足欲望语义相似"""
+        if not content or not desires:
+            return False
+        try:
+            tokens_new = _ext_text_token_set(content)
+            for d in desires:
+                if d.get("satisfied", False):
+                    continue
+                tokens_old = _ext_text_token_set(d.get("content", ""))
+                if not tokens_new or not tokens_old:
+                    continue
+                if _ext_jaccard(tokens_new, tokens_old) >= threshold:
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _decay_desires(self):
         """欲望衰减：每次调用 intensity *= 0.95，低于 0.1 的删除"""
         desires = self._read_desires()
@@ -405,6 +423,10 @@ class DesireMixin:
                     if hasattr(self, "_looks_like_inner_monologue") and self._looks_like_inner_monologue(result):
                         if self.config.get("log_level") == "debug":
                             logger.debug(f"[Anima] 提取的欲望疑似煽情自白，不入队: {result[:50]}")
+                        return
+                    if self._is_desire_similar_to_existing(result, desires):
+                        if self.config.get("log_level") == "debug":
+                            logger.debug(f"[Anima] 提取的欲望与队列中现有欲望相似，不入队: {result[:50]}")
                         return
                     desires.append({
                         "id": f"desire_{int(time.time())}",

@@ -244,7 +244,12 @@ class MergedEvalMixin:
             max_queue = self.config.get("desire_max_queue", 5)
             if len(desires) >= max_queue:
                 return
-            # 去重：已在 bot 回复里表达过则跳过
+            # 去重 A：与队列中已有的活跃欲望语义相似则跳过
+            if self._is_desire_similar_to_existing(result, desires):
+                if self.config.get("log_level") == "debug":
+                    logger.debug(f"[Anima] 欲望与队列中现有欲望相似，跳过（合并路径）: {result[:40]}")
+                return
+            # 去重 B：已在 bot 回复里表达过则跳过
             if await self._is_desire_already_expressed(result, response_text, event):
                 if self.config.get("log_level") == "debug":
                     logger.debug(f"[Anima] 欲望已在回复中表达，跳过（合并路径）: {result[:40]}")

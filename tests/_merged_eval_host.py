@@ -100,6 +100,9 @@ class Host(MergedEvalMixin):
     def _is_rejected(self, text):
         return any(s in (text or "") for s in self._rejected_substrings)
 
+    def _is_desire_similar_to_existing(self, content: str, desires: list, threshold: float = 0.70) -> bool:
+        return False
+
     async def _is_desire_already_expressed(self, desire_text, response_text, event=None):
         return self._already_expressed
 

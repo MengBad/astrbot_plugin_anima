@@ -266,7 +266,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.14",
+    "1.2.0",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -296,6 +296,45 @@ class AnimaPlugin(
         self.logger = logger
         super().__init__(context)
         self.config = config
+
+        # Proxy wrapper for Context.llm_generate to support automatic failover
+        orig_llm_generate = self.context.llm_generate
+        async def safe_llm_generate(*args, **kwargs):
+            try:
+                return await orig_llm_generate(*args, **kwargs)
+            except Exception as main_exc:
+                logger.warning(f"[Anima] Primary LLM call failed: {main_exc}. Trying failover...")
+                chat_provider_id = kwargs.get("chat_provider_id")
+                if not chat_provider_id and len(args) > 0:
+                    chat_provider_id = args[0]
+                
+                fallback_pids = []
+                if hasattr(self.context, "get_all_providers"):
+                    try:
+                        providers = self.context.get_all_providers()
+                        fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
+                    except Exception:
+                        pass
+                
+                if not fallback_pids:
+                    raise main_exc
+                    
+                for fpid in fallback_pids:
+                    try:
+                        logger.info(f"[Anima] Failover: retrying with provider {fpid}...")
+                        new_kwargs = dict(kwargs)
+                        new_args = list(args)
+                        if "chat_provider_id" in new_kwargs:
+                            new_kwargs["chat_provider_id"] = fpid
+                        elif len(args) > 0:
+                            new_args[0] = fpid
+                        return await orig_llm_generate(*new_args, **new_kwargs)
+                    except Exception as fallback_exc:
+                        logger.warning(f"[Anima] Failover provider {fpid} failed: {fallback_exc}")
+                        continue
+                raise main_exc
+
+        self.context.llm_generate = safe_llm_generate
 
         # 全局 IO 锁：保护所有"读-改-写"的状态文件，避免多协程并发交错
         # 由于多数 IO 函数是同步的（普通 open），用 threading.Lock 即可在
@@ -1205,18 +1244,12 @@ class AnimaPlugin(
         base_url = f"http://{shown_host}:{port}"
         t = token
         yield event.plain_result(
-            "[Anima] WebUI 访问地址（含访问口令，请妥善保管）：\n\n"
-            f"1. Sylanne 意识面板：\n"
+            "[Anima] WebUI 统一控制台入口（含访问口令，请妥善保管）：\n\n"
             f"{base_url}/?token={t}\n\n"
-            f"2. Anima 运行仪表盘：\n"
-            f"{base_url}/dashboard/?token={t}\n\n"
-            f"3. Anima 能力树：\n"
-            f"{base_url}/capability-tree/?token={t}\n\n"
-            f"绑定：{host}:{port}\n"
+            "· 一个页面包含全部组件（Sylanne 意识、Anima 仪表盘、能力树）。\n"
+            "· 支持「全景分屏」与「单面板最大化」自由切换。\n"
             "· 默认仅本机可访问（127.0.0.1）。\n"
-            "· 如需远程访问，把"
-            f"「{config_label('sylanne_webui_host')}」改为 0.0.0.0 并重载，"
-            "但请注意这是明文 HTTP + 口令鉴权，仅建议在可信网络使用。"
+            "· 如需远程访问，请在配置里将 host 改为 0.0.0.0 并重启。"
         )
 
     @filter.command("anima_world")

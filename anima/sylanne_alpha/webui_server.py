@@ -323,6 +323,48 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
         html = _inject_shim_and_nav(dashboard_html, "sylanne")
         return web.Response(text=html, content_type="text/html", charset="utf-8")
 
+    async def handle_mutation_history(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"ok": False, "error": "Plugin not loaded"})
+        state = current_plugin._load_state()
+        history = state.get("mutation_history", [])
+        return web.json_response({"ok": True, "history": history})
+
+    async def handle_mutation_rollback(request: web.Request) -> web.Response:
+        import os
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"ok": False, "error": "Plugin not loaded"})
+        if current_plugin.config.get("persona_lock", False):
+            return web.json_response({"ok": False, "error": "Persona core is locked."})
+        
+        backup_path = current_plugin.persona_core_path + ".bak"
+        if not os.path.exists(backup_path):
+            return web.json_response({"ok": False, "error": "No rollback backup found."})
+        
+        try:
+            with open(backup_path, "r", encoding="utf-8") as f:
+                backup_content = f.read()
+            current_content = ""
+            if os.path.exists(current_plugin.persona_core_path):
+                with open(current_plugin.persona_core_path, "r", encoding="utf-8") as f:
+                    current_content = f.read()
+            with open(current_plugin.persona_core_path, "w", encoding="utf-8") as f:
+                f.write(backup_content)
+            if current_content:
+                with open(backup_path, "w", encoding="utf-8") as f:
+                    f.write(current_content)
+            
+            current_plugin._record_mutation(
+                "回滚恢复", 
+                "用户手动触发回滚：已恢复上一版本的核心人设配置。",
+                triggered_by="user_webui"
+            )
+            return web.json_response({"ok": True, "message": "Rollback successful."})
+        except Exception as e:
+            return web.json_response({"ok": False, "error": str(e)})
+
     async def handle_state(request: web.Request) -> web.Response:
         global _last_diag_request
         if _last_diag_request and time.time() - _last_diag_request > 30:
@@ -1624,6 +1666,8 @@ if (window.self !== window.top) {
     app.router.add_get("/health", handle_health)
     app.router.add_get("/metrics", handle_metrics)
     app.router.add_get("/api/state", handle_state)
+    app.router.add_get("/api/mutation_history", handle_mutation_history)
+    app.router.add_post("/api/mutation_rollback", handle_mutation_rollback)
     app.router.add_get("/api/settings", handle_settings_get)
     app.router.add_post("/api/settings", handle_settings_post)
     app.router.add_get("/api/computation_logs", handle_computation_logs)

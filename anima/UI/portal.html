@@ -190,42 +190,15 @@
       background-color: var(--bg-main);
     }
 
-    /* Iframe Containers */
-    .view-container {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      pointer-events: none;
-      visibility: hidden;
-      transition: opacity 0.3s ease, transform 0.3s ease;
-      transform: scale(0.99);
-    }
-
-    .view-container.active {
-      opacity: 1;
-      pointer-events: auto;
-      visibility: visible;
-      transform: scale(1);
-    }
-
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      background: transparent;
-    }
-
     /* Split Screen Layout Grid */
     .split-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
       gap: 12px;
       padding: 12px;
       height: 100%;
       width: 100%;
+      transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .split-panel {
@@ -244,6 +217,10 @@
     .split-panel:hover {
       border-color: rgba(99, 102, 241, 0.3);
       box-shadow: 0 8px 32px rgba(99, 102, 241, 0.05);
+    }
+
+    .split-panel.collapsed {
+      display: none !important;
     }
 
     .panel-header {
@@ -271,6 +248,84 @@
       position: relative;
     }
 
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: transparent;
+    }
+
+    .btn-toggle {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-left: auto;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+
+    .btn-toggle:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Timeline visual styles */
+    .timeline {
+      position: relative;
+      padding-left: 20px;
+      border-left: 2px solid rgba(255, 255, 255, 0.06);
+      margin-top: 10px;
+    }
+
+    .timeline-item {
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: -26px;
+      top: 4px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-color);
+      border: 2px solid var(--bg-main);
+      box-shadow: 0 0 8px var(--accent-color);
+    }
+
+    .timeline-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-body);
+      margin-bottom: 4px;
+    }
+
+    .timeline-type {
+      font-size: 12px;
+      font-weight: 600;
+      color: #a78bfa;
+      background: rgba(167, 139, 250, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+
+    .timeline-desc {
+      font-size: 13px;
+      color: var(--text-main);
+      line-height: 1.5;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 10px;
+      border-radius: 8px;
+    }
+
     @keyframes pulse {
       0% { transform: scale(0.95); opacity: 0.8; }
       50% { transform: scale(1.05); opacity: 1; }
@@ -281,7 +336,7 @@
     @media (max-width: 1024px) {
       .split-grid {
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr 1fr 1fr;
+        grid-template-rows: auto;
         overflow-y: auto;
       }
       .split-panel {
@@ -306,10 +361,11 @@
 
     <!-- Navigation Tabs -->
     <div class="nav-tabs">
-      <button class="nav-tab active" onclick="switchView('sylanne-view')">🧠 Sylanne 意识</button>
-      <button class="nav-tab" onclick="switchView('dashboard-view')">📊 运行仪表盘</button>
-      <button class="nav-tab" onclick="switchView('captree-view')">🌳 能力树</button>
-      <button class="nav-tab" onclick="switchView('split-view')">🖥️ 全景分屏</button>
+      <button id="tab-split" class="nav-tab active" onclick="switchView('split')">🖥️ 全景分屏</button>
+      <button id="tab-sylanne" class="nav-tab" onclick="switchView('sylanne')">🧠 Sylanne 意识</button>
+      <button id="tab-dashboard" class="nav-tab" onclick="switchView('dashboard')">📊 运行仪表盘</button>
+      <button id="tab-captree" class="nav-tab" onclick="switchView('captree')">🌳 能力树</button>
+      <button id="tab-mutation" class="nav-tab" onclick="switchView('mutation')">🧬 核心突变演化</button>
     </div>
 
     <div class="header-actions">
@@ -327,64 +383,73 @@
 
   <!-- Main View Frame Area -->
   <main class="portal-content">
-    
-    <!-- View 1: Sylanne Consciousness -->
-    <div id="sylanne-view" class="view-container active">
-      <iframe id="sylanne-iframe" src="about:blank"></iframe>
-    </div>
-
-    <!-- View 2: Anima Runtime Dashboard -->
-    <div id="dashboard-view" class="view-container">
-      <iframe id="dashboard-iframe" src="about:blank"></iframe>
-    </div>
-
-    <!-- View 3: Anima Capability Tree -->
-    <div id="captree-view" class="view-container">
-      <iframe id="captree-iframe" src="about:blank"></iframe>
-    </div>
-
-    <!-- View 4: Split Panorama Grid View -->
-    <div id="split-view" class="view-container">
-      <div class="split-grid">
-        <div class="split-panel">
-          <div class="panel-header">
-            <span class="dot"></span>
-            Sylanne 意识状态
-          </div>
-          <div class="panel-body">
-            <iframe id="split-sylanne-iframe" src="about:blank"></iframe>
-          </div>
+    <div class="split-grid" id="main-grid">
+      <!-- Panel 1: Sylanne Consciousness -->
+      <div class="split-panel" id="panel-sylanne">
+        <div class="panel-header">
+          <span class="dot"></span>
+          <span>Sylanne 意识状态</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('sylanne')">🗖</button>
         </div>
-        <div class="split-panel">
-          <div class="panel-header">
-            <span class="dot" style="background:#38bdf8;box-shadow:0 0 6px #38bdf8;"></span>
-            Anima 运行仪表盘
-          </div>
-          <div class="panel-body">
-            <iframe id="split-dashboard-iframe" src="about:blank"></iframe>
-          </div>
+        <div class="panel-body">
+          <iframe id="sylanne-iframe" src="about:blank"></iframe>
         </div>
-        <div class="split-panel">
-          <div class="panel-header">
-            <span class="dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span>
-            Anima 能力树结构
+      </div>
+      
+      <!-- Panel 2: Anima Dashboard -->
+      <div class="split-panel" id="panel-dashboard">
+        <div class="panel-header">
+          <span class="dot" style="background:#38bdf8;box-shadow:0 0 6px #38bdf8;"></span>
+          <span>Anima 运行仪表盘</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('dashboard')">🗖</button>
+        </div>
+        <div class="panel-body">
+          <iframe id="dashboard-iframe" src="about:blank"></iframe>
+        </div>
+      </div>
+
+      <!-- Panel 3: Anima Capability Tree -->
+      <div class="split-panel" id="panel-captree">
+        <div class="panel-header">
+          <span class="dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span>
+          <span>Anima 能力树结构</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('captree')">🗖</button>
+        </div>
+        <div class="panel-body">
+          <iframe id="captree-iframe" src="about:blank"></iframe>
+        </div>
+      </div>
+
+      <!-- Panel 4: Mutation History Timeline -->
+      <div class="split-panel" id="panel-mutation">
+        <div class="panel-header">
+          <span class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa;"></span>
+          <span>🧬 核心人设突变演化历程</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('mutation')">🗖</button>
+        </div>
+        <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+            <p style="font-size:12px; color:var(--text-muted);">
+              这里记录了 AI 核心人格的突变轨迹（保留最近 100 次）。
+            </p>
+            <button class="btn-rollback" onclick="triggerRollback()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#f87171; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">
+              ↩ 撤销并回滚至上一人设版本
+            </button>
           </div>
-          <div class="panel-body">
-            <iframe id="split-captree-iframe" src="about:blank"></iframe>
+          <div id="timeline-container" class="timeline">
+            <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载突变历史中...</p>
           </div>
         </div>
       </div>
     </div>
-
   </main>
 
   <!-- JS Controller for Tab and Token Management -->
   <script>
-    // Extract token from location.search and propagate to standard relative paths
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
+    let csrfToken = '';
 
-    // Standard absolute URLs with tokens
     const urls = {
       sylanne: `/sylanne/?token=${encodeURIComponent(token)}`,
       dashboard: `/dashboard/?token=${encodeURIComponent(token)}`,
@@ -397,34 +462,107 @@
       document.getElementById('dashboard-iframe').src = urls.dashboard;
       document.getElementById('captree-iframe').src = urls.captree;
 
-      // Also pre-populate split view iframes
-      document.getElementById('split-sylanne-iframe').src = urls.sylanne;
-      document.getElementById('split-dashboard-iframe').src = urls.dashboard;
-      document.getElementById('split-captree-iframe').src = urls.captree;
+      // Fetch state once to get CSRF token and then load timeline
+      fetch(`/api/state?token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          csrfToken = data.csrf_token || '';
+          loadMutationHistory();
+        })
+        .catch(e => {
+          console.error("加载 CSRF Token 失败", e);
+          loadMutationHistory();
+        });
     });
 
-    // View Switcher logic
-    function switchView(targetId) {
-      // Manage active states of navigation buttons
+    // View Switcher logic (Dynamic Grid-Collapsing)
+    function switchView(target) {
+      const grid = document.getElementById('main-grid');
+      const panels = {
+        sylanne: document.getElementById('panel-sylanne'),
+        dashboard: document.getElementById('panel-dashboard'),
+        captree: document.getElementById('panel-captree'),
+        mutation: document.getElementById('panel-mutation')
+      };
+      
       const buttons = document.querySelectorAll('.nav-tab');
       buttons.forEach(btn => {
-        // Toggle active styling based on clicked button action
-        const actionAttr = btn.getAttribute('onclick');
-        if (actionAttr.includes(targetId)) {
-          btn.classList.add('active');
-        } else {
-          btn.classList.remove('active');
-        }
+        btn.classList.toggle('active', btn.id === `tab-${target}`);
       });
 
-      // Manage active states of content container panels
-      const containers = document.querySelectorAll('.view-container');
-      containers.forEach(container => {
-        if (container.id === targetId) {
-          container.classList.add('active');
-        } else {
-          container.classList.remove('active');
+      // Reset all collapsed states
+      Object.values(panels).forEach(p => p.classList.remove('collapsed'));
+
+      if (target === 'split') {
+        grid.style.gridTemplateColumns = '1fr 1fr 1fr 1fr';
+      } else {
+        grid.style.gridTemplateColumns = '1fr';
+        Object.keys(panels).forEach(key => {
+          if (key !== target) {
+            panels[key].classList.add('collapsed');
+          }
+        });
+      }
+    }
+
+    function toggleMaximize(panelKey) {
+      // If currently maximized, switch back to split view; else maximize this panel
+      const otherKey = panelKey === 'sylanne' ? 'dashboard' : 'sylanne';
+      const isMaximized = document.getElementById(`panel-${otherKey}`).classList.contains('collapsed');
+      switchView(isMaximized ? 'split' : panelKey);
+    }
+
+    // Load mutations history via API
+    function loadMutationHistory() {
+      const container = document.getElementById('timeline-container');
+      fetch(`/api/mutation_history?token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.ok || !data.history || data.history.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无核心突变记录。</p>';
+            return;
+          }
+          // Show newest mutations first
+          const history = [...data.history].reverse();
+          container.innerHTML = history.map(item => {
+            const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString('zh-CN') : '未知时间';
+            return `
+              <div class="timeline-item">
+                <div class="timeline-time">${timeStr}</div>
+                <span class="timeline-type">${item.type || '突变'}</span>
+                <div class="timeline-desc">${item.description || '无具体内容描述'}</div>
+              </div>
+            `;
+          }).join('');
+        })
+        .catch(e => {
+          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载突变历史失败，请尝试刷新。</p>';
+        });
+    }
+
+    // Trigger mutation rollback POST request
+    function triggerRollback() {
+      if (!confirm("确定要撤销最新核心突变并回退到上一个版本的人设配置文件吗？\n警告：这将会覆盖当前的 core_beliefs 并且重载人格。")) {
+        return;
+      }
+      fetch(`/api/mutation_rollback?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
         }
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          alert("回滚成功！核心人设文件已成功恢复，并已写入演化日志。");
+          loadMutationHistory();
+        } else {
+          alert(`回滚失败: ${data.error || '未知错误'}`);
+        }
+      })
+      .catch(e => {
+        alert("请求回滚失败，请检查网络或刷新页面。");
       });
     }
 
@@ -434,9 +572,9 @@
       iframes.forEach(iframe => {
         const src = iframe.src;
         iframe.src = 'about:blank';
-        // Force refresh source URL reload
         setTimeout(() => { iframe.src = src; }, 50);
       });
+      loadMutationHistory();
     }
   </script>
 </body>

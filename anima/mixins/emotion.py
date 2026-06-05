@@ -40,6 +40,18 @@ class EmotionMixin:
         """尝试读取 Sylanne 状态，失败时静默返回空"""
         if not self.config.get("sylanne_integration", True):
             return ""
+        # 1. Direct local bypass shortcut
+        if hasattr(self, "_public_api") and self._public_api:
+            try:
+                state_str = await self._public_api.query_agent_state_tool(event=event)
+                if state_str:
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[Anima] Sylanne 状态 (Direct): {state_str[:100]}")
+                    return state_str[:200]
+            except Exception as e:
+                logger.debug(f"[Anima] Direct Sylanne state query failed: {e}")
+
+        # 2. Legacy fallback path
         try:
             tool_mgr = self.context.provider_manager.llm_tools
             for tool in tool_mgr.func_list:
