@@ -1329,7 +1329,7 @@ class MemorySystem:
         """
         if len(self._l1) <= max_turns:
             return 0
-        overflow = len(self._l1) - max_turns
+        overflow = len(self._l1) - max_turns + 1
         # 取出最旧的 overflow 条
         old_items: list[MemoryItem] = []
         for _ in range(overflow):

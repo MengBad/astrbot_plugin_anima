@@ -10,6 +10,43 @@ import math
 import os
 import sys
 
+# ==================== JSON Serialization Monkeypatch ====================
+# v1.1.13: AstrBot core (v4.25.2) context compressor (round_utils.py:36) 
+# calls json.dumps(content) directly on message round content.
+# If content contains non-serializable custom objects like TextPart / ImagePart,
+# it crashes with TypeError: Object of type TextPart is not JSON serializable.
+# We globally patch JSONEncoder to support Pydantic models (dict() / model_dump())
+# and fallback __dict__ serialization.
+try:
+    _orig_encoder_default = json.JSONEncoder.default
+
+    def _anima_patched_encoder_default(self, o):
+        if hasattr(o, "model_dump") and callable(o.model_dump):
+            try:
+                return o.model_dump()
+            except Exception:
+                pass
+        if hasattr(o, "dict") and callable(o.dict):
+            try:
+                return o.dict()
+            except Exception:
+                pass
+        if hasattr(o, "__dict__"):
+            try:
+                return {k: v for k, v in o.__dict__.items() if not k.startswith('_')}
+            except Exception:
+                pass
+        try:
+            return _orig_encoder_default(self, o)
+        except TypeError:
+            return str(o)
+
+    json.JSONEncoder.default = _anima_patched_encoder_default
+except Exception:
+    pass
+# ========================================================================
+
+
 _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 if _PLUGIN_DIR not in sys.path:
     sys.path.insert(0, _PLUGIN_DIR)
@@ -229,7 +266,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.1.13",
+    "1.1.14",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(

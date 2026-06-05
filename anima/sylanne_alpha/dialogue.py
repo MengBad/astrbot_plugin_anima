@@ -239,7 +239,7 @@ class WindowManager:
         if total <= self._max_tokens:
             return messages
 
-        # 按重要性分层：landmark 保留原文，notable 截断到 100 字，ephemeral 丢弃
+        # 在单次循环中保留选中消息的原有时序，最近 3 条内的 ephemeral 消息也会被保留
         result = []
         for i, msg in enumerate(messages):
             tag = importance_tags.get(i, "ephemeral")
@@ -251,14 +251,8 @@ class WindowManager:
                     msg = dict(msg)
                     msg["content"] = content[:100] + "…"
                 result.append(msg)
-            # ephemeral: 只保留最近 3 条
-
-        # 补充最近 3 条 ephemeral
-        recent_ephemeral = [
-            m for i, m in enumerate(messages[-3:])
-            if importance_tags.get(len(messages) - 3 + i, "ephemeral") == "ephemeral"
-        ]
-        result.extend(recent_ephemeral)
+            elif tag == "ephemeral" and i >= len(messages) - 3:
+                result.append(msg)
         return result
 
 

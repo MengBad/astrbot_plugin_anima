@@ -76,6 +76,12 @@ class CompressionMixin:
 
             if llm_resp and llm_resp.completion_text:
                 compressed = llm_resp.completion_text.strip()
+                if _ext_is_rejected(compressed):
+                    logger.warning("[Anima] self_notes 压缩结果判定为安全拒答，放弃写入以防破坏记忆")
+                    return
+                if _ext_is_sensitive(compressed):
+                    logger.warning("[Anima] self_notes 压缩结果包含敏感密钥等词汇，放弃写入")
+                    return
                 old_summary = notes[:200]
                 self._write_self_notes(compressed)
                 self.config["self_notes_editor"] = compressed

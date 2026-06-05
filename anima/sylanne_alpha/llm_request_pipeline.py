@@ -1420,6 +1420,10 @@ class LLMRequestPipeline:
                     f"(prompt={len(current_prompt)} chars)"
                 )
 
+        # === Layer 3: Payload capping to prevent context overflow ===
+        if hasattr(p, "_llm_response_pipeline") and hasattr(p._llm_response_pipeline, "_cap_llm_request_payload"):
+            p._llm_response_pipeline._cap_llm_request_payload(request)
+
         # 首次请求时启动生命模拟器（懒初始化）
         if not getattr(p, "_life_simulator_started", False):
             p._life_simulator_started = True
