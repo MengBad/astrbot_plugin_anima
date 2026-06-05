@@ -38,9 +38,18 @@ class StorageMixin:
     """知识库 + 文件读写 mixin（从 main.py 自动抽出）。所有方法依赖宿主类提供的 self.* 状态。"""
 
     async def _ensure_kb(self) -> bool:
-        """懒加载：确保知识库已创建。返回知识库是否可用。"""
+        """懒加载：确保知识库已创建。返回知识库是否可用。
+
+        v1.2.2: 不再在尝试前缓存失败——仅在成功后标记 _kb_initialized，
+        失败时设置重试冷却（60 秒），避免 provider 系统未就绪时永久降级。
+        """
         if self._kb_initialized:
             return self._kb_available
+
+        # 冷却期内不重试，避免频繁调用
+        now = time.time()
+        if hasattr(self, "_kb_retry_after") and now < self._kb_retry_after:
+            return False
 
         embedding_id = self.config.get("embedding_provider_id", "")
         if not embedding_id:
@@ -48,7 +57,6 @@ class StorageMixin:
                 logger.debug("[Anima] 未配置 embedding_provider_id，向量记忆功能禁用")
             return False
 
-        self._kb_initialized = True
         try:
             kb = await self.context.kb_manager.get_kb_by_name("anima_memory")
             if not kb:
@@ -57,12 +65,13 @@ class StorageMixin:
                     embedding_provider_id=embedding_id,
                 )
                 logger.info("[Anima] 知识库 anima_memory 创建成功")
+            self._kb_initialized = True
             self._kb_available = True
             return True
         except Exception as e:
-            logger.warning(f"[Anima] 知识库初始化失败: {e}")
-            self._kb_initialized = False
+            logger.warning(f"[Anima] 知识库初始化失败（60 秒后重试）: {e}")
             self._kb_available = False
+            self._kb_retry_after = now + 60
             return False
 
     @staticmethod

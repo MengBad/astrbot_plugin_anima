@@ -150,7 +150,8 @@ class StateIOMixin:
         try:
             providers = self.context.get_all_providers()
             if providers:
-                return providers[0].meta().id
+                meta = providers[0].meta() if callable(getattr(providers[0], "meta", None)) else None
+                return getattr(meta, "id", "") if meta else ""
         except Exception as e:
             logger.debug(f"[Anima] 兜底获取 chat provider 失败: {e}")
         return ""

@@ -400,7 +400,11 @@ class DesireMixin:
             if not providers:
                 return
             internal = self.config.get("internal_provider_id", "")
-            provider_id = internal if internal else providers[0].meta().id
+            if internal:
+                provider_id = internal
+            else:
+                meta = providers[0].meta() if callable(getattr(providers[0], "meta", None)) else None
+                provider_id = getattr(meta, "id", "") if meta else ""
 
             prompt = (
                 "以下是一个角色的内心独白。从中提取它此刻想做的事、想知道的事、"

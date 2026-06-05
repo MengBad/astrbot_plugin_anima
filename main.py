@@ -270,7 +270,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.2.1",
+    "1.2.2",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -334,13 +334,17 @@ class AnimaPlugin(
                     if hasattr(self.context, "get_all_providers"):
                         try:
                             providers = self.context.get_all_providers()
-                            fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
+                            fallback_pids = [
+                                m.id for p in providers
+                                if (m := (p.meta() if callable(getattr(p, "meta", None)) else None))
+                                and getattr(m, "id", "") != chat_provider_id
+                            ]
                         except Exception:
                             pass
-                    
+
                     if not fallback_pids:
                         raise main_exc
-                        
+
                     for fpid in fallback_pids:
                         try:
                             logger.info(f"[Anima] Failover helper: retrying with provider {fpid}...")
@@ -365,12 +369,16 @@ class AnimaPlugin(
                     chat_provider_id = kwargs.get("chat_provider_id")
                     if not chat_provider_id and len(args) > 0:
                         chat_provider_id = args[0]
-                    
+
                     fallback_pids = []
                     if hasattr(self.context, "get_all_providers"):
                         try:
                             providers = self.context.get_all_providers()
-                            fallback_pids = [p.meta().id for p in providers if p.meta().id != chat_provider_id]
+                            fallback_pids = [
+                                m.id for p in providers
+                                if (m := (p.meta() if callable(getattr(p, "meta", None)) else None))
+                                and getattr(m, "id", "") != chat_provider_id
+                            ]
                         except Exception:
                             pass
                     
@@ -532,11 +540,15 @@ class AnimaPlugin(
 
         # 动态读取已配置的 Provider 列表，启动时打印方便用户查看
         try:
+            def _safe_pid(p):
+                meta = p.meta() if callable(getattr(p, "meta", None)) else None
+                return getattr(meta, "id", "") if meta else ""
+
             chat_providers = self.context.get_all_providers()
-            chat_ids = [p.meta().id for p in chat_providers]
+            chat_ids = [pid for p in chat_providers if (pid := _safe_pid(p))]
 
             embedding_providers = self.context.get_all_embedding_providers()
-            embedding_ids = [p.meta().id for p in embedding_providers]
+            embedding_ids = [pid for p in embedding_providers if (pid := _safe_pid(p))]
 
             # v0.8.5: 插件初始化可能早于 AstrBot provider 系统就绪，此时列表为空属正常。
             # Anima 运行时通过 _get_provider_id 懒查询，不依赖这里的快照，避免空列表误导。
@@ -2177,7 +2189,9 @@ class AnimaPlugin(
         try:
             providers = self.context.get_all_embedding_providers()
             for p in providers:
-                if p.meta().id == provider_id:
+                meta = p.meta() if callable(getattr(p, "meta", None)) else None
+                pid = getattr(meta, "id", "") if meta else ""
+                if pid == provider_id:
                     return EmbeddingProviderWrapper(p)
         except Exception as e:
             logger.debug(f"[Anima] _get_embedding_provider error: {e}")

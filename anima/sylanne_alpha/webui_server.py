@@ -33,6 +33,8 @@ from urllib.parse import parse_qs, urlparse, quote
 
 from pathlib import Path
 
+from .provider_registry import collect_provider_items
+
 
 def _get_plugin_version() -> str:
     """从 metadata.yaml 读取版本号（缓存结果）。"""
@@ -2490,61 +2492,9 @@ def start_webui_thread_server(
 async def _provider_items(plugin: Any) -> list[dict[str, Any]]:
     """尽力获取 AstrBot 已注册的 provider 列表，供设置面板下拉选择。"""
     context = getattr(plugin, "context", None)
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    def add(provider: Any, provider_type: str = "") -> None:
-        config = getattr(provider, "provider_config", None)
-        if not isinstance(config, dict):
-            config = {}
-        provider_id = str(
-            config.get("id")
-            or config.get("provider_id")
-            or getattr(provider, "provider_id", "")
-            or getattr(provider, "id", "")
-            or "",
-        ).strip()
-        if not provider_id or provider_id in seen:
-            return
-        seen.add(provider_id)
-        items.append(
-            {
-                "id": provider_id,
-                "name": str(
-                    config.get("name")
-                    or config.get("display_name")
-                    or getattr(provider, "name", "")
-                    or provider_id
-                ),
-                "type": str(
-                    provider_type
-                    or config.get("provider_type")
-                    or getattr(provider, "provider_type", "")
-                    or ""
-                ),
-            }
-        )
-
-    for method_name, provider_type in (
-        ("get_all_providers", "llm"),
-        ("get_all_llm_providers", "llm"),
-        ("get_all_embedding_providers", "embedding"),
-    ):
-        getter = getattr(context, method_name, None)
-        if not callable(getter):
-            continue
-        try:
-            providers = getter()
-            if hasattr(providers, "__await__"):
-                providers = await providers
-        except Exception:
-            continue
-        iterable = (
-            providers.values() if isinstance(providers, dict) else (providers or [])
-        )
-        for provider in iterable:
-            add(provider, provider_type)
-    return items
+    if context is None:
+        return []
+    return await collect_provider_items(context)
 
 
 def _known_sessions(plugin: Any, *, requested: str = "") -> list[str]:

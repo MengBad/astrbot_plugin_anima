@@ -1224,7 +1224,10 @@ class StatePersistence:
             import json
             raw = kv.get(key)
             if raw:
-                return json.loads(raw)
+                try:
+                    return json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    return None
         return None
 
     # ------------------------------------------------------------------

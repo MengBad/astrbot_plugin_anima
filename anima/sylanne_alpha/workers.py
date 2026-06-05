@@ -138,7 +138,10 @@ class BackgroundQueue:
         """
         if not self.path.exists():
             return
-        data = json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
         jobs = list(data.get("jobs") or [])
         self._pending = jobs
         self._inflight = []

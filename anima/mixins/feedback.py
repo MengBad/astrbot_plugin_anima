@@ -70,9 +70,15 @@ class FeedbackMixin:
             providers = self.context.get_all_embedding_providers()
             target = None
             for p in providers:
-                if p.meta().id == embedding_id:
+                meta = p.meta() if callable(getattr(p, "meta", None)) else None
+                pid = getattr(meta, "id", "") if meta else ""
+                if pid == embedding_id:
                     target = p
                     break
+            if not target:
+                # 回退：用 provider_registry 按 id 搜索（兼容 meta() 不可用的版本）
+                from ..sylanne_alpha.provider_registry import find_provider_by_id
+                target = find_provider_by_id(self.context, embedding_id, kinds=("embedding",))
             if not target:
                 return None
             # 不同 AstrBot 版本的 embedding 接口名可能不同，按常见命名兜底尝试

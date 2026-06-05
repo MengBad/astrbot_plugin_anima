@@ -1739,6 +1739,14 @@ function updateStaticI18n() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   XSS SAFETY — HTML escaping helper
+   ═══════════════════════════════════════════════════════════════ */
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ═══════════════════════════════════════════════════════════════
    LLM PROVIDER DATA
    ═══════════════════════════════════════════════════════════════ */
 var MOCK_PROVIDERS = [
@@ -1938,10 +1946,10 @@ function updateContactDisplay() {
     apiFetch('/api/state').then(function(data) {
       var n = (data && data.persona && data.persona.profile && data.persona.profile.name) || 'Sylanne';
       var v = (data && data.version) || '';
-      el.innerHTML = '「' + n + '」<br><span style="font-size:11px;color:var(--text-muted);letter-spacing:1px">OS. Embodiment-' + v + '</span>';
+      el.innerHTML = '「' + escHtml(n) + '」<br><span style="font-size:11px;color:var(--text-muted);letter-spacing:1px">OS. Embodiment-' + escHtml(v) + '</span>';
     }).catch(function() {});
   }
-  el.innerHTML = '「' + name + '」<br><span style="font-size:11px;color:var(--text-muted);letter-spacing:1px">OS. Embodiment' + (version ? '-' + version : '') + '</span>';
+  el.innerHTML = '「' + escHtml(name) + '」<br><span style="font-size:11px;color:var(--text-muted);letter-spacing:1px">OS. Embodiment' + (version ? '-' + escHtml(version) : '') + '</span>';
 }
 
 async function verifyToken(token) {
@@ -2569,8 +2577,8 @@ function renderLayerDetail(container, layer) {
   var statusColors = { active: '#4caf50', idle: 'var(--amber)', error: 'var(--red)' };
   var statusColor = statusColors[layer.status] || '#555';
   var html = '<div class="card">';
-  html += '<div class="card-title">' + layer.id + ' ' + layer.name + '</div>';
-  html += '<p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:16px;line-height:1.5">' + layer.desc + '</p>';
+  html += '<div class="card-title">' + escHtml(layer.id) + ' ' + escHtml(layer.name) + '</div>';
+  html += '<p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:16px;line-height:1.5">' + escHtml(layer.desc) + '</p>';
   html += '<div class="stat-grid">';
   html += '<div class="stat-box"><div class="stat-val" style="font-size:22px">' + layer.p50 + 'ms</div><div class="stat-lbl">P50</div></div>';
   html += '<div class="stat-box"><div class="stat-val" style="font-size:22px">' + layer.p99 + 'ms</div><div class="stat-lbl">P99</div></div>';
@@ -3287,7 +3295,7 @@ async function updateLogs() {
       var time = formatLogTime(l.ts || l.time);
       var msg = l.msg || l.text || l.message || '';
       var layers = l.layers ? ' [' + Object.keys(l.layers).join(',') + ']' : '';
-      return '<div class="log-entry"><span class="log-time">' + time + '</span><span class="log-badge ' + cls + '">' + route + '</span><span class="log-msg">' + msg + layers + '</span></div>';
+      return '<div class="log-entry"><span class="log-time">' + escHtml(time) + '</span><span class="log-badge ' + escHtml(cls) + '">' + escHtml(route) + '</span><span class="log-msg">' + escHtml(msg) + escHtml(layers) + '</span></div>';
     }).join('');
 
     if (lastLogTs === 0) {
@@ -3362,8 +3370,8 @@ async function renderMemory() {
       var content = item.content || item.text || item.summary || '';
       var weight = typeof item.weight === 'number' ? item.weight : 0;
       var age = item.age || formatAge(item.created_at);
-      html += '<div class="mem-item"><div class="mem-content">' + content + '</div>';
-      html += '<div class="mem-meta"><span>weight: ' + weight.toFixed(2) + '</span><span>age: ' + age + '</span></div>';
+      html += '<div class="mem-item"><div class="mem-content">' + escHtml(content) + '</div>';
+      html += '<div class="mem-meta"><span>weight: ' + weight.toFixed(2) + '</span><span>age: ' + escHtml(age) + '</span></div>';
       html += '<div class="mem-weight-track"><div class="mem-weight-fill" style="width:' + (weight*100) + '%"></div></div>';
       html += '</div>';
     });
@@ -3709,7 +3717,7 @@ function updatePersonality() {
     } else {
       var driftHtml = '';
       p.drift.forEach(function(ev) {
-        driftHtml += '<div class="drift-event"><div class="drift-event-time">' + ev.time + '</div><div class="drift-event-text">' + ev.text + '</div></div>';
+        driftHtml += '<div class="drift-event"><div class="drift-event-time">' + escHtml(ev.time) + '</div><div class="drift-event-text">' + escHtml(ev.text) + '</div></div>';
       });
       driftEl.innerHTML = driftHtml;
     }
@@ -3744,7 +3752,7 @@ function buildSessionMenu(sessions) {
   if (!sessions.length) { menu.innerHTML = ''; return; }
   menu.innerHTML = sessions.map(function(key) {
     var cls = key === current ? 'session-opt active' : 'session-opt';
-    return '<button class="' + cls + '" onclick="selectSession(\'' + key.replace(/'/g, "\\'") + '\')">' + key + '</button>';
+    return '<button class="' + cls + '" onclick="selectSession(\'' + key.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;') + '\')">' + escHtml(key) + '</button>';
   }).join('');
 }
 

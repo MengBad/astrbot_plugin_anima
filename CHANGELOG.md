@@ -1,3 +1,34 @@
+## v1.2.2 - 全面体检修复：兼容层补全、安全加固与健壮性提升
+
+本次发版基于对整个插件的全面代码体检，修复了多个阻断性缺陷、安全漏洞和健壮性问题。
+
+### 阻断性修复
+
+- **补全缺失的 `sylanne_alpha.compat` 模块**：`llm_response_pipeline`、`proactive_scheduler`、`public_api` 等模块导入了不存在的 `compat.py`，导致插件加载即崩溃（`ModuleNotFoundError`）。新建 `compat.py` 提供 `strip_draft_blocks`、`realtime_plan`、`proactive_decision`、`command_surface`、`simulate_update`、`emotion_values` 六个兼容函数。
+- **修复 `json.loads()` 无错误处理**：`state_persistence.py` 和 `workers.py` 中两处 `json.loads()` 调用无 try/except，损坏数据会导致系统崩溃。已添加 `JSONDecodeError` 捕获。
+
+### WebUI 配置修复
+
+- **修复 Provider 下拉选择器失效**：`webui_routes.py` 和 `webui_server.py` 各自维护了一套 provider 发现逻辑，但实现不完整（要求 `provider_config` 为 dict、未对 `meta()` 做空值检查）。统一替换为共享模块 `provider_registry.collect_provider_items()`。
+- **修复 Embedding 加载偶发降级**：`_ensure_kb()` 在尝试创建知识库前就标记 `_kb_initialized = True`，若此时 provider 系统未就绪则永久缓存失败。改为仅在成功后标记，失败时设置 60 秒冷却重试。
+
+### 安全加固（XSS）
+
+- **全局添加 `escHtml()` 工具函数**：在 `index.html` 和 `portal.html` 中添加 HTML 转义函数。
+- **修复 7 处存储型 XSS 漏洞**：计算日志、记忆池、漂移时间线、会话选择器、人格名称、层描述、突变历史等 innerHTML 注入点全部添加转义。
+- **修复会话选择器 onclick 注入**：对 session key 中的反斜杠和引号做额外转义。
+
+### 健壮性提升
+
+- **全量 `meta()` 空值防护**：修复 `main.py`（启动日志、failover、`_get_embedding_provider`）、`feedback.py`（`_embed_one`）、`desire.py`、`danger.py`、`rumination.py`、`state_io.py` 中共 10 处 `p.meta().id` 裸调用，添加 null guard。
+- **`_embed_one` 添加 provider_registry 回退**：当直接遍历 `get_all_embedding_providers()` 找不到目标时，回退到 `find_provider_by_id()` 按 id 搜索。
+
+### 测试
+
+- `345/345` 测试全绿。
+
+---
+
 ## v1.2.1 - 修复 helper LLM 调用误拦截
 
 本次发版修复了图片转文字等辅助 LLM 调用会被自身 `on_llm_request` 钩子误判为普通聊天请求的问题。修复后，helper 调用会通过模块级 `ContextVar` 明确标记并直接放行，避免请求载荷被历史消息污染、prompt 严重膨胀，并防止在群聊场景下输出过长的内部推理内容。

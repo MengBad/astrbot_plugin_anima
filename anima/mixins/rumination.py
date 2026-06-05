@@ -169,7 +169,8 @@ class RuminationMixin:
             if not provider_id:
                 providers = self.context.get_all_providers()
                 if providers:
-                    provider_id = providers[0].meta().id
+                    meta = providers[0].meta() if callable(getattr(providers[0], "meta", None)) else None
+                    provider_id = getattr(meta, "id", "") if meta else ""
             if not provider_id:
                 return
 
