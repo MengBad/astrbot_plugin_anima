@@ -312,7 +312,8 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
         )
 
     async def handle_sylanne_redirect(request: web.Request) -> web.Response:
-        t = quote(_active_token, safe="")
+        token = request.query.get("token", "")
+        t = quote(token, safe="")
         raise web.HTTPFound(f"/sylanne/?token={t}")
 
     async def handle_sylanne_index(request: web.Request) -> web.Response:
@@ -1445,7 +1446,8 @@ if (window.self !== window.top) {
         return html
 
     async def handle_captree_redirect(request: web.Request) -> web.Response:
-        t = quote(_active_token, safe="")
+        token = request.query.get("token", "")
+        t = quote(token, safe="")
         raise web.HTTPFound(f"/capability-tree/?token={t}")
 
     async def handle_captree_index(request: web.Request) -> web.Response:
@@ -1476,7 +1478,8 @@ if (window.self !== window.top) {
         return web.Response(text=css_path.read_text(encoding="utf-8"), content_type="text/css", charset="utf-8")
 
     async def handle_dashboard_redirect(request: web.Request) -> web.Response:
-        t = quote(_active_token, safe="")
+        token = request.query.get("token", "")
+        t = quote(token, safe="")
         raise web.HTTPFound(f"/dashboard/?token={t}")
 
     async def handle_dashboard_index(request: web.Request) -> web.Response:
