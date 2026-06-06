@@ -87,7 +87,8 @@ class AutopoieticBoundary:
 
         # Penetration = orthogonal magnitude × (1 - integrity)
         penetration = orth_norm * (1.0 - self.boundary_integrity)
-        self._last_penetration = penetration
+        # Delay recovery under high stress (force magnitude) as well
+        self._last_penetration = max(penetration, orth_norm * 0.6)
         phase_transition = penetration > self._phase_threshold
 
         if phase_transition:
@@ -102,10 +103,11 @@ class AutopoieticBoundary:
             if len(self._phase_transitions) > 20:
                 self._phase_transitions = self._phase_transitions[-20:]
         else:
+            # Decay of boundary integrity and rise of entropy should be driven by the force itself
             self.boundary_integrity = max(
-                0.0, self.boundary_integrity - penetration * 0.1
+                0.0, self.boundary_integrity - orth_norm * 0.1
             )
-            self.internal_entropy = min(1.0, self.internal_entropy + penetration * 0.05)
+            self.internal_entropy = min(1.0, self.internal_entropy + orth_norm * 0.05)
 
         return {
             "penetration": round(penetration, 4),

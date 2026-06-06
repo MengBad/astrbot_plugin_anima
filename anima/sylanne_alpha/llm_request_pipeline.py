@@ -1258,6 +1258,13 @@ class LLMRequestPipeline:
                 signals.append(f"紧张感{'高' if tension > 0.6 else '中'}")
         if coherence < 0.7:
             signals.append("内心矛盾")
+        if p.config.get("danger_identity_crisis", False):
+            try:
+                stability = host.kernel.computation.boundary.stability()
+                if stability < 0.5:
+                    signals.append("自身感到某种游离，不确定自己是谁")
+            except Exception:
+                pass
         if void_pressure > 5.0:
             signals.append("有话想说但在忍")
         if not _short_gap and dissociation > 0.3:

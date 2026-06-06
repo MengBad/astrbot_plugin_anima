@@ -1,3 +1,20 @@
+## v1.2.3 - 身份危机与自创生边界数学锁定修复
+
+本版修复了在启用 Sylanne 时身份稳定度始终卡在 1.00、无法正确触发身份危机的数学及逻辑锁定缺陷。
+
+### 阻断性与算法修复
+
+- **修复自创生边界（Autopoietic Boundary）数学锁定**：原 perturbation 公式中，边界完整性衰减与熵增加仅由 `penetration` 驱动，而 `penetration` 被定义为 `orth_norm * (1.0 - boundary_integrity)`。一旦边界完整性被修复至 `1.0`，`penetration` 便恒为 `0.0`，导致外力无法造成任何磨损。现将衰减和熵增改为由外力本身（`orth_norm`）驱动，使得高强度攻击能够真实削弱边界。
+- **引入外力应力伤口冷却延迟**：在 `self_repair` 中，原伤口愈合延迟判定（`_last_penetration > 0.4`）也因 `penetration` 归零而失效，导致单次 Request 滴答的损伤会在 Response 滴答（零外力）中被立即满血恢复。现将 `_last_penetration` 改进为综合外力强度（`max(penetration, orth_norm * 0.6)`），保证强情绪/否定词刺激后，伤口能够保持开启状态数轮，从而使稳定度衰减在会话层真实可见。
+- **补全 `/anima_stability` 动态映射**：当 Sylanne 启用时，`/anima_stability` 运维指令此前因读取 legacy 的 `_identity_stability` 而始终显示 1.00。已动态映射至 active session kernel 的 autopoietic boundary stability。
+
+### 测试
+
+- **新增测试覆盖**：编写了 `tests/test_autopoietic_boundary.py`，覆盖了初态自检、外力衰减与伤口延迟修复等核心数学规律。
+- `348/348` 测试全绿。
+
+---
+
 ## v1.2.2 - 全面体检修复：兼容层补全、安全加固与健壮性提升
 
 本次发版基于对整个插件的全面代码体检，修复了多个阻断性缺陷、安全漏洞和健壮性问题。

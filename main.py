@@ -270,7 +270,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.2.2",
+    "1.2.3",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -1385,6 +1385,11 @@ class AnimaPlugin(
             yield event.plain_result("[Anima] 身份危机模块未启用。")
             return
         stability = self._identity_stability
+        if hasattr(self, "_hosts"):
+            session_key = self._session_key(event)
+            host = self._host(session_key)
+            if host and hasattr(host, "kernel") and host.kernel:
+                stability = host.kernel.computation.boundary.stability()
         bar = "█" * int(stability * 10) + "░" * (10 - int(stability * 10))
         status = "稳定" if stability > 0.7 else "动摇" if stability > 0.4 else "游离"
         yield event.plain_result(
