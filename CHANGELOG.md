@@ -1,3 +1,43 @@
+## v1.2.5 - 认知观测台加固：Prompt 调试器、状态检查器与多维分析器
+
+本版基于 Phase 2 稳定性发布（v1.2.4）进行观测性加固。新增了认知观测台（Cognitive Observatory）的一系列子视图和诊断 API，对 Prompt 注入预算、会话状态一致性、三层记忆拓扑、欲望队列积压、创伤代数指标以及人格漂移趋势进行无敏感数据泄漏的安全可视化。所有 API 接口均在共享 WebUI 端口与独立 WebUI 端口同步暴露。
+
+### Prompt 调试器 (Prompt Debugger)
+- 新增脱敏的 `anima.prompt_debug.v1` 注入快照。快照记录注入槽位名称、原始与截断后长度、预算上限、注入路径和请求基本结构，不保留 Prompt 正文与记忆原文。
+- 新增 `prompt.injection_assembled` 运行时事件，使认知时间线能够实时查看注入预算状态而不泄漏敏感数据。
+- 注册 `/api/prompt_debug` 接口，支持 limit 与 session 过滤。
+
+### 状态检查器 (State Inspector)
+- 引入无损的 `dirty_snapshot()`，诊断 Sylanne 的脏标志而不消费持久化缓存。
+- 新增脱敏的 `anima.state_inspector.v1` 快照，报告活动会话数、宿主状态、记忆系统、会话缓冲、脏子系统、持久化文件元数据与 KV 可用性，并诊断会话隔离越界。
+- 注册 `/api/state_inspector` 接口，并在 Anima Portal 中新增 State Inspector 状态检查卡片。
+
+### 记忆浏览器 (Memory Explorer)
+- 新增脱敏的 `anima.memory_explorer.v1` 记忆系统快照，展示 L1/L2/L3 的条目数、Consolidation 运行状态、配置参数以及混淆 fingerprinted item/node/edge。
+- 抹除记忆文本和图谱标签，仅暴露字符统计与 SHA-256 指纹。
+- 注册 `/api/memory_explorer` 接口，并在 Portal 中新增相应卡片。
+
+### 欲望仪表盘 (Desire Dashboard)
+- 新增脱敏的 `anima.desire_dashboard.v1` 欲望队列快照，展示队列健康度、进/出欲望分流、强度分布、作用域标志及指纹。
+- 抹除欲望正文、目标群组与用户 ID，仅保留指纹与统计数据。
+- 注册 `/api/desire_dashboard` 接口，并在 Portal 中新增相应卡片。
+
+### 创伤浏览器 (Scar Explorer)
+- 新增脱敏的 `anima.scar_explorer.v1` 创伤代数与 legacy 创伤数据快照，展示愈合阶段分布、维度敏感度/密度、溢出熔断状态等。
+- 抹除创伤事件正文，仅保留数字与状态特征。
+- 注册 `/api/scar_explorer` 接口，并在 Portal 中新增相应卡片。
+
+### 人格漂移观测器 (Personality Drift Viewer)
+- 新增脱敏的 `anima.personality_drift_viewer.v1` 快照，展示 5D 向量、Sylanne surface traits、关系变动计数及 core-beliefs 变化指纹。
+- 抹除 persona_core 内容与突变描述。
+- 注册 `/api/personality_drift` 接口，并在 Portal 中新增相应卡片。
+
+### 测试与验证
+- 新增对全部脱敏 API 接口及 UI 卡片的契约测试和回归覆盖，确保安全防护不泄漏任何敏感信息，同时不破坏原有 dirty trackers 的状态。
+- 测试用例全量通过，在 `373/373` 测试中全绿运行。
+
+---
+
 ## v1.2.4 - 发布前稳定性加固：原子持久化、生命周期收束与 Sylanne 记忆一致性
 
 本版基于 Phase 2 深度 Bug / Risk 扫描，优先修复会导致数据损坏、热重载泄漏、双引擎边界误判和 Sylanne 记忆观察不一致的问题。整体策略保持向后兼容，不删除旧 Anima Mixin 路径，不改变高风险 autonomy 核心逻辑。

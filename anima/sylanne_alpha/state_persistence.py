@@ -62,6 +62,16 @@ class _DirtyTracker:
             return bool(self._global_subsystems or self._session_subsystems.get(session_key))
         return bool(self._global_subsystems or any(self._session_subsystems.values()))
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a non-destructive copy of dirty flags for diagnostics."""
+        return {
+            "global": sorted(self._global_subsystems),
+            "sessions": {
+                session_key: sorted(subsystems)
+                for session_key, subsystems in self._session_subsystems.items()
+            },
+        }
+
 
 # 模块级实例——StatePersistence.__init__ 中会替换为自己的实例
 _dirty = _DirtyTracker()
@@ -80,6 +90,11 @@ def is_dirty(session_key: str = "") -> bool:
 def swap_dirty(session_key: str = "") -> set[str]:
     """原子地取出当前脏集合并清空。"""
     return _dirty.swap(session_key=session_key)
+
+
+def dirty_snapshot() -> dict[str, Any]:
+    """Return dirty flags without consuming them."""
+    return _dirty.snapshot()
 
 
 # ---------------------------------------------------------------------------

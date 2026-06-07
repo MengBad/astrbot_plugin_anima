@@ -1637,6 +1637,180 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_prompt_debug(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            try:
+                limit = int(request.query.get("limit", 50))
+            except (TypeError, ValueError):
+                limit = 50
+            limit = max(1, min(200, limit))
+            session_key = str(request.query.get("session", "") or "").strip()
+            snapshots = getattr(current_plugin, "_prompt_debug_snapshots", None)
+            if not snapshots:
+                return web.json_response({"success": True, "snapshots": [], "count": 0})
+            values = list(snapshots.values()) if hasattr(snapshots, "values") else []
+            if session_key:
+                values = [
+                    item for item in values
+                    if isinstance(item, dict) and item.get("session_key") == session_key
+                ]
+            values = sorted(
+                [item for item in values if isinstance(item, dict)],
+                key=lambda item: float(item.get("timestamp") or 0),
+                reverse=True,
+            )[:limit]
+            return web.json_response({
+                "success": True,
+                "snapshots": values,
+                "count": len(values),
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_state_inspector(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.state_inspector import build_state_inspector_snapshot
+
+            snapshot = build_state_inspector_snapshot(current_plugin)
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "state.inspector_snapshot",
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["state", "inspector"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_memory_explorer(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.memory_explorer import build_memory_explorer_snapshot
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 5))
+            except (TypeError, ValueError):
+                limit = 5
+            snapshot = build_memory_explorer_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "memory.explorer_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["memory", "explorer"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_desire_dashboard(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.desire_dashboard import build_desire_dashboard_snapshot
+
+            try:
+                limit = int(request.query.get("limit", 20))
+            except (TypeError, ValueError):
+                limit = 20
+            snapshot = build_desire_dashboard_snapshot(current_plugin, limit=limit)
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "desire.dashboard_snapshot",
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["desire", "dashboard"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_scar_explorer(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.scar_explorer import build_scar_explorer_snapshot
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 8))
+            except (TypeError, ValueError):
+                limit = 8
+            snapshot = build_scar_explorer_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "scar.explorer_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["scar", "explorer"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_personality_drift(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.personality_drift_viewer import (
+                build_personality_drift_viewer_snapshot,
+            )
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 12))
+            except (TypeError, ValueError):
+                limit = 12
+            snapshot = build_personality_drift_viewer_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "personality.drift_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["personality", "drift"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def handle_export(request: web.Request) -> web.Response:
         current_plugin = _plugin(plugin)
         if current_plugin is None:
@@ -1699,6 +1873,12 @@ if (window.self !== window.top) {
     app.router.add_get("/api/capabilities", handle_capabilities)
     app.router.add_get("/api/events", handle_events)
     app.router.add_get("/api/runtime_events", handle_runtime_events)
+    app.router.add_get("/api/prompt_debug", handle_prompt_debug)
+    app.router.add_get("/api/state_inspector", handle_state_inspector)
+    app.router.add_get("/api/memory_explorer", handle_memory_explorer)
+    app.router.add_get("/api/desire_dashboard", handle_desire_dashboard)
+    app.router.add_get("/api/scar_explorer", handle_scar_explorer)
+    app.router.add_get("/api/personality_drift", handle_personality_drift)
     app.router.add_get("/api/export", handle_export)
     app.router.add_get("/api/config", handle_config)
     app.router.add_get("/health", handle_health)

@@ -134,6 +134,114 @@ def _format_inner_context(trimmed: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _slot_lengths(fragments: dict[str, str]) -> dict[str, int]:
+    """Return per-slot character counts without retaining prompt content."""
+    lengths: dict[str, int] = {}
+    for slot_name, _priority, _max in _INJECTION_SLOTS:
+        text = fragments.get(slot_name, "")
+        if text:
+            lengths[slot_name] = len(text)
+    return lengths
+
+
+def _safe_len(value: Any) -> int:
+    try:
+        return len(value)
+    except Exception:
+        return 0
+
+
+def _request_shape(request: Any) -> dict[str, int]:
+    """Capture non-sensitive request shape metrics for prompt debugging."""
+    contexts = getattr(request, "contexts", None)
+    extra = getattr(request, "extra_user_content_parts", None)
+    contents = getattr(request, "contents", None)
+    return {
+        "system_prompt_chars": len(str(getattr(request, "system_prompt", "") or "")),
+        "prompt_chars": len(str(getattr(request, "prompt", "") or "")),
+        "contexts_count": _safe_len(contexts) if isinstance(contexts, list) else 0,
+        "extra_user_content_parts_count": _safe_len(extra) if isinstance(extra, list) else 0,
+        "contents_count": _safe_len(contents) if isinstance(contents, list) else 0,
+    }
+
+
+def _record_prompt_debug_snapshot(
+    plugin: Any,
+    *,
+    session_key: str,
+    request: Any,
+    budget: Any,
+    gap_seconds: float,
+    total_budget: int,
+    raw_fragments: dict[str, str],
+    trimmed_fragments: dict[str, str],
+    current_prompt: str,
+    message_text: str,
+) -> None:
+    """Record a redacted prompt-injection snapshot for observability APIs."""
+    try:
+        raw_lengths = _slot_lengths(raw_fragments)
+        trimmed_lengths = _slot_lengths(trimmed_fragments)
+        skipped_slots = [
+            slot_name
+            for slot_name in raw_lengths
+            if slot_name not in trimmed_lengths
+        ]
+        compat_mode = str(getattr(budget, "compat_mode", "") or "")
+        if compat_mode == "claude_agent_owned_context":
+            injection_path = "skipped_hajide"
+        elif compat_mode == "claude_advisory":
+            injection_path = "system_prompt_advisory"
+        else:
+            injection_path = "nosave_context"
+
+        snapshot = {
+            "schema": "anima.prompt_debug.v1",
+            "timestamp": time.time(),
+            "session_key": session_key,
+            "budget_chars": int(total_budget),
+            "gap_seconds": round(float(gap_seconds), 3),
+            "compat_mode": compat_mode,
+            "injection_path": injection_path,
+            "raw_lengths": raw_lengths,
+            "trimmed_lengths": trimmed_lengths,
+            "raw_total_chars": sum(raw_lengths.values()),
+            "trimmed_total_chars": sum(trimmed_lengths.values()),
+            "injected_slots": list(trimmed_lengths.keys()),
+            "skipped_slots": skipped_slots,
+            "message_chars": len(message_text or ""),
+            "current_prompt_chars": len(current_prompt or ""),
+            "request_shape": _request_shape(request),
+            "budget_injected_sources": list(getattr(budget, "injected", []) or [])[:10],
+            "budget_skipped_sources": list(getattr(budget, "skipped", []) or [])[:10],
+        }
+
+        snapshots = getattr(plugin, "_prompt_debug_snapshots", None)
+        if snapshots is not None:
+            snapshots[session_key] = snapshot
+
+        emitter = getattr(plugin, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "prompt.injection_assembled",
+                session_key=session_key,
+                severity="debug",
+                source="llm_request_pipeline",
+                payload={
+                    "budget_chars": snapshot["budget_chars"],
+                    "compat_mode": snapshot["compat_mode"],
+                    "injection_path": snapshot["injection_path"],
+                    "injected_slots": snapshot["injected_slots"],
+                    "skipped_slots": snapshot["skipped_slots"],
+                    "trimmed_total_chars": snapshot["trimmed_total_chars"],
+                    "raw_total_chars": snapshot["raw_total_chars"],
+                },
+                tags=["prompt", "budget"],
+            )
+    except Exception as e:
+        logger.debug(f"Sylanne prompt debug snapshot skipped: {e}")
+
+
 # ---------------------------------------------------------------------------
 # LLM 降级链（Item 81）
 # ---------------------------------------------------------------------------
@@ -1366,6 +1474,9 @@ class LLMRequestPipeline:
         trimmed = _allocate_and_trim(raw_fragments, total_budget)
 
         unfinished_final = trimmed.pop("unfinished", "")
+        trimmed_for_debug = dict(trimmed)
+        if unfinished_final:
+            trimmed_for_debug["unfinished"] = unfinished_final
         inner_text = _format_inner_context(trimmed)
 
         _compat = budget.compat_mode if budget else ""
@@ -1433,6 +1544,19 @@ class LLMRequestPipeline:
                     f"[Sylanne] no context injected "
                     f"(prompt={len(current_prompt)} chars)"
                 )
+
+        _record_prompt_debug_snapshot(
+            p,
+            session_key=session_key,
+            request=request,
+            budget=budget,
+            gap_seconds=gap_seconds,
+            total_budget=total_budget,
+            raw_fragments=raw_fragments,
+            trimmed_fragments=trimmed_for_debug,
+            current_prompt=current_prompt,
+            message_text=message_text,
+        )
 
         # === Layer 3: Payload capping to prevent context overflow ===
         if hasattr(p, "_llm_response_pipeline") and hasattr(p._llm_response_pipeline, "_cap_llm_request_payload"):

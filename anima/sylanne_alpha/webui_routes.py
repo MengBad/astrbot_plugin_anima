@@ -439,6 +439,153 @@ class WebUIRoutes:
             "stats": bus.stats(),
         }
 
+    async def prompt_debug_handler(self) -> dict[str, Any]:
+        """Return redacted prompt-injection snapshots for debugging budgets."""
+        from quart import request as quart_request
+
+        try:
+            limit = int(quart_request.args.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        limit = max(1, min(200, limit))
+        session_key = str(quart_request.args.get("session") or "").strip()
+        snapshots = getattr(self._p, "_prompt_debug_snapshots", None)
+        if not snapshots:
+            return {"success": True, "snapshots": [], "count": 0}
+
+        values = list(snapshots.values()) if hasattr(snapshots, "values") else []
+        if session_key:
+            values = [
+                item for item in values
+                if isinstance(item, dict) and item.get("session_key") == session_key
+            ]
+        values = sorted(
+            [item for item in values if isinstance(item, dict)],
+            key=lambda item: float(item.get("timestamp") or 0),
+            reverse=True,
+        )[:limit]
+        return {"success": True, "snapshots": values, "count": len(values)}
+
+    async def state_inspector_handler(self) -> dict[str, Any]:
+        """Return a redacted state/session consistency snapshot."""
+        from sylanne_alpha.state_inspector import build_state_inspector_snapshot
+
+        snapshot = build_state_inspector_snapshot(self._p)
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "state.inspector_snapshot",
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["state", "inspector"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def memory_explorer_handler(self) -> dict[str, Any]:
+        """Return redacted memory topology and recall metadata."""
+        from quart import request as quart_request
+        from sylanne_alpha.memory_explorer import build_memory_explorer_snapshot
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 5)
+        except (TypeError, ValueError):
+            limit = 5
+        snapshot = build_memory_explorer_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "memory.explorer_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["memory", "explorer"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def desire_dashboard_handler(self) -> dict[str, Any]:
+        """Return redacted desire queue health and distribution data."""
+        from quart import request as quart_request
+        from sylanne_alpha.desire_dashboard import build_desire_dashboard_snapshot
+
+        try:
+            limit = int(quart_request.args.get("limit") or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        snapshot = build_desire_dashboard_snapshot(self._p, limit=limit)
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "desire.dashboard_snapshot",
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["desire", "dashboard"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def scar_explorer_handler(self) -> dict[str, Any]:
+        """Return redacted Scar Algebra topology and legacy-source metadata."""
+        from quart import request as quart_request
+        from sylanne_alpha.scar_explorer import build_scar_explorer_snapshot
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 8)
+        except (TypeError, ValueError):
+            limit = 8
+        snapshot = build_scar_explorer_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "scar.explorer_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["scar", "explorer"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def personality_drift_handler(self) -> dict[str, Any]:
+        """Return redacted personality drift and continuity diagnostics."""
+        from quart import request as quart_request
+        from sylanne_alpha.personality_drift_viewer import (
+            build_personality_drift_viewer_snapshot,
+        )
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 12)
+        except (TypeError, ValueError):
+            limit = 12
+        snapshot = build_personality_drift_viewer_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "personality.drift_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["personality", "drift"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
     # ------------------------------------------------------------------
     # Settings handlers
     # ------------------------------------------------------------------

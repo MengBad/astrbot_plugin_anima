@@ -355,6 +355,62 @@
       opacity: 0.9;
     }
 
+    .inspector-card {
+      border: 1px solid rgba(251,191,36,0.18);
+      background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(15,23,42,0.42));
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+
+    .inspector-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .inspector-metric {
+      border: 1px solid rgba(255,255,255,0.07);
+      background: rgba(2,6,23,0.28);
+      border-radius: 10px;
+      padding: 9px;
+    }
+
+    .inspector-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .inspector-value {
+      font-family: var(--font-title);
+      font-size: 18px;
+      color: #fde68a;
+      margin-top: 3px;
+    }
+
+    .inspector-session {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding: 8px 0;
+      font-size: 12px;
+    }
+
+    .inspector-pill {
+      display: inline-block;
+      color: #bae6fd;
+      border: 1px solid rgba(125,211,252,0.24);
+      background: rgba(14,165,233,0.08);
+      border-radius: 999px;
+      padding: 2px 7px;
+      margin: 2px;
+      font-size: 11px;
+    }
+
     @keyframes pulse {
       0% { transform: scale(0.95); opacity: 0.8; }
       50% { transform: scale(1.05); opacity: 1; }
@@ -466,6 +522,81 @@
               刷新时间线
             </button>
           </div>
+          <div id="state-inspector-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#fde68a;">State Inspector</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted session/state topology, dirty flags, persistence files, and isolation signals.</div>
+              </div>
+              <button onclick="loadStateInspector()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh State
+              </button>
+            </div>
+            <div id="state-inspector-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="state-inspector-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="memory-explorer-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#bae6fd;">Memory Explorer</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted L1/L2/L3 topology, recall metadata, embeddings, and reconsolidation signals.</div>
+              </div>
+              <button onclick="loadMemoryExplorer()" style="background:rgba(14,165,233,0.12); border:1px solid rgba(14,165,233,0.25); color:#7dd3fc; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Memory
+              </button>
+            </div>
+            <div id="memory-explorer-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="desire-dashboard-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#fda4af;">Desire Dashboard</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted desire queue health, inward/outward split, intensity buckets, and scoped-target signals.</div>
+              </div>
+              <button onclick="loadDesireDashboard()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fda4af; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Desires
+              </button>
+            </div>
+            <div id="desire-dashboard-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="desire-dashboard-items" style="margin-top:10px;"></div>
+          </div>
+          <div id="scar-explorer-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#c4b5fd;">Scar Explorer</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted Scar Algebra topology, healing stages, circuit breakers, and legacy JSON source signals.</div>
+              </div>
+              <button onclick="loadScarExplorer()" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); color:#c4b5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Scars
+              </button>
+            </div>
+            <div id="scar-explorer-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+          <div id="scar-explorer-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="personality-drift-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#a7f3d0;">Personality Drift</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted continuity view for legacy personality vectors, Sylanne embodiment drift, mutation hashes, and persona-core fingerprints.</div>
+              </div>
+              <button onclick="loadPersonalityDrift()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); color:#a7f3d0; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Drift
+              </button>
+            </div>
+            <div id="personality-drift-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="personality-drift-sessions" style="margin-top:10px;"></div>
+          </div>
           <div id="cognitive-stats" style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"></div>
           <div id="cognitive-timeline-container" class="timeline">
             <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载认知时间线中...</p>
@@ -527,11 +658,19 @@
           csrfToken = data.csrf_token || '';
           loadMutationHistory();
           loadCognitiveTimeline();
+          loadStateInspector();
+          loadMemoryExplorer();
+          loadDesireDashboard();
         })
         .catch(e => {
           console.error("加载 CSRF Token 失败", e);
           loadMutationHistory();
           loadCognitiveTimeline();
+          loadStateInspector();
+          loadMemoryExplorer();
+          loadDesireDashboard();
+          loadScarExplorer();
+          loadPersonalityDrift();
         });
     });
 
@@ -589,6 +728,288 @@
     function formatEventTime(ts) {
       if (!ts) return '未知时间';
       return new Date(Number(ts) * 1000).toLocaleString('zh-CN');
+    }
+
+    function renderInspectorMetric(label, value) {
+      return `
+        <div class="inspector-metric">
+          <div class="inspector-label">${escHtml(label)}</div>
+          <div class="inspector-value">${escHtml(value)}</div>
+        </div>
+      `;
+    }
+
+    function renderStateSession(session) {
+      const dirty = Array.isArray(session.dirty_subsystems) ? session.dirty_subsystems : [];
+      const host = session.host || {};
+      const pills = [
+        session.has_host ? 'host' : 'no-host',
+        session.has_memory_system ? 'memory' : 'no-memory',
+        session.has_conversation_buffer ? 'buffer' : 'no-buffer',
+        session.has_prompt_debug_snapshot ? 'prompt-debug' : '',
+        session.has_request_budget ? 'budget' : ''
+      ].filter(Boolean);
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">turns ${escHtml(host.turns || 0)} / ticks ${escHtml(host.spine_ticks || 0)} / route ${escHtml(host.last_route || '-')}</div>
+          </div>
+          <div style="text-align:right;">
+            ${pills.map(p => `<span class="inspector-pill">${escHtml(p)}</span>`).join('')}
+            ${dirty.length ? `<div style="color:#fbbf24; margin-top:4px;">dirty: ${escHtml(dirty.join(', '))}</div>` : '<div style="color:var(--text-muted); margin-top:4px;">clean</div>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadStateInspector() {
+      const summaryEl = document.getElementById('state-inspector-summary');
+      const sessionsEl = document.getElementById('state-inspector-sessions');
+      if (!summaryEl || !sessionsEl) return;
+      fetch(`/api/state_inspector?token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('State', 'offline');
+            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">State Inspector API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const files = snap.persistence_files || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Hosts', summary.active_hosts || 0),
+            renderInspectorMetric('Dirty Sessions', summary.dirty_sessions || 0),
+            renderInspectorMetric('KV API', summary.kv_api_available ? 'yes' : 'no'),
+            renderInspectorMetric('Isolation', summary.isolation_violation_count || 0),
+            renderInspectorMetric('Memory Systems', summary.memory_systems || 0),
+            renderInspectorMetric('Buffers', summary.conversation_buffers || 0),
+            renderInspectorMetric('Self Notes', files.self_notes && files.self_notes.exists ? `${files.self_notes.size_bytes || 0}b` : 'missing'),
+            renderInspectorMetric('Desires', files.desires && files.desires.exists ? `${files.desires.size_bytes || 0}b` : 'missing')
+          ].join('');
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
+          sessionsEl.innerHTML = sessions.length
+            ? sessions.map(renderStateSession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active sessions observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('State', 'error');
+          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/state_inspector.</div>';
+        });
+    }
+
+    function renderMemorySession(session) {
+      const counts = session.counts || {};
+      const params = session.params || {};
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#e0f2fe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / reconsolidation ${escHtml(params.reconsolidation_rate || 0)} / mood ${escHtml(params.mood_weight || 0)}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">L1 ${escHtml(counts.l1_hot || 0)}</span>
+            <span class="inspector-pill">L2 ${escHtml(counts.l2_warm || 0)}</span>
+            <span class="inspector-pill">L3 ${escHtml(counts.l3_nodes || 0)}</span>
+            <span class="inspector-pill">recall ${escHtml(counts.recalled_l2 || 0)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadMemoryExplorer() {
+      const summaryEl = document.getElementById('memory-explorer-summary');
+      const sessionsEl = document.getElementById('memory-explorer-sessions');
+      if (!summaryEl || !sessionsEl) return;
+      fetch(`/api/memory_explorer?limit=5&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Memory', 'offline');
+            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Memory Explorer API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Sessions', summary.sessions || 0),
+            renderInspectorMetric('L1 Hot', summary.l1_hot || 0),
+            renderInspectorMetric('L2 Warm', summary.l2_warm || 0),
+            renderInspectorMetric('L3 Nodes', summary.l3_nodes || 0),
+            renderInspectorMetric('L3 Edges', summary.l3_edges || 0),
+            renderInspectorMetric('Recalled L2', summary.recalled_l2 || 0),
+            renderInspectorMetric('Embeddings', summary.embedding_items || 0),
+            renderInspectorMetric('Redaction', 'hash')
+          ].join('');
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
+          sessionsEl.innerHTML = sessions.length
+            ? sessions.map(renderMemorySession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded memory systems observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Memory', 'error');
+          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/memory_explorer.</div>';
+        });
+    }
+
+    function renderDesireItem(item) {
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#ffe4e6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.source || 'unknown')} / ${escHtml(item.kind || 'inward')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">hash ${escHtml(item.content_fingerprint || '-')} / chars ${escHtml(item.content_chars || 0)} / age ${Math.round(Number(item.age_seconds || 0))}s</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">${escHtml(item.intensity_bucket || 'low')}</span>
+            <span class="inspector-pill">i ${escHtml(item.intensity || 0)}</span>
+            ${item.has_target_umo ? '<span class="inspector-pill">scoped</span>' : '<span class="inspector-pill">global</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadDesireDashboard() {
+      const summaryEl = document.getElementById('desire-dashboard-summary');
+      const itemsEl = document.getElementById('desire-dashboard-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(`/api/desire_dashboard?limit=8&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Desires', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Desire Dashboard API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const byKind = snap.by_kind || {};
+          const byIntensity = snap.by_intensity || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Enabled', summary.enabled ? 'yes' : 'no'),
+            renderInspectorMetric('Active', summary.active || 0),
+            renderInspectorMetric('Total', summary.total || 0),
+            renderInspectorMetric('Fill', `${Math.round(Number(summary.queue_fill_ratio || 0) * 100)}%`),
+            renderInspectorMetric('Outward', byKind.outward || 0),
+            renderInspectorMetric('Inward', byKind.inward || 0),
+            renderInspectorMetric('High', byIntensity.high || 0),
+            renderInspectorMetric('Scoped', summary.scoped_to_umo || 0)
+          ].join('');
+          const items = Array.isArray(snap.active_desires) ? snap.active_desires.slice(0, 8) : [];
+          itemsEl.innerHTML = items.length
+            ? items.map(renderDesireItem).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active desires observed.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Desires', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/desire_dashboard.</div>';
+        });
+    }
+
+    function renderScarSession(session) {
+      const stages = session.stage_counts || {};
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#ede9fe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / threshold ${escHtml(session.wound_threshold || 0)} / cap ${escHtml(session.session_scar_count || 0)}:${escHtml(session.session_scar_cap || 0)}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">total ${escHtml(session.total_scars || 0)}</span>
+            <span class="inspector-pill">RAW ${escHtml(stages.RAW || 0)}</span>
+            <span class="inspector-pill">SCARRED ${escHtml(stages.SCARRED || 0)}</span>
+            ${session.circuit_breaker_active ? '<span class="inspector-pill">breaker</span>' : '<span class="inspector-pill">stable</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadScarExplorer() {
+      const summaryEl = document.getElementById('scar-explorer-summary');
+      const sessionsEl = document.getElementById('scar-explorer-sessions');
+      if (!summaryEl || !sessionsEl) return;
+      fetch(`/api/scar_explorer?limit=8&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Scars', 'offline');
+            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Scar Explorer API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Topology', summary.topology || 'empty'),
+            renderInspectorMetric('Sessions', summary.sylanne_sessions || 0),
+            renderInspectorMetric('Sylanne', summary.sylanne_total_scars || 0),
+            renderInspectorMetric('Legacy', summary.legacy_total_scars || 0),
+            renderInspectorMetric('Breakers', summary.active_circuit_breakers || 0),
+            renderInspectorMetric('Cap Pressure', summary.session_cap_pressure || 0),
+            renderInspectorMetric('Redaction', 'safe')
+          ].join('');
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
+          sessionsEl.innerHTML = sessions.length
+            ? sessions.map(renderScarSession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded Sylanne scar state observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Scars', 'error');
+          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/scar_explorer.</div>';
+        });
+    }
+
+    function renderPersonalityDriftSession(session) {
+      const emb = Array.isArray(session.embodiment_traits) ? session.embodiment_traits.slice(0, 5) : [];
+      const driftCount = Array.isArray(session.recent_drift_events) ? session.recent_drift_events.length : 0;
+      const traitSummary = emb.map(t => `${escHtml(t.name || 'trait')} ${escHtml(t.value || 0)}`).join(' / ');
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#d1fae5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / drift ${escHtml(session.drift_tick || 0)} / ${traitSummary}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">events ${escHtml(driftCount)}</span>
+            <span class="inspector-pill">rels ${escHtml(session.relationship_delta_sessions || 0)}</span>
+            ${session.personality_dirty ? '<span class="inspector-pill">dirty</span>' : '<span class="inspector-pill">clean</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadPersonalityDrift() {
+      const summaryEl = document.getElementById('personality-drift-summary');
+      const sessionsEl = document.getElementById('personality-drift-sessions');
+      if (!summaryEl || !sessionsEl) return;
+      fetch(`/api/personality_drift?limit=8&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Drift', 'offline');
+            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Personality Drift API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const personaCore = (((snap.legacy || {}).persona_core) || {});
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Sessions', summary.sylanne_sessions || 0),
+            renderInspectorMetric('Events', summary.recent_drift_events || 0),
+            renderInspectorMetric('Mutations', summary.mutation_history_count || 0),
+            renderInspectorMetric('Dirty', summary.active_dirty_sessions || 0),
+            renderInspectorMetric('Rel Deltas', summary.relationship_delta_sessions || 0),
+            renderInspectorMetric('Legacy Vec', summary.legacy_vector_available ? 'yes' : 'no'),
+            renderInspectorMetric('Persona Core', personaCore.exists ? 'hash' : 'none')
+          ].join('');
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
+          sessionsEl.innerHTML = sessions.length
+            ? sessions.map(renderPersonalityDriftSession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded Sylanne personality state observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Drift', 'error');
+          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/personality_drift.</div>';
+        });
     }
 
     function renderRuntimeEvent(item) {
@@ -700,6 +1121,9 @@
       });
       loadMutationHistory();
       loadCognitiveTimeline();
+      loadStateInspector();
+      loadMemoryExplorer();
+      loadDesireDashboard();
     }
   </script>
 </body>

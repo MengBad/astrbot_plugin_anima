@@ -285,7 +285,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.2.3",
+    "1.2.5",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(
@@ -640,6 +640,7 @@ class AnimaPlugin(
         self._segmented_tasks = BoundedDict(maxsize=200)
         # 请求/响应诊断缓存
         self._last_request_budgets = BoundedDict(maxsize=200)
+        self._prompt_debug_snapshots = BoundedDict(maxsize=200)
         self._last_understanding_closed_loop = BoundedDict(maxsize=200)
         self._last_bot_expression_time = BoundedDict(maxsize=200)
         # 计算日志环形缓冲区（供 WebUI 实时显示，限制最大容量以防止内存泄漏）

@@ -33,6 +33,7 @@ _stub(
 
 from sylanne_alpha.observability import RuntimeEventBus  # noqa: E402
 from sylanne_alpha.llm_response_pipeline import LLMResponsePipeline  # noqa: E402
+from sylanne_alpha.llm_request_pipeline import _record_prompt_debug_snapshot  # noqa: E402
 
 
 def test_runtime_event_bus_records_filters_and_sanitizes_payload():
@@ -121,3 +122,43 @@ def test_response_observation_emits_runtime_event():
         assert any(event["type"] == "response.observed" for event in events)
 
     asyncio.run(run())
+
+
+def test_prompt_debug_snapshot_is_redacted_and_emits_event():
+    class Plugin:
+        def __init__(self):
+            self._prompt_debug_snapshots = {}
+            self._runtime_event_bus = RuntimeEventBus()
+
+        def _emit_runtime_event(self, event_type, **kwargs):
+            return self._runtime_event_bus.emit(event_type, **kwargs)
+
+    plugin = Plugin()
+    request = types.SimpleNamespace(system_prompt="sys", prompt="user", contexts=[])
+    budget = types.SimpleNamespace(compat_mode="", injected=[], skipped=[])
+    secret_memory = "private memory that must not be stored"
+
+    _record_prompt_debug_snapshot(
+        plugin,
+        session_key="session-a",
+        request=request,
+        budget=budget,
+        gap_seconds=12.34,
+        total_budget=1200,
+        raw_fragments={"memory": secret_memory, "state": "warm"},
+        trimmed_fragments={"state": "warm"},
+        current_prompt="current prompt text",
+        message_text="hello",
+    )
+
+    snapshot = plugin._prompt_debug_snapshots["session-a"]
+    encoded = json.dumps(snapshot, ensure_ascii=False)
+    assert secret_memory not in encoded
+    assert snapshot["raw_lengths"]["memory"] == len(secret_memory)
+    assert snapshot["trimmed_lengths"] == {"state": 4}
+    assert snapshot["skipped_slots"] == ["memory"]
+    assert snapshot["request_shape"]["system_prompt_chars"] == 3
+
+    events = plugin._runtime_event_bus.recent(limit=5)
+    assert events[0]["type"] == "prompt.injection_assembled"
+    assert events[0]["payload"]["injected_slots"] == ["state"]
