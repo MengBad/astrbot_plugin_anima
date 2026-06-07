@@ -34,42 +34,52 @@ _VALID_SUBSYSTEMS = frozenset({"personality", "memory", "spine", "session"})
 class _DirtyTracker:
     """实例级脏标记追踪器，避免模块级全局状态在多实例/热重载时污染。"""
 
-    __slots__ = ("_subsystems",)
+    __slots__ = ("_global_subsystems", "_session_subsystems")
 
     def __init__(self):
-        self._subsystems: set[str] = set()
+        self._global_subsystems: set[str] = set()
+        self._session_subsystems: dict[str, set[str]] = {}
 
-    def mark(self, subsystem: str) -> None:
+    def mark(self, subsystem: str, session_key: str = "") -> None:
         if subsystem in _VALID_SUBSYSTEMS:
-            self._subsystems.add(subsystem)
+            if session_key:
+                self._session_subsystems.setdefault(session_key, set()).add(subsystem)
+            else:
+                self._global_subsystems.add(subsystem)
 
-    def swap(self) -> set[str]:
+    def swap(self, session_key: str = "") -> set[str]:
         """原子地取出当前脏集合并清空，避免 get+clear 之间的竞态。"""
-        taken = self._subsystems
-        self._subsystems = set()
+        if session_key:
+            taken = self._session_subsystems.pop(session_key, set())
+            # 全局 dirty 是向后兼容兜底，不在单 session persist 时消费。
+            return set(taken) | set(self._global_subsystems)
+        taken = self._global_subsystems
+        self._global_subsystems = set()
         return taken
 
-    def is_dirty(self) -> bool:
-        return bool(self._subsystems)
+    def is_dirty(self, session_key: str = "") -> bool:
+        if session_key:
+            return bool(self._global_subsystems or self._session_subsystems.get(session_key))
+        return bool(self._global_subsystems or any(self._session_subsystems.values()))
 
 
 # 模块级实例——StatePersistence.__init__ 中会替换为自己的实例
 _dirty = _DirtyTracker()
 
 
-def mark_dirty(subsystem: str) -> None:
+def mark_dirty(subsystem: str, session_key: str = "") -> None:
     """标记某子系统为脏（需要持久化）。向后兼容的模块级 API。"""
-    _dirty.mark(subsystem)
+    _dirty.mark(subsystem, session_key=session_key)
 
 
-def is_dirty() -> bool:
+def is_dirty(session_key: str = "") -> bool:
     """是否有任何子系统需要持久化。"""
-    return _dirty.is_dirty()
+    return _dirty.is_dirty(session_key=session_key)
 
 
-def swap_dirty() -> set[str]:
+def swap_dirty(session_key: str = "") -> set[str]:
     """原子地取出当前脏集合并清空。"""
-    return _dirty.swap()
+    return _dirty.swap(session_key=session_key)
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +229,9 @@ class StatePersistence:
     # Kernel 持久化
     # ------------------------------------------------------------------
 
-    async def persist_kernel(self, session_key: str, host: SylanneAlphaHost) -> None:
+    async def persist_kernel(
+        self, session_key: str, host: SylanneAlphaHost, *, force: bool = False
+    ) -> None:
         """保存 kernel 状态：KV 存储（主路径）+ 文件 IO（回退路径）。
 
         双写确保：KV 存储提供快速查询，文件提供向后兼容和离线恢复能力。
@@ -233,10 +245,14 @@ class StatePersistence:
         import json as _json
 
         # 增量持久化：dirty set 为空时跳过 save（减少无变化时的 IO）
-        if not is_dirty():
+        if not force and not is_dirty(session_key):
             return
 
-        dirty_set = swap_dirty()
+        dirty_set = (
+            {"personality", "memory", "spine", "session"}
+            if force
+            else swap_dirty(session_key)
+        )
         snapshot = host.kernel.snapshot()
 
         if self.has_kv_api():
@@ -851,6 +867,11 @@ class StatePersistence:
     def _on_session_deleted(self, session_key: str) -> None:
         """AstrBot 会话删除回调——释放 Sylanne 侧的会话资源。"""
         p = self._p
+        for attr in ("_segmented_tasks", "_fragment_timers", "_background_post_checkpoint_tasks"):
+            container = getattr(p, attr, None)
+            task = container.get(session_key) if isinstance(container, dict) else None
+            if isinstance(task, asyncio.Task) and not task.done():
+                task.cancel()
         for attr in self._SESSION_KEYED_CONTAINERS:
             container = getattr(p, attr, None)
             if container is None:
@@ -881,6 +902,13 @@ class StatePersistence:
             f"sylanne_kernel_{safe}_backup",
             f"sylanne_buffer_{safe}",
             f"emotion_state:{safe}",
+            f"humanlike_state:{safe}",
+            f"lifelike_learning:{safe}",
+            f"personality_drift:{safe}",
+            f"moral_repair_state:{safe}",
+            f"fallibility_state:{safe}",
+            f"psychological_screening:{safe}",
+            f"group_atmosphere:{safe}",
             f"sylanne_memory_state:{safe}",
         ]
         delete_fn = getattr(self._p, "delete_kv_data", None)

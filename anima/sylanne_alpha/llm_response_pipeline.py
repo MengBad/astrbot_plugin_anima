@@ -87,6 +87,33 @@ class LLMResponsePipeline:
             )
         return cleaned
 
+    def _is_cron_event(self, event: Any) -> bool:
+        """Return True for internal cron events whose summaries should not be observed."""
+        platform = ""
+        platform_meta = getattr(event, "platform_meta", None)
+        if platform_meta:
+            platform = str(getattr(platform_meta, "name", "") or "")
+        if not platform:
+            umo = str(getattr(event, "unified_msg_origin", "") or "")
+            if umo.startswith("cron"):
+                platform = "cron"
+        return platform == "cron"
+
+    def _schedule_background_observe_response(self, session_key: str, text: str) -> None:
+        """Schedule one non-blocking response observation for memory consistency."""
+        if not str(text or "").strip():
+            return
+        if not hasattr(self._p, "_background_tasks"):
+            self._p._background_tasks = set()
+        obs_task = safe_ensure_future(
+            self._background_observe_response(session_key, text),
+            name="background_observe_response",
+        )
+        self._p._background_tasks.add(obs_task)
+        obs_task.add_done_callback(
+            lambda t: self._p._background_tasks.discard(t)
+        )
+
     # ------------------------------------------------------------------
     # Main response handler
     # ------------------------------------------------------------------
@@ -122,6 +149,8 @@ class LLMResponsePipeline:
                 cleaned = self._sanitize_response(cleaned)
                 if cleaned != text:
                     response.completion_text = cleaned
+                if not self._is_cron_event(event):
+                    self._schedule_background_observe_response(session_key, cleaned)
             return
 
         if response is None:
@@ -135,15 +164,7 @@ class LLMResponsePipeline:
         )
 
         # 定时任务（cron）的 LLM 回复是内部总结，不应发送给用户
-        _platform = ""
-        _pm = getattr(event, "platform_meta", None)
-        if _pm:
-            _platform = str(getattr(_pm, "name", "") or "")
-        if not _platform:
-            _umo = str(getattr(event, "unified_msg_origin", "") or "")
-            if _umo.startswith("cron"):
-                _platform = "cron"
-        if _platform == "cron":
+        if self._is_cron_event(event):
             response.completion_text = ""
             return
 
@@ -168,6 +189,7 @@ class LLMResponsePipeline:
                     remainder = ""
             if remainder:
                 self._p._unfinished_replies[session_key] = remainder
+            self._schedule_background_observe_response(session_key, cleaned)
             # Don't modify completion_text, don't stop event
             return
 
@@ -199,6 +221,7 @@ class LLMResponsePipeline:
 
         if not parts:
             response.completion_text = cleaned
+            self._schedule_background_observe_response(session_key, cleaned)
             return
 
         # 保留 completion_text 供 AstrBot 上下文历史记录使用。
@@ -232,14 +255,7 @@ class LLMResponsePipeline:
         self._p._segmented_tasks[session_key] = task
 
         # 将观测任务从热路径移出，后台异步执行
-        obs_task = safe_ensure_future(
-            self._background_observe_response(session_key, cleaned),
-            name="background_observe_response",
-        )
-        self._p._background_tasks.add(obs_task)
-        obs_task.add_done_callback(
-            lambda t: self._p._background_tasks.discard(t)
-        )
+        self._schedule_background_observe_response(session_key, cleaned)
 
     async def _background_observe_response(self, session_key: str, text: str) -> None:
         """后台观测 bot 回复：写入对话缓冲、通知社交场域、更新计算栈。"""
@@ -278,6 +294,15 @@ class LLMResponsePipeline:
                 flags=["safe"],
                 now=time.time(),
             )
+            emitter = getattr(self._p, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "response.observed",
+                    session_key=session_key,
+                    source="llm_response_pipeline",
+                    payload={"text_len": len(text)},
+                    tags=["response", "memory"],
+                )
         except Exception as e:
             logger.warning(f"Sylanne observe_response: {e}", exc_info=True)
 
@@ -619,8 +644,18 @@ class LLMResponsePipeline:
 
         budget = _StateInjectionBudget(session_key=session_key, model_hint=model_hint)
         cfg = self._p.config or {}
-        budget.max_added_chars = int(cfg.get("state_injection_max_added_chars", 2400))
-        budget.max_parts = int(cfg.get("state_injection_max_parts", 8))
+        try:
+            budget.max_added_chars = max(
+                0, min(20000, int(cfg.get("state_injection_max_added_chars", 2400)))
+            )
+        except (TypeError, ValueError):
+            budget.max_added_chars = 2400
+        try:
+            budget.max_parts = max(
+                0, min(32, int(cfg.get("state_injection_max_parts", 8)))
+            )
+        except (TypeError, ValueError):
+            budget.max_parts = 8
         hajide = bool(cfg.get("sylanne_alpha_hajide_compat_mode"))
         is_claude = (
             "claude" in model_hint.lower()

@@ -109,6 +109,64 @@ class DesireMixin:
         """写入欲望队列"""
         self._write_json(self.desires_path, desires)
 
+    def _atomic_update_desires(self, updater):
+        """在同一把 IO 锁内完成 desires.json 的读-改-原子写。"""
+        if not hasattr(self, "_io_lock") or not hasattr(self, "desires_path"):
+            desires = self._read_desires()
+            updated = updater(desires)
+            if updated is not None:
+                desires = updated
+            self._write_desires(desires)
+            return desires
+
+        with self._io_lock:
+            try:
+                if os.path.exists(self.desires_path):
+                    with open(self.desires_path, "r", encoding="utf-8") as f:
+                        desires = json.load(f)
+                else:
+                    desires = []
+                if not isinstance(desires, list):
+                    logger.warning("[Anima] desires.json 不是列表，已跳过本次欲望更新")
+                    return []
+            except json.JSONDecodeError as e:
+                logger.warning(f"[Anima] desires.json 损坏，本次欲望更新已跳过: {e}")
+                if hasattr(self, "_backup_corrupt_file_locked"):
+                    self._backup_corrupt_file_locked(self.desires_path, "corrupt-json")
+                return []
+            except OSError as e:
+                logger.warning(f"[Anima] 读取 desires.json 失败，本次欲望更新已跳过: {e}")
+                return []
+
+            try:
+                before_count = len(desires)
+                updated = updater(desires)
+                if updated is not None:
+                    desires = updated
+                if not isinstance(desires, list):
+                    logger.warning("[Anima] desire updater 返回非列表，已跳过写入")
+                    return []
+                if hasattr(self, "_atomic_write_json_locked"):
+                    self._atomic_write_json_locked(self.desires_path, desires)
+                else:
+                    with open(self.desires_path, "w", encoding="utf-8") as f:
+                        json.dump(desires, f, ensure_ascii=False, indent=2)
+                emitter = getattr(self, "_emit_runtime_event", None)
+                if callable(emitter):
+                    emitter(
+                        "desire.queue_updated",
+                        source="desire",
+                        payload={
+                            "before_count": before_count,
+                            "after_count": len(desires),
+                        },
+                        tags=["desire", "state"],
+                    )
+                return desires
+            except Exception as e:
+                logger.warning(f"[Anima] desire updater 失败: {e}")
+                return []
+
     def _is_desire_similar_to_existing(self, content: str, desires: list, threshold: float = 0.70) -> bool:
         """检查新的欲望内容是否与队列中现有的未满足欲望语义相似"""
         if not content or not desires:
@@ -129,41 +187,40 @@ class DesireMixin:
 
     def _decay_desires(self):
         """欲望衰减：每次调用 intensity *= 0.95，低于 0.1 的删除"""
-        desires = self._read_desires()
-        if not desires:
-            return
-        updated = []
-        for d in desires:
-            d["intensity"] = d.get("intensity", 0.5) * 0.95
-            if d["intensity"] >= 0.1 and not d.get("satisfied", False):
-                updated.append(d)
-        self._write_desires(updated)
+        def _update(desires):
+            updated = []
+            for d in desires:
+                d["intensity"] = d.get("intensity", 0.5) * 0.95
+                if d["intensity"] >= 0.1 and not d.get("satisfied", False):
+                    updated.append(d)
+            return updated
+        self._atomic_update_desires(_update)
 
     def _check_desire_satisfaction(self, text: str, event=None):
         """检查对话内容是否满足某个欲望（语义匹配优先，回退关键词匹配）。
         v0.8.0：仅匹配当前 umo 可见的欲望，避免跨群误满足。
         """
-        all_desires = self._read_desires()
-        if not all_desires:
-            return
         umo = self._get_event_umo(event)
-        changed = False
-        for d in all_desires:
-            if d.get("satisfied"):
-                continue
-            # 仅检查属于当前 umo 或通用（无 target_umo）的欲望
-            d_umo = d.get("target_umo", "")
-            if d_umo and umo and d_umo != umo:
-                continue
-            content = d.get("content", "")
-            keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
-            if any(kw in text for kw in keywords):
-                d["satisfied"] = True
-                changed = True
-                if self.config.get("log_level") == "debug":
-                    logger.debug(f"[Anima] 欲望已满足(关键词): {content[:50]}")
-        if changed:
-            self._write_desires([d for d in all_desires if not d.get("satisfied")])
+        def _update(all_desires):
+            changed = False
+            for d in all_desires:
+                if d.get("satisfied"):
+                    continue
+                # 仅检查属于当前 umo 或通用（无 target_umo）的欲望
+                d_umo = d.get("target_umo", "")
+                if d_umo and umo and d_umo != umo:
+                    continue
+                content = d.get("content", "")
+                keywords = re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}', content)
+                if any(kw in text for kw in keywords):
+                    d["satisfied"] = True
+                    changed = True
+                    if self.config.get("log_level") == "debug":
+                        logger.debug(f"[Anima] 欲望已满足(关键词): {content[:50]}")
+            if changed:
+                return [d for d in all_desires if not d.get("satisfied")]
+            return all_desires
+        self._atomic_update_desires(_update)
 
     async def _check_desire_satisfaction_semantic(self, text: str, event=None):
         """语义匹配版本的欲望满足检查（需要向量记忆可用）。
@@ -432,7 +489,7 @@ class DesireMixin:
                         if self.config.get("log_level") == "debug":
                             logger.debug(f"[Anima] 提取的欲望与队列中现有欲望相似，不入队: {result[:50]}")
                         return
-                    desires.append({
+                    new_desire = {
                         "id": f"desire_{int(time.time())}",
                         "content": result,
                         "source": "self",
@@ -442,16 +499,24 @@ class DesireMixin:
                         "target_user": "",
                         "target_umo": "",  # v0.8.0: 独白/反刍产生的欲望是通用的（每个会话都可见）
                         "satisfied": False,
-                    })
+                    }
 
                     # Phase 6+ B: 高强度欲望自动触发自主研究（角色主动想学东西）
-                    if desires[-1]["intensity"] >= 0.75:
+                    if new_desire["intensity"] >= 0.75:
                         asyncio.create_task(self._initiate_self_directed_research(
                             "高强度欲望驱动",
                             f"我有一个强烈的欲望：{result[:80]}。我可能需要发展新能力来实现它。",
                             force=False
                         ))
-                    self._write_desires(desires)
+                    def _append_if_still_valid(current_desires):
+                        max_queue_now = self.config.get("desire_max_queue", 5)
+                        if len(current_desires) >= max_queue_now:
+                            return current_desires
+                        if self._is_desire_similar_to_existing(result, current_desires):
+                            return current_desires
+                        current_desires.append(new_desire)
+                        return current_desires
+                    self._atomic_update_desires(_append_if_still_valid)
                     if hasattr(self, "_stat_bump"):
                         self._stat_bump("desire.created.inward")
                     logger.debug(f"[Anima] 反刍产生欲望: {result[:50]}")

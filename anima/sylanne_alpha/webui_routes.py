@@ -410,6 +410,35 @@ class WebUIRoutes:
             "life_simulation": self._p._life_simulator.to_dict(),
         }
 
+    async def runtime_events_handler(self) -> dict[str, Any]:
+        """Return structured runtime events for the Cognitive Observatory."""
+        from quart import request as quart_request
+
+        try:
+            limit = int(quart_request.args.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        session_key = str(quart_request.args.get("session") or "").strip()
+        event_type = str(quart_request.args.get("type") or "").strip()
+        severity = str(quart_request.args.get("severity") or "").strip()
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {
+                "success": True,
+                "events": [],
+                "stats": {"total": 0, "by_type": {}, "by_severity": {}},
+            }
+        return {
+            "success": True,
+            "events": bus.recent(
+                limit=limit,
+                session_key=session_key,
+                event_type=event_type,
+                severity=severity,
+            ),
+            "stats": bus.stats(),
+        }
+
     # ------------------------------------------------------------------
     # Settings handlers
     # ------------------------------------------------------------------

@@ -1605,6 +1605,38 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_runtime_events(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            try:
+                limit = int(request.query.get("limit", 100))
+            except (TypeError, ValueError):
+                limit = 100
+            session_key = str(request.query.get("session", "") or "").strip()
+            event_type = str(request.query.get("type", "") or "").strip()
+            severity = str(request.query.get("severity", "") or "").strip()
+            bus = getattr(current_plugin, "_runtime_event_bus", None)
+            if bus is None:
+                return web.json_response({
+                    "success": True,
+                    "events": [],
+                    "stats": {"total": 0, "by_type": {}, "by_severity": {}},
+                })
+            return web.json_response({
+                "success": True,
+                "events": bus.recent(
+                    limit=limit,
+                    session_key=session_key,
+                    event_type=event_type,
+                    severity=severity,
+                ),
+                "stats": bus.stats(),
+            })
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def handle_export(request: web.Request) -> web.Response:
         current_plugin = _plugin(plugin)
         if current_plugin is None:
@@ -1666,6 +1698,7 @@ if (window.self !== window.top) {
     app.router.add_get("/api/stats_history", handle_stats_history)
     app.router.add_get("/api/capabilities", handle_capabilities)
     app.router.add_get("/api/events", handle_events)
+    app.router.add_get("/api/runtime_events", handle_runtime_events)
     app.router.add_get("/api/export", handle_export)
     app.router.add_get("/api/config", handle_config)
     app.router.add_get("/health", handle_health)

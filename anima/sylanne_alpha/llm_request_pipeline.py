@@ -71,7 +71,13 @@ def _compute_injection_budget(gap_seconds: float, cfg: dict) -> int:
     """根据对话间隔计算本轮总注入预算（字符数）。"""
     override = cfg.get("state_injection_max_added_chars")
     if override is not None:
-        return int(override)
+        try:
+            return max(0, min(20000, int(override)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Sylanne invalid state_injection_max_added_chars=%r; using dynamic budget",
+                override,
+            )
     for threshold, budget in _BUDGET_BY_GAP:
         if threshold is None or gap_seconds < threshold:
             return budget

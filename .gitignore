@@ -39,3 +39,10 @@ diagnose_*.py
 .release_notes_*.md
 .commit_msg.txt
 .tag_msg.txt
+
+# Local Claude Code / npm dependencies
+node_modules/
+package.json
+package-lock.json
+claude.cmd
+

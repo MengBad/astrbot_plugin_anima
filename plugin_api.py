@@ -51,6 +51,7 @@ class PluginAPI:
                 ("/api/settings", "settings_get_handler", ["GET"]),
                 ("/api/settings", "settings_post_handler", ["POST"]),
                 ("/api/computation_logs", "computation_logs_handler", ["GET"]),
+                ("/api/runtime_events", "runtime_events_handler", ["GET"]),
                 ("/api/memory_pools", "memory_pools_handler", ["GET"]),
                 ("/api/memory_meltdown", "memory_meltdown_handler", ["POST"]),
                 ("/api/meltdown_nonce", "meltdown_nonce_handler", ["GET"]),
@@ -96,6 +97,11 @@ class PluginAPI:
 
     def _get_recent_events(self, limit: int = 20) -> list[dict]:
         try:
+            bus = getattr(self.plugin, "_runtime_event_bus", None)
+            if bus is not None and hasattr(bus, "recent"):
+                events = bus.recent(limit=limit)
+                if events:
+                    return events
             logs = self.plugin._read_evolution_log(limit * 2)  # 多读一些过滤
             keywords = ["autonomous", "capability", "self_directed", "dynamic", "pruning", "gap", "mutation"]
             filtered = []

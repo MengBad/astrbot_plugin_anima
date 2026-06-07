@@ -193,7 +193,7 @@
     /* Split Screen Layout Grid */
     .split-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
       gap: 12px;
       padding: 12px;
       height: 100%;
@@ -326,6 +326,35 @@
       border-radius: 8px;
     }
 
+    .timeline-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .timeline-chip {
+      font-size: 11px;
+      color: var(--text-muted);
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      padding: 2px 6px;
+      border-radius: 999px;
+    }
+
+    .timeline-chip.warning { color:#fbbf24; border-color:rgba(251,191,36,0.28); background:rgba(251,191,36,0.08); }
+    .timeline-chip.error { color:#f87171; border-color:rgba(248,113,113,0.28); background:rgba(248,113,113,0.08); }
+    .timeline-chip.debug { color:#60a5fa; border-color:rgba(96,165,250,0.28); background:rgba(96,165,250,0.08); }
+
+    .timeline-payload {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      color: #cbd5e1;
+      white-space: pre-wrap;
+      word-break: break-word;
+      opacity: 0.9;
+    }
+
     @keyframes pulse {
       0% { transform: scale(0.95); opacity: 0.8; }
       50% { transform: scale(1.05); opacity: 1; }
@@ -365,6 +394,7 @@
       <button id="tab-sylanne" class="nav-tab" onclick="switchView('sylanne')">🧠 Sylanne 意识</button>
       <button id="tab-dashboard" class="nav-tab" onclick="switchView('dashboard')">📊 运行仪表盘</button>
       <button id="tab-captree" class="nav-tab" onclick="switchView('captree')">🌳 能力树</button>
+      <button id="tab-cognitive" class="nav-tab" onclick="switchView('cognitive')">🧭 认知时间线</button>
       <button id="tab-mutation" class="nav-tab" onclick="switchView('mutation')">🧬 核心突变演化</button>
     </div>
 
@@ -420,7 +450,30 @@
         </div>
       </div>
 
-      <!-- Panel 4: Mutation History Timeline -->
+      <!-- Panel 4: Cognitive Runtime Timeline -->
+      <div class="split-panel" id="panel-cognitive">
+        <div class="panel-header">
+          <span class="dot" style="background:#fbbf24;box-shadow:0 0 6px #fbbf24;"></span>
+          <span>🧭 Cognitive Timeline</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('cognitive')">🗖</button>
+        </div>
+        <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+            <p style="font-size:12px; color:var(--text-muted);">
+              这里展示运行时认知事件：状态写入、欲望变化、response observation、后台任务与生命周期。
+            </p>
+            <button onclick="loadCognitiveTimeline()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">
+              刷新时间线
+            </button>
+          </div>
+          <div id="cognitive-stats" style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"></div>
+          <div id="cognitive-timeline-container" class="timeline">
+            <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载认知时间线中...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 5: Mutation History Timeline -->
       <div class="split-panel" id="panel-mutation">
         <div class="panel-header">
           <span class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa;"></span>
@@ -473,10 +526,12 @@
         .then(data => {
           csrfToken = data.csrf_token || '';
           loadMutationHistory();
+          loadCognitiveTimeline();
         })
         .catch(e => {
           console.error("加载 CSRF Token 失败", e);
           loadMutationHistory();
+          loadCognitiveTimeline();
         });
     });
 
@@ -487,6 +542,7 @@
         sylanne: document.getElementById('panel-sylanne'),
         dashboard: document.getElementById('panel-dashboard'),
         captree: document.getElementById('panel-captree'),
+        cognitive: document.getElementById('panel-cognitive'),
         mutation: document.getElementById('panel-mutation')
       };
       
@@ -499,7 +555,7 @@
       Object.values(panels).forEach(p => p.classList.remove('collapsed'));
 
       if (target === 'split') {
-        grid.style.gridTemplateColumns = '1fr 1fr 1fr 1fr';
+        grid.style.gridTemplateColumns = '1fr 1fr 1fr 1fr 1fr';
       } else {
         grid.style.gridTemplateColumns = '1fr';
         Object.keys(panels).forEach(key => {
@@ -515,6 +571,69 @@
       const otherKey = panelKey === 'sylanne' ? 'dashboard' : 'sylanne';
       const isMaximized = document.getElementById(`panel-${otherKey}`).classList.contains('collapsed');
       switchView(isMaximized ? 'split' : panelKey);
+    }
+
+    function summarizePayload(payload) {
+      if (!payload || typeof payload !== 'object') return '';
+      const entries = Object.entries(payload).slice(0, 6);
+      if (!entries.length) return '';
+      return entries.map(([k, v]) => {
+        let value = v;
+        if (value && typeof value === 'object') {
+          value = JSON.stringify(value);
+        }
+        return `${k}: ${String(value).slice(0, 160)}`;
+      }).join('\n');
+    }
+
+    function formatEventTime(ts) {
+      if (!ts) return '未知时间';
+      return new Date(Number(ts) * 1000).toLocaleString('zh-CN');
+    }
+
+    function renderRuntimeEvent(item) {
+      const severity = String(item.severity || 'info').toLowerCase();
+      const payload = summarizePayload(item.payload);
+      const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4) : [];
+      return `
+        <div class="timeline-item">
+          <div class="timeline-time">${escHtml(formatEventTime(item.ts))}</div>
+          <span class="timeline-type">${escHtml(item.type || 'runtime.event')}</span>
+          <div class="timeline-desc">
+            <div class="timeline-meta">
+              <span class="timeline-chip ${escHtml(severity)}">${escHtml(severity)}</span>
+              ${item.session_key ? `<span class="timeline-chip">session: ${escHtml(item.session_key)}</span>` : ''}
+              ${item.source ? `<span class="timeline-chip">source: ${escHtml(item.source)}</span>` : ''}
+              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
+            </div>
+            ${payload ? `<div class="timeline-payload">${escHtml(payload)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">无额外 payload</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadCognitiveTimeline() {
+      const container = document.getElementById('cognitive-timeline-container');
+      const statsEl = document.getElementById('cognitive-stats');
+      fetch(`/api/runtime_events?limit=80&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !Array.isArray(data.events) || data.events.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无运行时认知事件。触发一次对话或刷新插件后会开始记录。</p>';
+            if (statsEl) statsEl.textContent = '事件总数：0';
+            return;
+          }
+          const stats = data.stats || {};
+          const bySeverity = stats.by_severity || {};
+          if (statsEl) {
+            statsEl.textContent = `事件总数：${stats.total || data.events.length} · latest #${stats.last_event_id || '-'} · info ${bySeverity.info || 0} / warning ${bySeverity.warning || 0} / error ${bySeverity.error || 0}`;
+          }
+          container.innerHTML = data.events.map(renderRuntimeEvent).join('');
+        })
+        .catch(e => {
+          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载认知时间线失败，请确认 /api/runtime_events 已注册。</p>';
+          if (statsEl) statsEl.textContent = '';
+        });
     }
 
     // Load mutations history via API
@@ -580,6 +699,7 @@
         setTimeout(() => { iframe.src = src; }, 50);
       });
       loadMutationHistory();
+      loadCognitiveTimeline();
     }
   </script>
 </body>

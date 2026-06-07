@@ -18,7 +18,7 @@ import sys
 # We globally patch JSONEncoder to support Pydantic models (dict() / model_dump())
 # and fallback __dict__ serialization.
 try:
-    _orig_encoder_default = json.JSONEncoder.default
+    _orig_encoder_default = getattr(json.JSONEncoder.default, "_anima_original_default", json.JSONEncoder.default)
 
     def _anima_patched_encoder_default(self, o):
         if hasattr(o, "model_dump") and callable(o.model_dump):
@@ -41,9 +41,24 @@ try:
         except TypeError:
             return str(o)
 
-    json.JSONEncoder.default = _anima_patched_encoder_default
+    if not getattr(json.JSONEncoder.default, "_anima_patched", False):
+        _anima_patched_encoder_default._anima_patched = True
+        _anima_patched_encoder_default._anima_original_default = _orig_encoder_default
+        json.JSONEncoder.default = _anima_patched_encoder_default
 except Exception:
     pass
+
+
+def _restore_json_encoder_patch():
+    """Restore Anima's JSONEncoder monkeypatch when no later patch has replaced it."""
+    try:
+        current_default = json.JSONEncoder.default
+        if getattr(current_default, "_anima_patched", False):
+            original = getattr(current_default, "_anima_original_default", None)
+            if original is not None:
+                json.JSONEncoder.default = original
+    except Exception:
+        pass
 # ========================================================================
 
 
@@ -608,6 +623,7 @@ class AnimaPlugin(
         from sylanne_alpha.bounded_dict import BoundedDict
         from sylanne_alpha.rhythm_learner import RhythmLearner
         from sylanne_alpha.social_field import SocialFieldCollector
+        from sylanne_alpha.observability import RuntimeEventBus
         from collections import deque
 
         self._config = self.config
@@ -628,6 +644,10 @@ class AnimaPlugin(
         self._last_bot_expression_time = BoundedDict(maxsize=200)
         # 计算日志环形缓冲区（供 WebUI 实时显示，限制最大容量以防止内存泄漏）
         self._computation_logs = deque(maxlen=2000)
+        self._runtime_event_bus = RuntimeEventBus(
+            max_events=2000,
+            timeline_path=os.path.join(self.data_dir, "runtime_events.jsonl"),
+        )
         # WebUI 运行时标识（用于探针验证实例一致性）
         self._webui_runtime_id = f"{int(time.time() * 1000)}-{id(self):x}"
         # 节律学习器：学习用户的节奏
@@ -693,6 +713,13 @@ class AnimaPlugin(
             logger.info("[Anima] Plugin Pages 与 Sylanne WebUI 已成功注册至共享端口")
         except Exception as e:
             logger.warning(f"[Anima] Plugin Pages 与 WebUI 注册失败: {e}")
+
+        self._emit_runtime_event(
+            "plugin.initialized",
+            source="main",
+            payload={"sylanne_ready": self._sylanne_ready()},
+            tags=["lifecycle"],
+        )
 
     async def initialize(self):
         """异步初始化钩子。AstrBot 在事件循环就绪后自动调用。
@@ -961,6 +988,45 @@ class AnimaPlugin(
 
     # ==================== Hooks ====================
 
+    def _sylanne_ready(self) -> bool:
+        """Return whether the Sylanne hot path has all core delegates initialized."""
+        required_attrs = (
+            "_hosts",
+            "_session_ctx",
+            "_state_persistence",
+            "_llm_request_pipeline",
+            "_llm_response_pipeline",
+            "_public_api",
+        )
+        return all(hasattr(self, attr) and getattr(self, attr) is not None for attr in required_attrs)
+
+    def _emit_runtime_event(
+        self,
+        event_type: str,
+        *,
+        session_key: str = "",
+        severity: str = "info",
+        source: str = "",
+        payload: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Best-effort observability hook for the Cognitive Observatory."""
+        try:
+            bus = getattr(self, "_runtime_event_bus", None)
+            if bus is None:
+                return None
+            return bus.emit(
+                event_type,
+                session_key=session_key,
+                severity=severity,
+                source=source,
+                payload=payload or {},
+                tags=tags or [],
+            )
+        except Exception as e:
+            logger.debug(f"[Anima] runtime event emit failed: {e}")
+            return None
+
     @filter.on_llm_request()
     async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
         """对话前注入 self_notes 到上下文"""
@@ -971,7 +1037,7 @@ class AnimaPlugin(
             logger.debug("[Anima] Skipping on_llm_request hook for helper/utility LLM call.")
             return
 
-        if hasattr(self, "_hosts"):
+        if self._sylanne_ready():
             # 运行 SylannEngine 请求处理
             await self._on_llm_request_inner(event, req)
 
@@ -1195,7 +1261,7 @@ class AnimaPlugin(
         if not self.config.get("enabled", True):
             return
 
-        if hasattr(self, "_hosts"):
+        if self._sylanne_ready():
             # 运行 SylannEngine 的 llm_response_pipeline
             await self._on_llm_response_inner(event, resp)
             return
@@ -1824,8 +1890,108 @@ class AnimaPlugin(
             except Exception as e:
                 logger.debug(f"[Anima] 真实 LLM 工具调用记录失败: {e}")
 
+    async def _persist_loaded_hosts_on_shutdown(self):
+        """Persist loaded Sylanne hosts once during plugin shutdown."""
+        hosts = list(getattr(self, "_hosts", {}).items())
+        if not hosts or not hasattr(self, "_state_persistence"):
+            return
+        self._emit_runtime_event(
+            "persistence.shutdown_flush_started",
+            source="main.shutdown",
+            payload={"host_count": len(hosts)},
+            tags=["persistence", "shutdown"],
+        )
+
+        async def _persist_one(session_key, host):
+            try:
+                await self._state_persistence.persist_kernel(session_key, host, force=True)
+                buffer = getattr(self, "_conversation_buffers", {}).get(session_key)
+                if buffer is not None:
+                    if hasattr(buffer, "to_dict") and callable(buffer.to_dict):
+                        buffer_data = buffer.to_dict()
+                    elif isinstance(buffer, dict):
+                        buffer_data = buffer
+                    else:
+                        buffer_data = None
+                    if buffer_data is not None:
+                        await self._state_persistence.persist_buffer(session_key, host, buffer_data)
+            except Exception as e:
+                logger.warning(f"[Anima] shutdown 持久化 Sylanne session 失败 {session_key}: {e}")
+
+        await asyncio.gather(
+            *[_persist_one(session_key, host) for session_key, host in hosts],
+            return_exceptions=True,
+        )
+        self._emit_runtime_event(
+            "persistence.shutdown_flush_finished",
+            source="main.shutdown",
+            payload={"host_count": len(hosts)},
+            tags=["persistence", "shutdown"],
+        )
+
+    async def _cancel_managed_background_tasks(self):
+        """Cancel tracked background tasks created by Sylanne hot-path components."""
+        task_candidates = []
+
+        def _collect(value):
+            if value is None:
+                return
+            if isinstance(value, asyncio.Task):
+                task_candidates.append(value)
+                return
+            if isinstance(value, dict):
+                for item in list(value.values()):
+                    _collect(item)
+                return
+            if isinstance(value, (list, set, tuple)):
+                for item in list(value):
+                    _collect(item)
+
+        _collect(getattr(self, "_background_tasks", None))
+        _collect(getattr(self, "_fragment_timers", None))
+        _collect(getattr(self, "_segmented_tasks", None))
+        _collect(getattr(self, "_background_post_checkpoint_tasks", None))
+
+        unique_tasks = []
+        seen = set()
+        for task in task_candidates:
+            if id(task) in seen:
+                continue
+            seen.add(id(task))
+            unique_tasks.append(task)
+
+        for task in unique_tasks:
+            if not task.done():
+                task.cancel()
+
+        if unique_tasks:
+            results = await asyncio.gather(*unique_tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                    logger.debug(f"[Anima] 后台任务取消收尾异常: {result}")
+
+        for attr in ("_background_tasks", "_fragment_timers", "_segmented_tasks", "_background_post_checkpoint_tasks"):
+            container = getattr(self, attr, None)
+            if hasattr(container, "clear"):
+                try:
+                    container.clear()
+                except Exception:
+                    pass
+        self._emit_runtime_event(
+            "background_tasks.cancelled",
+            source="main.shutdown",
+            payload={"task_count": len(unique_tasks)},
+            tags=["tasks", "shutdown"],
+        )
+
     async def terminate(self):
         """插件卸载时清理资源"""
+        self._emit_runtime_event(
+            "plugin.terminating",
+            source="main",
+            payload={"loaded_hosts": len(getattr(self, "_hosts", {}) or {})},
+            tags=["lifecycle", "shutdown"],
+        )
         # 取消 SQLite 记忆批处理写入后台任务，并等待余波写入完毕
         try:
             if hasattr(self, "_batch_write_task") and self._batch_write_task:
@@ -1841,9 +2007,22 @@ class AnimaPlugin(
         try:
             if hasattr(self, "_editor_poll_task") and self._editor_poll_task:
                 self._editor_poll_task.cancel()
+                try:
+                    await self._editor_poll_task
+                except asyncio.CancelledError:
+                    pass
         except Exception as e:
             logger.debug(f"[Anima] 取消编辑器轮询 task 失败: {e}")
 
+        try:
+            await self._persist_loaded_hosts_on_shutdown()
+        except Exception as e:
+            logger.debug(f"[Anima] shutdown 持久化 Sylanne host 异常: {e}")
+
+        try:
+            await self._cancel_managed_background_tasks()
+        except Exception as e:
+            logger.debug(f"[Anima] 取消 Sylanne 后台任务异常: {e}")
 
         # Stop SylannEngine WebUI server
         try:
@@ -1862,6 +2041,13 @@ class AnimaPlugin(
                         break
             except Exception as e:
                 logger.debug(f"[Anima] 移除反刍定时任务异常: {e}")
+        _restore_json_encoder_patch()
+        self._emit_runtime_event(
+            "plugin.terminated",
+            source="main",
+            payload={"json_encoder_restored": True},
+            tags=["lifecycle", "shutdown"],
+        )
         logger.info("[Anima] 插件正在卸载...")
 
     # ==================== SylannEngine Delegates ====================
@@ -1971,16 +2157,26 @@ class AnimaPlugin(
         return self._llm_response_pipeline._state_injection_budget_for_request(session_key, request, model_hint)
 
     def _has_conversation_manager(self) -> bool:
-        return False
+        mgr = getattr(self, "_state_persistence", None)
+        if mgr is None:
+            return False
+        return bool(mgr.has_conversation_manager())
 
     def _has_persona_manager(self) -> bool:
-        return False
+        mgr = getattr(self, "_state_persistence", None)
+        if mgr is None:
+            return False
+        return bool(mgr.has_persona_manager())
 
     async def _sync_message_to_conv_mgr(self, session_key: str, role: str, text: str) -> None:
-        pass
+        mgr = getattr(self, "_state_persistence", None)
+        if mgr is not None:
+            await mgr.sync_message_to_conv_mgr(session_key, role, text)
 
     def _sync_personality_to_persona_mgr(self, session_key: str) -> None:
-        pass
+        mgr = getattr(self, "_state_persistence", None)
+        if mgr is not None:
+            mgr.sync_personality_to_persona_mgr(session_key)
 
     async def observe_response(self, session_key: str, *, text: str = "", confidence: float = 0.0, flags: list[str] | None = None, now: float = 0.0) -> dict[str, Any]:
         return await self._public_api.observe_response(session_key, text=text, confidence=confidence, flags=flags, now=now)

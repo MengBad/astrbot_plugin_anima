@@ -328,8 +328,9 @@ class StorageMixin:
         if not os.path.exists(self.self_notes_path):
             return ""
         try:
-            with open(self.self_notes_path, "r", encoding="utf-8") as f:
-                return f.read()
+            with self._io_lock:
+                with open(self.self_notes_path, "r", encoding="utf-8") as f:
+                    return f.read()
         except OSError as e:
             logger.warning(f"[Anima] 读取 self_notes 失败: {e}")
             return ""
@@ -338,8 +339,7 @@ class StorageMixin:
         """写入 self_notes.md（持锁）"""
         try:
             with self._io_lock:
-                with open(self.self_notes_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+                self._atomic_write_text_locked(self.self_notes_path, content)
         except OSError as e:
             logger.warning(f"[Anima] 写入 self_notes 失败: {e}")
 
@@ -347,8 +347,14 @@ class StorageMixin:
         """追加内容到 self_notes.md（持锁）"""
         try:
             with self._io_lock:
-                with open(self.self_notes_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n\n---\n{entry}")
+                existing = ""
+                if os.path.exists(self.self_notes_path):
+                    with open(self.self_notes_path, "r", encoding="utf-8") as f:
+                        existing = f.read()
+                self._atomic_write_text_locked(
+                    self.self_notes_path,
+                    existing + f"\n\n---\n{entry}",
+                )
         except OSError as e:
             logger.warning(f"[Anima] 追加 self_notes 失败: {e}")
 

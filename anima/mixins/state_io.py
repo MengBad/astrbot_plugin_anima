@@ -163,17 +163,82 @@ class StateIOMixin:
         if not os.path.exists(path):
             return default
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
+            with self._io_lock:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except json.JSONDecodeError as e:
+            logger.warning(f"[Anima] JSON 文件损坏，已跳过读取 {path}: {e}")
             return default
+        except OSError:
+            return default
+
+    def _atomic_write_text_locked(self, path: str, content: str):
+        """在已持有 _io_lock 时原子写入文本文件。"""
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000000)}"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+
+    def _atomic_write_json_locked(self, path: str, data):
+        """在已持有 _io_lock 时原子写入 JSON 文件。"""
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        tmp_path = f"{path}.tmp.{os.getpid()}.{int(time.time() * 1000000)}"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+
+    def _backup_corrupt_file_locked(self, path: str, reason: str = "corrupt"):
+        """在已持有 _io_lock 时把损坏文件移到旁路备份，避免被空状态覆盖。"""
+        if not os.path.exists(path):
+            return
+        backup_path = f"{path}.{reason}.{datetime.now().strftime('%Y%m%d%H%M%S')}.bak"
+        try:
+            os.replace(path, backup_path)
+            logger.warning(f"[Anima] 已将损坏文件移至备份: {backup_path}")
+            emitter = getattr(self, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "state.corrupt_file_backed_up",
+                    severity="warning",
+                    source="state_io",
+                    payload={
+                        "path": os.path.basename(path),
+                        "backup": os.path.basename(backup_path),
+                        "reason": reason,
+                    },
+                    tags=["state", "recovery"],
+                )
+        except OSError as e:
+            logger.warning(f"[Anima] 备份损坏文件失败 {path}: {e}")
 
     def _write_json(self, path: str, data):
         """安全写入 JSON 文件（持锁，避免并发交错）"""
         try:
             with self._io_lock:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                self._atomic_write_json_locked(path, data)
         except OSError as e:
             logger.warning(f"[Anima] 写入 {path} 失败: {e}")
         except Exception as e:
@@ -254,16 +319,28 @@ class StateIOMixin:
                         state = json.load(f)
                 else:
                     state = {}
-            except (json.JSONDecodeError, OSError):
-                state = {}
+            except json.JSONDecodeError as e:
+                logger.warning(f"[Anima] state 文件损坏，本次状态更新已跳过以避免数据丢失: {e}")
+                self._backup_corrupt_file_locked(self._state_path, "corrupt-json")
+                return
+            except OSError as e:
+                logger.warning(f"[Anima] 读取 state 失败，本次状态更新已跳过: {e}")
+                return
             try:
                 updater(state)
             except Exception as e:
                 logger.warning(f"[Anima] state updater 回调失败: {e}")
                 return
             try:
-                with open(self._state_path, "w", encoding="utf-8") as f:
-                    json.dump(state, f, ensure_ascii=False, indent=2)
+                self._atomic_write_json_locked(self._state_path, state)
+                emitter = getattr(self, "_emit_runtime_event", None)
+                if callable(emitter):
+                    emitter(
+                        "state.atomic_update_committed",
+                        source="state_io",
+                        payload={"path": os.path.basename(self._state_path)},
+                        tags=["state", "persistence"],
+                    )
             except OSError as e:
                 logger.warning(f"[Anima] 写入 state 失败: {e}")
 

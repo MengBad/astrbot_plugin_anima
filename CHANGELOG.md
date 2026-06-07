@@ -1,3 +1,44 @@
+## v1.2.4 - 发布前稳定性加固：原子持久化、生命周期收束与 Sylanne 记忆一致性
+
+本版基于 Phase 2 深度 Bug / Risk 扫描，优先修复会导致数据损坏、热重载泄漏、双引擎边界误判和 Sylanne 记忆观察不一致的问题。整体策略保持向后兼容，不删除旧 Anima Mixin 路径，不改变高风险 autonomy 核心逻辑。
+
+### Critical / High 修复
+
+- **修复 `anima_state.json` 损坏后被空状态覆盖的风险**：`_atomic_update_state` 在遇到 JSONDecodeError 时不再写回 `{}`，而是跳过本次更新并将损坏文件移动到 `.bak` 备份，避免临时半写入演变为永久性全量状态丢失。
+- **引入通用原子写入工具**：JSON 和文本写入改为临时文件写入、flush/fsync 后 `os.replace`，覆盖 `anima_state.json`、会话 JSON、`self_notes.md` 等高频持久化路径。
+- **收紧 `desires.json` 读改写事务边界**：新增 `_atomic_update_desires()`，将欲望衰减、关键词满足、反刍欲望追加等路径迁移到单锁读改写，降低后台任务并发时的丢更新风险。
+- **加固 `persona_core` 突变落盘安全**：`danger_core_mutation` 的备份与写入现在在同一把 IO 锁内完成，并优先使用原子文本写入工具；不改变核心自主突变逻辑。
+- **修复 Sylanne response observation 分支遗漏**：realtime/intercept 关闭、首句已发送、无分段 parts 等路径现在都会调度后台 `observe_response`，保证 bot 回复进入 Sylanne 记忆缓冲。
+- **增强插件卸载收尾**：terminate 现在会等待 editor poll 取消、强制持久化已加载 Sylanne hosts/buffers、统一取消 `_background_tasks`、fragment timers、segmented tasks 和 background post checkpoint tasks。
+
+### 兼容性与集成修复
+
+- **全局 JSONEncoder monkeypatch 改为幂等可恢复**：避免插件热重载时多层包裹 `json.JSONEncoder.default`，并在 terminate 时仅当当前 patch 仍由 Anima 持有时恢复原始 encoder。
+- **双引擎切换改用显式 Sylanne ready 检查**：`on_llm_request` / `on_llm_response` 不再仅凭 `_hosts` 属性存在进入 Sylanne 热路径，而是检查核心 delegate 是否完整初始化。
+- **恢复 AstrBot ConversationManager / PersonaManager 桥接委托**：主类不再硬编码返回 False，而是委托 `StatePersistence` 的现有集成方法；未配置官方 manager 时仍自然降级。
+- **Sylanne dirty tracker 增加 session 维度**：保留旧模块级 API，同时支持按 session 消费 dirty 标记，降低多 session 持久化互相清空 dirty set 的风险。
+- **扩展 session 删除清理**：删除 session 时会取消对应分段/碎片/checkpoint 任务，并补充多个子系统 KV key 的清理范围。
+
+### Cognitive Observatory 基础设施
+
+- **新增 Runtime Event Bus + JSONL Cognitive Timeline**：引入 `sylanne_alpha.observability.RuntimeEventBus`，以结构化环形缓冲记录运行时认知事件，并追加写入 `runtime_events.jsonl`，为 Cognitive Timeline / State Inspector / Desire Dashboard 提供统一事件源。
+- **接入关键观测事件**：状态损坏备份、state 原子提交、欲望队列变化、response observation、shutdown flush、后台任务取消、插件生命周期均会发出元数据级事件；事件不记录 self_notes、persona_core 或完整回复正文。
+- **新增 WebUI 事件 API**：共享端口新增 `/astrbot_plugin_anima/api/runtime_events`，支持按 limit / session / type / severity 查询；旧 `/events` API 优先返回 Runtime Event Bus 数据并保留 evolution_log 回退。
+- **新增 Portal 认知时间线面板**：Anima Portal 增加 `Cognitive Timeline` 分屏面板，展示 runtime events 的时间、类型、session、severity、source、tags 与安全 payload 摘要；独立 WebUI 同步注册 `/api/runtime_events`。
+
+### Token / Prompt 健壮性
+
+- **修复注入预算配置异常导致崩溃**：`state_injection_max_added_chars` 和 `state_injection_max_parts` 增加类型转换容错与上下限 clamp，错误配置会回退到安全默认值。
+
+### 测试
+
+- **新增 Phase 2 稳定性回归测试**：`tests/test_phase2_stability_fixes.py` 覆盖损坏 state 备份、原子 state 写入、欲望事务更新、错误预算配置、realtime 关闭时 response observation、cron response 不观察。
+- **新增 Runtime Observability 回归测试**：`tests/test_runtime_observability.py` 覆盖事件记录、过滤、payload 截断、JSONL timeline 持久化/重载、response observation 事件发射。
+- **新增 Cognitive Timeline WebUI 契约测试**：`tests/test_cognitive_timeline_webui.py` 确认 Portal 面板、前端 API 调用、共享路由和独立 WebUI 路由均存在。
+- **全量测试通过**：`359/359` 测试全绿。
+
+---
+
 ## v1.2.3 - 身份危机与自创生边界数学锁定修复
 
 本版修复了在启用 Sylanne 时身份稳定度始终卡在 1.00、无法正确触发身份危机的数学及逻辑锁定缺陷。

@@ -630,10 +630,14 @@ class DangerMixin:
             # 备份 + 写入
             import shutil
             backup_path = self.persona_core_path + ".bak"
-            if os.path.exists(self.persona_core_path):
-                shutil.copy2(self.persona_core_path, backup_path)
-            with open(self.persona_core_path, "w", encoding="utf-8") as f:
-                f.write(new_core)
+            with self._io_lock:
+                if os.path.exists(self.persona_core_path):
+                    shutil.copy2(self.persona_core_path, backup_path)
+                if hasattr(self, "_atomic_write_text_locked"):
+                    self._atomic_write_text_locked(self.persona_core_path, new_core)
+                else:
+                    with open(self.persona_core_path, "w", encoding="utf-8") as f:
+                        f.write(new_core)
 
             # Phase 5: 永久记录突变
             mutation_desc = f"{mtype} | {raw[:180]}"
