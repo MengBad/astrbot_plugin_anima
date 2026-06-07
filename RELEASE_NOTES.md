@@ -1,4 +1,4 @@
-# Release Notes - v1.2.4 Release Candidate
+# Release Notes - v1.2.4
 
 ## Summary
 
