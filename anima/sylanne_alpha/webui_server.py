@@ -1447,6 +1447,15 @@ if (window.self !== window.top) {
             html = nav_html + html
         return html
 
+    def _legacy_plugin_pages_dir() -> Path:
+        """Internal assets for legacy dashboard/capability-tree routes.
+
+        Keep these pages outside top-level ``pages/`` so AstrBot only exposes
+        the unified ``pages/anima`` Plugin Page entry while standalone WebUI
+        and Portal iframes keep backward-compatible URLs.
+        """
+        return plugin_root / "UI" / "plugin_pages"
+
     async def handle_captree_redirect(request: web.Request) -> web.Response:
         token = request.query.get("token", "")
         t = quote(token, safe="")
@@ -1457,7 +1466,7 @@ if (window.self !== window.top) {
             return web.Response(
                 status=401, text="<h1>401 Unauthorized</h1><p>Missing or invalid token.</p>", content_type="text/html"
             )
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         index_path = pages_dir / "capability-tree" / "index.html"
         if not index_path.exists():
             return web.Response(status=404, text="Capability tree index.html not found.")
@@ -1466,14 +1475,14 @@ if (window.self !== window.top) {
         return web.Response(text=html, content_type="text/html", charset="utf-8")
 
     async def handle_captree_asset_js(request: web.Request) -> web.Response:
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         js_path = pages_dir / "capability-tree" / "app.js"
         if not js_path.exists():
             return web.Response(status=404, text="app.js not found")
         return web.Response(text=js_path.read_text(encoding="utf-8"), content_type="application/javascript", charset="utf-8")
 
     async def handle_captree_asset_css(request: web.Request) -> web.Response:
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         css_path = pages_dir / "capability-tree" / "style.css"
         if not css_path.exists():
             return web.Response(status=404, text="style.css not found")
@@ -1489,7 +1498,7 @@ if (window.self !== window.top) {
             return web.Response(
                 status=401, text="<h1>401 Unauthorized</h1><p>Missing or invalid token.</p>", content_type="text/html"
             )
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         index_path = pages_dir / "dashboard" / "index.html"
         if not index_path.exists():
             return web.Response(status=404, text="Dashboard index.html not found.")
@@ -1498,14 +1507,14 @@ if (window.self !== window.top) {
         return web.Response(text=html, content_type="text/html", charset="utf-8")
 
     async def handle_dashboard_asset_js(request: web.Request) -> web.Response:
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         js_path = pages_dir / "dashboard" / "app.js"
         if not js_path.exists():
             return web.Response(status=404, text="app.js not found")
         return web.Response(text=js_path.read_text(encoding="utf-8"), content_type="application/javascript", charset="utf-8")
 
     async def handle_dashboard_asset_css(request: web.Request) -> web.Response:
-        pages_dir = Path(__file__).resolve().parent.parent.parent / "pages"
+        pages_dir = _legacy_plugin_pages_dir()
         css_path = pages_dir / "dashboard" / "style.css"
         if not css_path.exists():
             return web.Response(status=404, text="style.css not found")
@@ -1670,6 +1679,68 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_reasoning_trace(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.reasoning_trace import build_reasoning_trace_snapshot
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 80))
+            except (TypeError, ValueError):
+                limit = 80
+            snapshot = build_reasoning_trace_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "reasoning.trace_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["reasoning", "trace"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_session_replay(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.session_replay import build_session_replay_snapshot
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 80))
+            except (TypeError, ValueError):
+                limit = 80
+            snapshot = build_session_replay_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "session.replay_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["session", "replay"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def handle_state_inspector(request: web.Request) -> web.Response:
         current_plugin = _plugin(plugin)
         if current_plugin is None:
@@ -1722,6 +1793,37 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_memory_recall_replay(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.memory_recall_replay import build_memory_recall_replay_snapshot
+
+            session_key = str(request.query.get("session", "") or "").strip()
+            try:
+                limit = int(request.query.get("limit", 50))
+            except (TypeError, ValueError):
+                limit = 50
+            snapshot = build_memory_recall_replay_snapshot(
+                current_plugin,
+                session_key=session_key,
+                limit=limit,
+            )
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "memory.recall_replay_snapshot",
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["memory", "recall", "replay"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def handle_desire_dashboard(request: web.Request) -> web.Response:
         current_plugin = _plugin(plugin)
         if current_plugin is None:
@@ -1742,6 +1844,31 @@ if (window.self !== window.top) {
                     source="webui_server",
                     payload=snapshot.get("summary", {}),
                     tags=["desire", "dashboard"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_desire_evolution(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.desire_evolution import build_desire_evolution_snapshot
+
+            try:
+                limit = int(request.query.get("limit", 80))
+            except (TypeError, ValueError):
+                limit = 80
+            snapshot = build_desire_evolution_snapshot(current_plugin, limit=limit)
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "desire.evolution_snapshot",
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["desire", "evolution"],
                 )
             return web.json_response({"success": True, "snapshot": snapshot})
         except Exception as e:
@@ -1874,9 +2001,13 @@ if (window.self !== window.top) {
     app.router.add_get("/api/events", handle_events)
     app.router.add_get("/api/runtime_events", handle_runtime_events)
     app.router.add_get("/api/prompt_debug", handle_prompt_debug)
+    app.router.add_get("/api/reasoning_trace", handle_reasoning_trace)
+    app.router.add_get("/api/session_replay", handle_session_replay)
     app.router.add_get("/api/state_inspector", handle_state_inspector)
     app.router.add_get("/api/memory_explorer", handle_memory_explorer)
+    app.router.add_get("/api/memory_recall_replay", handle_memory_recall_replay)
     app.router.add_get("/api/desire_dashboard", handle_desire_dashboard)
+    app.router.add_get("/api/desire_evolution", handle_desire_evolution)
     app.router.add_get("/api/scar_explorer", handle_scar_explorer)
     app.router.add_get("/api/personality_drift", handle_personality_drift)
     app.router.add_get("/api/export", handle_export)

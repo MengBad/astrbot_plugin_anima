@@ -44,11 +44,11 @@ Next step:
 ### Cognitive Observatory UI is still incomplete
 
 The Portal now renders a Cognitive Timeline panel backed by runtime events.
-However, the full Observatory is not complete yet. Runtime Timeline, Prompt Debugger API, State Inspector API/card, Memory Explorer API/card, Desire Dashboard API/card, Scar Explorer API/card, and Personality Drift API/card exist, but the Portal does not yet expose deep drill-down views for desire evolution history, detailed memory recall replay, reasoning trace, or session replay.
+However, the full Observatory is not complete yet. Runtime Timeline, Prompt Debugger API, State Inspector API/card, Memory Explorer API/card, Memory Recall Replay API/card, Desire Dashboard API/card, Desire Evolution API/card, Scar Explorer API/card, Personality Drift API/card, Reasoning Trace API/card, and Session Replay API/card exist, but the Portal still lacks deeper drill-down and compare tools for long-horizon cognitive trends.
 
 Next step:
 
-- add Desire Evolution History, detailed Memory Recall Replay, Reasoning Trace, and Session Replay views incrementally
+- add cross-session trend comparison and StateStore-backed audit views incrementally
 
 ### Some persistence paths remain outside a unified StateStore
 

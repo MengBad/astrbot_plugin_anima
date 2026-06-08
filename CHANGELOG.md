@@ -17,10 +17,24 @@
 - 抹除记忆文本和图谱标签，仅暴露字符统计与 SHA-256 指纹。
 - 注册 `/api/memory_explorer` 接口，并在 Portal 中新增相应卡片。
 
+### Memory Recall Replay
+- Added redacted `anima.memory_recall_replay.v1` snapshots that explain recent memory recall evidence without triggering a new recall.
+- Added `memory.recall_performed` runtime events with query length/fingerprint, gap, recall limit, result count, layer counts, reason counts, and L2 recalled count.
+- Registered `/api/memory_recall_replay` on both the shared AstrBot WebUI layer and the independent Sylanne WebUI server.
+- Added a `Memory Recall Replay` card to Anima Portal's Cognitive Observatory panel.
+- Memory Recall Replay never exposes memory text, query text, prompt bodies, graph labels, or arbitrary runtime-event payload values.
+
 ### 欲望仪表盘 (Desire Dashboard)
 - 新增脱敏的 `anima.desire_dashboard.v1` 欲望队列快照，展示队列健康度、进/出欲望分流、强度分布、作用域标志及指纹。
 - 抹除欲望正文、目标群组与用户 ID，仅保留指纹与统计数据。
 - 注册 `/api/desire_dashboard` 接口，并在 Portal 中新增相应卡片。
+
+### Desire Evolution History
+- Added redacted `anima.desire_evolution_history.v1` snapshots that connect the current desire queue with recent desire lifecycle events.
+- Enhanced `desire.queue_updated` runtime events with redacted queue-diff metadata: active/satisfied counts, source/kind distributions, and added/removed content fingerprints.
+- Registered `/api/desire_evolution` on both the shared AstrBot WebUI layer and the independent Sylanne WebUI server.
+- Added a `Desire Evolution` card to Anima Portal's Cognitive Observatory panel.
+- Desire Evolution never exposes desire text, target UMO, target user identifiers, or arbitrary runtime-event payload values; it only exposes whitelisted counts, buckets, and fingerprints.
 
 ### 创伤浏览器 (Scar Explorer)
 - 新增脱敏的 `anima.scar_explorer.v1` 创伤代数与 legacy 创伤数据快照，展示愈合阶段分布、维度敏感度/密度、溢出熔断状态等。
@@ -32,9 +46,30 @@
 - 抹除 persona_core 内容与突变描述。
 - 注册 `/api/personality_drift` 接口，并在 Portal 中新增相应卡片。
 
+### Reasoning Trace
+- Added redacted `anima.reasoning_trace.v1` snapshots assembled from Runtime Event Bus, Prompt Debugger, response observation, Observatory snapshot events, and tool-use metadata.
+- Added `tool.invocation_started` and `tool.invocation_finished` runtime events. These record tool name, argument keys, argument/result lengths, success signals, and personal-capability flags, but do not store tool argument values or result text.
+- Registered `/api/reasoning_trace` on both the shared AstrBot WebUI layer and the independent Sylanne WebUI server.
+- Added a `Reasoning Trace` card to Anima Portal's Cognitive Observatory panel, including redacted step summaries and recent decision evidence.
+- Hardened Reasoning Trace prompt-debug ingestion so abnormal `request_shape` payloads only expose numeric/boolean request-shape metadata.
+- Fixed the Portal normal-load path so existing Scar Explorer and Personality Drift cards refresh after successful state/CSRF loading, not only after the fallback path.
+
+### Session Replay
+- Added redacted `anima.session_replay.v1` snapshots that merge recent runtime events with conversation-buffer message shapes into a session timeline.
+- Registered `/api/session_replay` on both the shared AstrBot WebUI layer and the independent Sylanne WebUI server.
+- Added a `Session Replay` card to Anima Portal's Cognitive Observatory panel.
+- Session Replay exposes role, timestamp, text length, and SHA-256 fingerprints for buffered messages, but never exposes user text, bot text, prompt bodies, tool argument values, tool results, or memory bodies.
+- Added route and redaction regression tests for Session Replay.
+
+### Unified AstrBot Plugin Page
+- Collapsed AstrBot's auto-scanned Plugin Pages into a single `pages/anima` entry that opens the unified Anima Portal.
+- Moved the legacy `capability-tree` and `dashboard` page assets into `anima/UI/plugin_pages/` so they no longer appear as separate AstrBot Plugin Page entries.
+- Preserved backward-compatible standalone WebUI routes for `/dashboard/` and `/capability-tree/`; Portal iframes continue to load the existing panels from the internal asset directory.
+- Added regression tests to ensure top-level `pages/` exposes only one Plugin Page entry while legacy assets remain available for internal routes.
+
 ### 测试与验证
 - 新增对全部脱敏 API 接口及 UI 卡片的契约测试和回归覆盖，确保安全防护不泄漏任何敏感信息，同时不破坏原有 dirty trackers 的状态。
-- 测试用例全量通过，在 `373/373` 测试中全绿运行。
+- 测试用例全量通过，在 `384/384` 测试中全绿运行。
 
 ---
 

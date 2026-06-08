@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import random
 import re as _re
 import time
@@ -1280,6 +1281,37 @@ class LLMRequestPipeline:
                 results = [
                     r for r in results if r.relevance >= _MEMORY_RELEVANCE_THRESHOLD
                 ]
+            emitter = getattr(p, "_emit_runtime_event", None)
+            if callable(emitter):
+                layer_counts: dict[str, int] = {}
+                reason_counts: dict[str, int] = {}
+                for result in results or []:
+                    layer = str(getattr(result, "layer", "") or "unknown")
+                    reason = str(getattr(result, "recall_reason", "") or "unknown")
+                    layer_counts[layer] = layer_counts.get(layer, 0) + 1
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                query_hint = str(message_text[:100] or "")
+                emitter(
+                    "memory.recall_performed",
+                    session_key=session_key,
+                    severity="debug",
+                    source="llm_request_pipeline",
+                    payload={
+                        "query_chars": len(query_hint),
+                        "query_fingerprint": (
+                            hashlib.sha256(query_hint.encode("utf-8", errors="replace")).hexdigest()[:12]
+                            if query_hint
+                            else ""
+                        ),
+                        "gap_seconds": round(float(gap_seconds), 3),
+                        "recall_limit": recall_limit,
+                        "result_count": len(results or []),
+                        "layer_counts": layer_counts,
+                        "reason_counts": reason_counts,
+                        "l2_recalled_count": len(memory_system.get_recalled_l2_items()),
+                    },
+                    tags=["memory", "recall"],
+                )
             if results:
                 mem_texts = [r.text[:100] for r in results if r.text]
                 if mem_texts:

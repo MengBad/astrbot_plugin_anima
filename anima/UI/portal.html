@@ -550,7 +550,22 @@
             <div id="memory-explorer-summary" class="inspector-grid">
               <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
             </div>
-            <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
+          <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="memory-recall-replay-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#67e8f9;">Memory Recall Replay</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted recall evidence: latest L2 hits, memory slot budget, recall events, and injection decisions.</div>
+              </div>
+              <button onclick="loadMemoryRecallReplay()" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25); color:#67e8f9; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Recall
+              </button>
+            </div>
+            <div id="memory-recall-replay-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="memory-recall-replay-items" style="margin-top:10px;"></div>
           </div>
           <div id="desire-dashboard-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
@@ -565,7 +580,22 @@
             <div id="desire-dashboard-summary" class="inspector-grid">
               <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
             </div>
-            <div id="desire-dashboard-items" style="margin-top:10px;"></div>
+          <div id="desire-dashboard-items" style="margin-top:10px;"></div>
+          </div>
+          <div id="desire-evolution-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#fb7185;">Desire Evolution</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted desire lifecycle history, queue-update evidence, and active/satisfied drift without exposing desire text.</div>
+              </div>
+              <button onclick="loadDesireEvolution()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fb7185; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Evolution
+              </button>
+            </div>
+            <div id="desire-evolution-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="desire-evolution-items" style="margin-top:10px;"></div>
           </div>
           <div id="scar-explorer-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
@@ -596,6 +626,36 @@
               <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
             </div>
             <div id="personality-drift-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="reasoning-trace-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#fcd34d;">Reasoning Trace</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted decision trail from prompt injection, tool use, response observation, and Observatory snapshot events.</div>
+              </div>
+              <button onclick="loadReasoningTrace()" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); color:#fcd34d; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Trace
+              </button>
+            </div>
+            <div id="reasoning-trace-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="reasoning-trace-steps" style="margin-top:10px;"></div>
+          </div>
+          <div id="session-replay-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#93c5fd;">Session Replay</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted timeline of session events and conversation-buffer message shapes for replaying cognitive flow without exposing text.</div>
+              </div>
+              <button onclick="loadSessionReplay()" style="background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); color:#93c5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Replay
+              </button>
+            </div>
+            <div id="session-replay-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="session-replay-items" style="margin-top:10px;"></div>
           </div>
           <div id="cognitive-stats" style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"></div>
           <div id="cognitive-timeline-container" class="timeline">
@@ -660,7 +720,13 @@
           loadCognitiveTimeline();
           loadStateInspector();
           loadMemoryExplorer();
+          loadMemoryRecallReplay();
           loadDesireDashboard();
+          loadDesireEvolution();
+          loadScarExplorer();
+          loadPersonalityDrift();
+          loadReasoningTrace();
+          loadSessionReplay();
         })
         .catch(e => {
           console.error("加载 CSRF Token 失败", e);
@@ -668,9 +734,13 @@
           loadCognitiveTimeline();
           loadStateInspector();
           loadMemoryExplorer();
+          loadMemoryRecallReplay();
           loadDesireDashboard();
+          loadDesireEvolution();
           loadScarExplorer();
           loadPersonalityDrift();
+          loadReasoningTrace();
+          loadSessionReplay();
         });
     });
 
@@ -853,6 +923,61 @@
         });
     }
 
+    function renderMemoryRecallReplaySession(session) {
+      const summary = session.summary || {};
+      const memory = session.memory || {};
+      const counts = memory.counts || {};
+      const hits = Array.isArray(memory.last_recalled_l2) ? memory.last_recalled_l2 : [];
+      const latest = hits[0] || {};
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#cffafe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(memory.tick || 0)} / last hash ${escHtml(latest.text_fingerprint || '-')} / chars ${escHtml(latest.text_chars || 0)}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">recall ${escHtml(summary.recall_events || 0)}</span>
+            <span class="inspector-pill">L2 ${escHtml(counts.recalled_l2 || 0)}</span>
+            <span class="inspector-pill">inject ${escHtml(summary.memory_injections || 0)}</span>
+            <span class="inspector-pill">skip ${escHtml(summary.memory_skips || 0)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadMemoryRecallReplay() {
+      const summaryEl = document.getElementById('memory-recall-replay-summary');
+      const itemsEl = document.getElementById('memory-recall-replay-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(`/api/memory_recall_replay?limit=20&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Recall', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Memory Recall Replay API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Sessions', summary.sessions || 0),
+            renderInspectorMetric('Recall Events', summary.recall_events || 0),
+            renderInspectorMetric('L2 Recalled', summary.recalled_l2 || 0),
+            renderInspectorMetric('Memory Injects', summary.memory_injections || 0),
+            renderInspectorMetric('Redaction', 'hash'),
+            renderInspectorMetric('Mode', 'read-only')
+          ].join('');
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
+          itemsEl.innerHTML = sessions.length
+            ? sessions.map(renderMemoryRecallReplaySession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No memory recall evidence observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Recall', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/memory_recall_replay.</div>';
+        });
+    }
+
     function renderDesireItem(item) {
       return `
         <div class="inspector-session">
@@ -903,6 +1028,64 @@
         .catch(e => {
           summaryEl.innerHTML = renderInspectorMetric('Desires', 'error');
           itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/desire_dashboard.</div>';
+        });
+    }
+
+    function renderDesireEvolutionItem(item) {
+      const evidence = item.evidence || {};
+      const added = Array.isArray(evidence.added_content_fingerprints) ? evidence.added_content_fingerprints.length : 0;
+      const removed = Array.isArray(evidence.removed_content_fingerprints) ? evidence.removed_content_fingerprints.length : 0;
+      const before = evidence.before_count != null ? evidence.before_count : '-';
+      const after = evidence.after_count != null ? evidence.after_count : '-';
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#ffe4e6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.type || 'desire.event')} #${escHtml(item.id || 0)}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">${escHtml(formatEventTime(item.ts))} / ${escHtml(item.source || '-')}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">${escHtml(before)} -> ${escHtml(after)}</span>
+            <span class="inspector-pill">+${escHtml(added)}</span>
+            <span class="inspector-pill">-${escHtml(removed)}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadDesireEvolution() {
+      const summaryEl = document.getElementById('desire-evolution-summary');
+      const itemsEl = document.getElementById('desire-evolution-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(`/api/desire_evolution?limit=20&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Evolution', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Desire Evolution API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const byKind = snap.by_kind || {};
+          const counts = snap.event_counts || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Active Now', summary.active_current || 0),
+            renderInspectorMetric('Satisfied', summary.satisfied_current || 0),
+            renderInspectorMetric('Scoped', summary.scoped_to_umo || 0),
+            renderInspectorMetric('Events', summary.timeline_events || 0),
+            renderInspectorMetric('Queue Updates', summary.queue_update_events || 0),
+            renderInspectorMetric('Outward', byKind.outward || 0),
+            renderInspectorMetric('Inward', byKind.inward || 0),
+            renderInspectorMetric('Snapshots', counts['desire.dashboard_snapshot'] || 0)
+          ].join('');
+          const timeline = Array.isArray(snap.timeline) ? snap.timeline.slice(0, 8) : [];
+          itemsEl.innerHTML = timeline.length
+            ? timeline.map(renderDesireEvolutionItem).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No desire evolution events observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Evolution', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/desire_evolution.</div>';
         });
     }
 
@@ -1009,6 +1192,136 @@
         .catch(e => {
           summaryEl.innerHTML = renderInspectorMetric('Drift', 'error');
           sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/personality_drift.</div>';
+        });
+    }
+
+    function renderReasoningTraceStep(step) {
+      const evidence = step.evidence && typeof step.evidence === 'object' ? step.evidence : {};
+      const evidenceText = summarizePayload(evidence);
+      const tags = Array.isArray(step.tags) ? step.tags.slice(0, 4) : [];
+      return `
+        <div class="timeline-item">
+          <div class="timeline-time">${escHtml(formatEventTime(step.timestamp))}</div>
+          <span class="timeline-type">${escHtml(step.decision || step.type || 'reasoning.step')}</span>
+          <div class="timeline-desc">
+            <div class="timeline-meta">
+              <span class="timeline-chip">${escHtml(step.type || 'event')}</span>
+              ${step.severity ? `<span class="timeline-chip ${escHtml(String(step.severity).toLowerCase())}">${escHtml(step.severity)}</span>` : ''}
+              ${step.source ? `<span class="timeline-chip">source: ${escHtml(step.source)}</span>` : ''}
+              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
+            </div>
+            ${evidenceText ? `<div class="timeline-payload">${escHtml(evidenceText)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">No evidence metadata.</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadReasoningTrace() {
+      const summaryEl = document.getElementById('reasoning-trace-summary');
+      const stepsEl = document.getElementById('reasoning-trace-steps');
+      if (!summaryEl || !stepsEl) return;
+      fetch(`/api/reasoning_trace?limit=80&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Trace', 'offline');
+            stepsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Reasoning Trace API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const byType = summary.by_type || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Steps', summary.steps || 0),
+            renderInspectorMetric('Source Events', summary.source_events || 0),
+            renderInspectorMetric('Prompt Snapshots', summary.prompt_debug_snapshots || 0),
+            renderInspectorMetric('Tools Started', byType['tool.invocation_started'] || 0),
+            renderInspectorMetric('Tools Finished', byType['tool.invocation_finished'] || 0),
+            renderInspectorMetric('Responses', byType['response.observed'] || 0),
+            renderInspectorMetric('Redaction', snap.redaction ? 'on' : 'unknown')
+          ].join('');
+          const steps = Array.isArray(snap.steps) ? snap.steps.slice(-10).reverse() : [];
+          stepsEl.innerHTML = steps.length
+            ? steps.map(renderReasoningTraceStep).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No reasoning events observed yet. Tool use, prompt injection, and response observation will appear here as redacted metadata.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Trace', 'error');
+          stepsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/reasoning_trace.</div>';
+        });
+    }
+
+    function renderSessionReplayItem(item) {
+      const evidence = item.evidence && typeof item.evidence === 'object' ? item.evidence : {};
+      const evidenceText = summarizePayload(evidence);
+      const kind = item.kind || 'replay.item';
+      const label = item.action || item.role || item.type || kind;
+      const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4) : [];
+      return `
+        <div class="timeline-item">
+          <div class="timeline-time">${escHtml(formatEventTime(item.timestamp))}</div>
+          <span class="timeline-type">${escHtml(label)}</span>
+          <div class="timeline-desc">
+            <div class="timeline-meta">
+              <span class="timeline-chip">${escHtml(kind)}</span>
+              ${item.type ? `<span class="timeline-chip">${escHtml(item.type)}</span>` : ''}
+              ${item.role ? `<span class="timeline-chip">role: ${escHtml(item.role)}</span>` : ''}
+              ${item.text_chars != null ? `<span class="timeline-chip">chars: ${escHtml(item.text_chars)}</span>` : ''}
+              ${item.text_fingerprint ? `<span class="timeline-chip">fp: ${escHtml(item.text_fingerprint)}</span>` : ''}
+              ${item.source ? `<span class="timeline-chip">source: ${escHtml(item.source)}</span>` : ''}
+              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
+            </div>
+            ${evidenceText ? `<div class="timeline-payload">${escHtml(evidenceText)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">Redacted metadata only.</span>'}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadSessionReplay() {
+      const summaryEl = document.getElementById('session-replay-summary');
+      const itemsEl = document.getElementById('session-replay-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(`/api/session_replay?limit=80&token=${encodeURIComponent(token)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Replay', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Session Replay API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const sessions = Array.isArray(snap.sessions) ? snap.sessions : [];
+          const first = sessions[0] || {};
+          const firstSummary = first.summary || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Sessions', summary.sessions || 0),
+            renderInspectorMetric('Events', summary.runtime_events || 0),
+            renderInspectorMetric('Buffer Msgs', summary.buffer_messages || 0),
+            renderInspectorMetric('Items', firstSummary.timeline_items || 0),
+            renderInspectorMetric('Turns', firstSummary.buffer_turn_count || 0),
+            renderInspectorMetric('Redaction', snap.redaction ? 'on' : 'unknown')
+          ].join('');
+          if (!sessions.length) {
+            itemsEl.innerHTML = '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No session replay data observed yet.</div>';
+            return;
+          }
+          const cards = sessions.slice(0, 3).map(session => {
+            const timeline = Array.isArray(session.timeline) ? session.timeline.slice(-8).reverse() : [];
+            return `
+              <div style="margin-top:12px;">
+                <div style="font-size:12px; color:#bfdbfe; font-weight:700; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  ${escHtml(session.session_key || 'unknown')}
+                </div>
+                ${timeline.length ? timeline.map(renderSessionReplayItem).join('') : '<div style="font-size:12px; color:var(--text-muted);">No recent replay items for this session.</div>'}
+              </div>
+            `;
+          });
+          itemsEl.innerHTML = cards.join('');
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Replay', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/session_replay.</div>';
         });
     }
 
@@ -1123,7 +1436,13 @@
       loadCognitiveTimeline();
       loadStateInspector();
       loadMemoryExplorer();
+      loadMemoryRecallReplay();
       loadDesireDashboard();
+      loadDesireEvolution();
+      loadScarExplorer();
+      loadPersonalityDrift();
+      loadReasoningTrace();
+      loadSessionReplay();
     }
   </script>
 </body>

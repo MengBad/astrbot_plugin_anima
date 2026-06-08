@@ -1778,6 +1778,25 @@ class AnimaPlugin(
         AstrBot 的 on_using_llm_tool 钩子签名为 (event, tool, tool_args)。
         """
         try:
+            tool_name = getattr(tool, "name", str(tool))
+            args = tool_args if isinstance(tool_args, dict) else {}
+            self._emit_runtime_event(
+                "tool.invocation_started",
+                session_key=self._session_key(event),
+                severity="debug",
+                source="main.tool_hook",
+                payload={
+                    "tool_name": str(tool_name)[:120],
+                    "arg_keys": sorted(str(key)[:80] for key in args.keys())[:20],
+                    "arg_chars": len(str(args)),
+                    "is_personal_capability": (
+                        "personal_capability" in str(tool_name)
+                        or "use_my_personal" in str(tool_name)
+                        or str(tool_name).startswith("my_")
+                    ),
+                },
+                tags=["tool", "reasoning"],
+            )
             if "personal_capability" in getattr(tool, 'name', '') or "capability" in str(tool_args):
                 logger.debug(f"[Anima Autonomy] 角色即将使用自己的个人能力: {tool_args}")
         except Exception as e:
@@ -1791,6 +1810,36 @@ class AnimaPlugin(
         """
         tool_name = getattr(tool, 'name', str(tool))
         is_personal_cap = "personal_capability" in tool_name or "use_my_personal" in tool_name or tool_name.startswith("my_")
+        try:
+            result_str_for_trace = str(tool_result) if tool_result is not None else ""
+            result_lower = result_str_for_trace.lower()
+            error_signals_for_trace = (
+                "失败", "error", "exception", "traceback", "错误",
+                "forbidden", "denied", "timeout",
+            )
+            self._emit_runtime_event(
+                "tool.invocation_finished",
+                session_key=self._session_key(event),
+                severity="debug",
+                source="main.tool_hook",
+                payload={
+                    "tool_name": str(tool_name)[:120],
+                    "arg_keys": (
+                        sorted(str(key)[:80] for key in (tool_args or {}).keys())[:20]
+                        if isinstance(tool_args, dict)
+                        else []
+                    ),
+                    "arg_chars": len(str(tool_args or {})),
+                    "result_chars": len(result_str_for_trace),
+                    "success": bool(result_str_for_trace) and not any(
+                        signal in result_lower for signal in error_signals_for_trace
+                    ),
+                    "is_personal_capability": bool(is_personal_cap),
+                },
+                tags=["tool", "reasoning"],
+            )
+        except Exception as e:
+            logger.debug(f"[Anima] tool reasoning trace event skipped: {e}")
 
         # ============ 分支 1：个人能力工具 → 自我反思 + 可能重写能力卡 ============
         if is_personal_cap:

@@ -466,6 +466,60 @@ class WebUIRoutes:
         )[:limit]
         return {"success": True, "snapshots": values, "count": len(values)}
 
+    async def reasoning_trace_handler(self) -> dict[str, Any]:
+        """Return a redacted reasoning trace assembled from Observatory events."""
+        from quart import request as quart_request
+        from sylanne_alpha.reasoning_trace import build_reasoning_trace_snapshot
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 80)
+        except (TypeError, ValueError):
+            limit = 80
+        snapshot = build_reasoning_trace_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "reasoning.trace_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["reasoning", "trace"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def session_replay_handler(self) -> dict[str, Any]:
+        """Return a redacted session replay timeline for Observatory debugging."""
+        from quart import request as quart_request
+        from sylanne_alpha.session_replay import build_session_replay_snapshot
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 80)
+        except (TypeError, ValueError):
+            limit = 80
+        snapshot = build_session_replay_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "session.replay_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["session", "replay"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
     async def state_inspector_handler(self) -> dict[str, Any]:
         """Return a redacted state/session consistency snapshot."""
         from sylanne_alpha.state_inspector import build_state_inspector_snapshot
@@ -509,6 +563,33 @@ class WebUIRoutes:
             )
         return {"success": True, "snapshot": snapshot}
 
+    async def memory_recall_replay_handler(self) -> dict[str, Any]:
+        """Return redacted memory recall replay evidence."""
+        from quart import request as quart_request
+        from sylanne_alpha.memory_recall_replay import build_memory_recall_replay_snapshot
+
+        session_key = str(quart_request.args.get("session") or "").strip()
+        try:
+            limit = int(quart_request.args.get("limit") or 50)
+        except (TypeError, ValueError):
+            limit = 50
+        snapshot = build_memory_recall_replay_snapshot(
+            self._p,
+            session_key=session_key,
+            limit=limit,
+        )
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "memory.recall_replay_snapshot",
+                session_key=session_key,
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["memory", "recall", "replay"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
     async def desire_dashboard_handler(self) -> dict[str, Any]:
         """Return redacted desire queue health and distribution data."""
         from quart import request as quart_request
@@ -527,6 +608,27 @@ class WebUIRoutes:
                 source="webui_routes",
                 payload=snapshot.get("summary", {}),
                 tags=["desire", "dashboard"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def desire_evolution_handler(self) -> dict[str, Any]:
+        """Return redacted desire queue lifecycle and event history."""
+        from quart import request as quart_request
+        from sylanne_alpha.desire_evolution import build_desire_evolution_snapshot
+
+        try:
+            limit = int(quart_request.args.get("limit") or 80)
+        except (TypeError, ValueError):
+            limit = 80
+        snapshot = build_desire_evolution_snapshot(self._p, limit=limit)
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "desire.evolution_snapshot",
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["desire", "evolution"],
             )
         return {"success": True, "snapshot": snapshot}
 

@@ -33,6 +33,21 @@ New API:
 /astrbot_plugin_anima/api/runtime_events
 ```
 
+Additional redacted Observatory APIs are also available in this release line:
+
+```text
+/astrbot_plugin_anima/api/prompt_debug
+/astrbot_plugin_anima/api/state_inspector
+/astrbot_plugin_anima/api/memory_explorer
+/astrbot_plugin_anima/api/memory_recall_replay
+/astrbot_plugin_anima/api/desire_dashboard
+/astrbot_plugin_anima/api/desire_evolution
+/astrbot_plugin_anima/api/scar_explorer
+/astrbot_plugin_anima/api/personality_drift
+/astrbot_plugin_anima/api/reasoning_trace
+/astrbot_plugin_anima/api/session_replay
+```
+
 Optional query parameters:
 
 ```text
@@ -43,6 +58,10 @@ severity=<severity>
 ```
 
 This is an observability feature only. It does not change prompt assembly, memory retrieval, personality drift, scar algebra, or desire formation.
+Reasoning Trace is also observability-only: it assembles prompt/tool/response decision metadata without storing prompt text, memory bodies, tool argument values, tool results, or response text.
+Session Replay is observability-only as well: it merges event metadata and conversation-buffer message shapes without exposing message text.
+Memory Recall Replay is observability-only too: it reads existing recall evidence and prompt-debug metadata without triggering memory recall or changing memory weights.
+Desire Evolution History is observability-only too: it connects current desire queue metadata with recent queue update events without exposing desire text, target UMO values, target users, or arbitrary runtime-event payload values.
 
 ## Recommended Operator Checks
 
@@ -53,9 +72,11 @@ After upgrading:
 3. Open `/astrbot_plugin_anima/api/runtime_events?limit=20`.
 4. If using the independent WebUI, open `/api/runtime_events?limit=20&token=<token>`.
 5. Open Anima Portal and check the `Cognitive Timeline` panel.
-6. Run one normal conversation turn.
-7. Confirm a `response.observed` event appears.
-8. Check logs for any `corrupt-json` backup notices.
+6. Check that `Reasoning Trace`, `Session Replay`, `State Inspector`, `Memory Explorer`, `Memory Recall Replay`, `Desire Dashboard`, `Desire Evolution`, `Scar Explorer`, and `Personality Drift` cards render in the same panel.
+7. Run one normal conversation turn.
+8. Confirm a `response.observed` event appears.
+9. If a tool is used, confirm `tool.invocation_started` / `tool.invocation_finished` metadata appears without raw arguments or results.
+10. Check logs for any `corrupt-json` backup notices.
 
 ## Rollback
 

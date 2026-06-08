@@ -8,6 +8,7 @@ v0.8.0 从 main.py 抽出：# ==================== 模块一：欲望系统 ====
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -109,6 +110,42 @@ class DesireMixin:
         """写入欲望队列"""
         self._write_json(self.desires_path, desires)
 
+    @classmethod
+    def _desire_event_summary(cls, desires: list) -> dict:
+        """Return redacted queue metadata for runtime observability events."""
+        summary = {
+            "count": 0,
+            "active_count": 0,
+            "satisfied_count": 0,
+            "by_source": {},
+            "by_kind": {},
+            "content_fingerprints": [],
+        }
+        if not isinstance(desires, list):
+            return summary
+        fingerprints = []
+        for raw in desires:
+            if not isinstance(raw, dict):
+                continue
+            summary["count"] += 1
+            if raw.get("satisfied"):
+                summary["satisfied_count"] += 1
+            else:
+                summary["active_count"] += 1
+            source = str(raw.get("source", "") or "unknown")
+            kind = str(raw.get("kind", "") or "")
+            if kind not in ("inward", "outward"):
+                kind = cls._desire_kind(source)
+            summary["by_source"][source] = summary["by_source"].get(source, 0) + 1
+            summary["by_kind"][kind] = summary["by_kind"].get(kind, 0) + 1
+            content = str(raw.get("content", "") or "")
+            if content:
+                fingerprints.append(
+                    hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:12]
+                )
+        summary["content_fingerprints"] = sorted(set(fingerprints))[:40]
+        return summary
+
     def _atomic_update_desires(self, updater):
         """在同一把 IO 锁内完成 desires.json 的读-改-原子写。"""
         if not hasattr(self, "_io_lock") or not hasattr(self, "desires_path"):
@@ -139,7 +176,7 @@ class DesireMixin:
                 return []
 
             try:
-                before_count = len(desires)
+                before_summary = self._desire_event_summary(desires)
                 updated = updater(desires)
                 if updated is not None:
                     desires = updated
@@ -153,12 +190,23 @@ class DesireMixin:
                         json.dump(desires, f, ensure_ascii=False, indent=2)
                 emitter = getattr(self, "_emit_runtime_event", None)
                 if callable(emitter):
+                    after_summary = self._desire_event_summary(desires)
+                    before_fp = set(before_summary.get("content_fingerprints") or [])
+                    after_fp = set(after_summary.get("content_fingerprints") or [])
                     emitter(
                         "desire.queue_updated",
                         source="desire",
                         payload={
-                            "before_count": before_count,
-                            "after_count": len(desires),
+                            "before_count": before_summary.get("count", 0),
+                            "after_count": after_summary.get("count", 0),
+                            "before_active_count": before_summary.get("active_count", 0),
+                            "after_active_count": after_summary.get("active_count", 0),
+                            "before_satisfied_count": before_summary.get("satisfied_count", 0),
+                            "after_satisfied_count": after_summary.get("satisfied_count", 0),
+                            "added_content_fingerprints": sorted(after_fp - before_fp)[:20],
+                            "removed_content_fingerprints": sorted(before_fp - after_fp)[:20],
+                            "by_source": after_summary.get("by_source", {}),
+                            "by_kind": after_summary.get("by_kind", {}),
                         },
                         tags=["desire", "state"],
                     )
