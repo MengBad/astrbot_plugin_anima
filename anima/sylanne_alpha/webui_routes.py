@@ -145,6 +145,76 @@ class WebUIRoutes:
     def _legacy_plugin_pages_dir(self) -> Path:
         return Path(self._plugin_dir) / "UI" / "plugin_pages"
 
+    def _legacy_page_manifest(self) -> dict[str, Any]:
+        pages_dir = self._legacy_plugin_pages_dir()
+        pages: dict[str, dict[str, Any]] = {}
+        for page in ("dashboard", "capability-tree"):
+            page_dir = pages_dir / page
+            pages[page] = {
+                "dir": str(page_dir),
+                "dir_exists": page_dir.exists(),
+                "index_exists": (page_dir / "index.html").exists(),
+                "app_js_exists": (page_dir / "app.js").exists(),
+                "style_css_exists": (page_dir / "style.css").exists(),
+            }
+        return {
+            "schema": "anima.webui_manifest.v1",
+            "server": "astrbot_shared",
+            "plugin_dir": str(self._plugin_dir),
+            "legacy_pages_dir": str(pages_dir),
+            "legacy_pages_dir_exists": pages_dir.exists(),
+            "pages": pages,
+        }
+
+    def _fallback_legacy_page_html(self, page: str) -> str:
+        label = "Capability Tree" if page == "capability-tree" else "Runtime Dashboard"
+        endpoint = "capabilities" if page == "capability-tree" else "state"
+        return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anima {label}</title>
+  <style>
+    body {{ margin:0; padding:18px; background:#0f172a; color:#e2e8f0;
+      font-family:"Segoe UI","Microsoft YaHei",sans-serif; }}
+    .panel {{ border:1px solid rgba(148,163,184,.24); border-radius:16px;
+      background:rgba(15,23,42,.86); padding:16px; }}
+    h1 {{ margin:0 0 8px; font-size:18px; }}
+    p {{ color:#94a3b8; line-height:1.65; font-size:13px; }}
+    pre {{ white-space:pre-wrap; word-break:break-word; color:#bae6fd;
+      background:#020617; border:1px solid rgba(56,189,248,.18);
+      border-radius:12px; padding:12px; max-height:60vh; overflow:auto; }}
+    .bad {{ color:#fb7185; }}
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Anima {label}</h1>
+    <p>
+      The packaged legacy page assets were not found, so Anima is showing a
+      lightweight read-only fallback. Reinstalling the plugin package should
+      restore the full embedded page.
+    </p>
+    <pre id="out">loading /api/{endpoint}...</pre>
+  </div>
+  <script>
+    const out = document.getElementById('out');
+    if (!window.AstrBotPluginPage || !window.AstrBotPluginPage.apiGet) {{
+      out.className = 'bad';
+      out.textContent = 'AstrBotPluginPage bridge is unavailable.';
+    }} else {{
+      window.AstrBotPluginPage.apiGet('{endpoint}')
+        .then(data => {{ out.textContent = JSON.stringify(data, null, 2); }})
+        .catch(err => {{
+          out.className = 'bad';
+          out.textContent = err && err.message ? err.message : 'request failed';
+        }});
+    }}
+  </script>
+</body>
+</html>"""
+
     def _inject_shared_plugin_page_shim(self, html: str) -> str:
         """Provide Plugin Pages bridge APIs when legacy pages run in an iframe."""
         shim = """
@@ -202,7 +272,15 @@ class WebUIRoutes:
 
         index_path = self._legacy_plugin_pages_dir() / page / "index.html"
         if not index_path.exists():
-            return Response(f"{page} index.html not found", status=404)
+            logger.warning(
+                "[Anima][WebUI] shared legacy page missing; serving fallback. page=%s path=%s",
+                page,
+                index_path,
+            )
+            html = self._inject_shared_plugin_page_shim(
+                self._fallback_legacy_page_html(page)
+            )
+            return Response(html, content_type="text/html; charset=utf-8")
         html = index_path.read_text(encoding="utf-8")
         html = self._inject_shared_plugin_page_shim(html)
         return Response(html, content_type="text/html; charset=utf-8")
@@ -738,6 +816,10 @@ class WebUIRoutes:
                 tags=["tasks", "background", "observatory"],
             )
         return {"success": True, "snapshot": snapshot}
+
+    async def webui_manifest_handler(self) -> dict[str, Any]:
+        """Return WebUI route/resource diagnostics for deployment checks."""
+        return {"success": True, "manifest": self._legacy_page_manifest()}
 
     async def memory_explorer_handler(self) -> dict[str, Any]:
         """Return redacted memory topology and recall metadata."""

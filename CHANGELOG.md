@@ -1,3 +1,30 @@
+## v1.2.8 - WebUI 入口自诊断与部署资源缺失降级
+
+本版继续加固 v1.2.7 的 WebUI 发布路径，重点修复 AstrBot 侧插件页面自动跳转共享路由时可能落入默认 404、独立 Sylanne WebUI 部署包缺少 legacy dashboard/capability-tree 资源时直接显示 `index.html not found`、以及 Observatory 子接口缺失时缺少有效诊断线索的问题。核心叙事、记忆、反刍、突变与状态持久化逻辑未改动。
+
+### WebUI 入口与 AstrBot 侧兼容
+- 移除 `pages/anima/index.html` 中自动跳转 `/astrbot_plugin_anima/...` 的行为，避免 AstrBot 4.25.x 下共享路由不可达时直接进入默认 404 页面。
+- 将 AstrBot 插件页入口改为安全诊断页：自动探测 `/astrbot_plugin_anima/health` 与 `/astrbot_plugin_anima/api/state`，并在共享 WebAPI 不可达时提示使用 `/anima_dashboard_url` 获取独立 WebUI 地址。
+- 保留“尝试共享 Portal”和“共享健康检查”按钮，便于兼容共享 WebAPI 可用的 AstrBot 部署。
+
+### 独立 WebUI 资源缺失降级
+- `aiohttp` 独立 WebUI 的 `/dashboard/` 与 `/capability-tree/` 在内部页面资源缺失时不再返回硬 404，改为渲染轻量只读 fallback 页面。
+- `stdlib http.server` fallback 层同步支持相同的资源缺失降级，避免 aiohttp 不可用或旧监听器回退时再次出现空白/404。
+- fallback 页面会尝试读取 `/api/state` 或 `/api/capabilities`，即使完整内嵌页面资源缺失，也能展示基础运行数据并提示重新安装插件包。
+
+### WebUI Manifest 诊断
+- 新增 `/api/webui_manifest`，覆盖 AstrBot 共享路由、独立 aiohttp 服务与 stdlib fallback 服务。
+- manifest 返回当前承载层、插件版本、模块文件、插件根目录、legacy 页面资源目录、dashboard/capability-tree 的 `index.html` / `app.js` / `style.css` 是否存在等信息。
+- aiohttp 与 stdlib WebUI 启动时新增 `[Anima][WebUI] ... manifest` 控制台日志，便于确认当前实际运行的模块文件、资源路径和 `/api/state_inspector` 路由状态。
+- Portal 的 Observatory 子接口加载失败时，会显示 manifest 诊断链接，不再只显示不可操作的 `Failed to load ...`。
+
+### 测试
+- 新增 AstrBot 静态插件页不再自动跳转共享路由的回归测试。
+- 新增 `/api/webui_manifest` 在共享 WebUI 与独立 WebUI 双层注册的回归测试。
+- 全量测试通过：`408 passed, 50 warnings`。
+
+---
+
 ## v1.2.7 - WebUI 入口与 fallback 数据接口热修复
 
 本版基于 v1.2.6 继续加固 WebUI 发布路径，重点修复 AstrBot Plugin Page 打开 `/astrbot_plugin_anima/anima` 时可能进入 404、独立 Sylanne WebUI fallback 模式下 dashboard/capability-tree 与 Observatory API 无法加载的问题。同时补强 StateStore 只读审计指纹与测试覆盖，将测试用例扩充至 406 项且全绿通过。

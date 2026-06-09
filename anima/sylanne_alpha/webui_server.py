@@ -1472,6 +1472,84 @@ if (window.self !== window.top) {
         """
         return plugin_root / "UI" / "plugin_pages"
 
+    def _legacy_page_manifest() -> dict[str, Any]:
+        pages_dir = _legacy_plugin_pages_dir()
+        pages: dict[str, dict[str, Any]] = {}
+        for page in ("dashboard", "capability-tree"):
+            page_dir = pages_dir / page
+            pages[page] = {
+                "dir": str(page_dir),
+                "dir_exists": page_dir.exists(),
+                "index_exists": (page_dir / "index.html").exists(),
+                "app_js_exists": (page_dir / "app.js").exists(),
+                "style_css_exists": (page_dir / "style.css").exists(),
+            }
+        return {
+            "schema": "anima.webui_manifest.v1",
+            "version": _get_plugin_version(),
+            "server": "aiohttp",
+            "module": __name__,
+            "module_file": __file__,
+            "plugin_root": str(plugin_root),
+            "legacy_pages_dir": str(pages_dir),
+            "legacy_pages_dir_exists": pages_dir.exists(),
+            "pages": pages,
+            "routes": sorted(
+                getattr(getattr(route, "resource", None), "canonical", "")
+                for route in list(app.router.routes())
+                if getattr(getattr(route, "resource", None), "canonical", "")
+            ),
+        }
+
+    def _fallback_legacy_page_html(page: str, active_page: str) -> str:
+        label = "Capability Tree" if page == "capability-tree" else "Runtime Dashboard"
+        endpoint = "/api/capabilities" if page == "capability-tree" else "/api/state"
+        token = quote(_active_token or "", safe="")
+        html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anima {label}</title>
+  <style>
+    body {{ margin:0; padding:18px; background:#0f172a; color:#e2e8f0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }}
+    .panel {{ border:1px solid rgba(148,163,184,.24); border-radius:16px;
+      background:rgba(15,23,42,.86); padding:16px; }}
+    h1 {{ margin:0 0 8px; font-size:18px; }}
+    p {{ color:#94a3b8; line-height:1.65; font-size:13px; }}
+    pre {{ white-space:pre-wrap; word-break:break-word; color:#bae6fd;
+      background:#020617; border:1px solid rgba(56,189,248,.18);
+      border-radius:12px; padding:12px; max-height:60vh; overflow:auto; }}
+    .bad {{ color:#fb7185; }}
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Anima {label}</h1>
+    <p>
+      The packaged legacy page assets were not found, so Anima is showing a
+      lightweight read-only fallback. Reinstalling the plugin package should
+      restore the full embedded page.
+    </p>
+    <pre id="out">loading {endpoint}...</pre>
+  </div>
+  <script>
+    const out = document.getElementById('out');
+    fetch('{endpoint}?token={token}', {{ headers: {{ Accept: 'application/json' }} }})
+      .then(r => r.json().then(data => [r, data]))
+      .then(([r, data]) => {{
+        out.textContent = JSON.stringify({{ status: r.status, data }}, null, 2);
+      }})
+      .catch(err => {{
+        out.className = 'bad';
+        out.textContent = err && err.message ? err.message : 'request failed';
+      }});
+  </script>
+</body>
+</html>"""
+        return _inject_shim_and_nav(html, active_page)
+
     async def handle_captree_redirect(request: web.Request) -> web.Response:
         token = request.query.get("token", "")
         t = quote(token, safe="")
@@ -1485,7 +1563,15 @@ if (window.self !== window.top) {
         pages_dir = _legacy_plugin_pages_dir()
         index_path = pages_dir / "capability-tree" / "index.html"
         if not index_path.exists():
-            return web.Response(status=404, text="Capability tree index.html not found.")
+            logger.warning(
+                "[Anima][WebUI] capability-tree index missing; serving fallback. path=%s",
+                index_path,
+            )
+            return web.Response(
+                text=_fallback_legacy_page_html("capability-tree", "capability-tree"),
+                content_type="text/html",
+                charset="utf-8",
+            )
         html = index_path.read_text(encoding="utf-8")
         html = _inject_shim_and_nav(html, "capability-tree")
         return web.Response(text=html, content_type="text/html", charset="utf-8")
@@ -1517,7 +1603,15 @@ if (window.self !== window.top) {
         pages_dir = _legacy_plugin_pages_dir()
         index_path = pages_dir / "dashboard" / "index.html"
         if not index_path.exists():
-            return web.Response(status=404, text="Dashboard index.html not found.")
+            logger.warning(
+                "[Anima][WebUI] dashboard index missing; serving fallback. path=%s",
+                index_path,
+            )
+            return web.Response(
+                text=_fallback_legacy_page_html("dashboard", "dashboard"),
+                content_type="text/html",
+                charset="utf-8",
+            )
         html = index_path.read_text(encoding="utf-8")
         html = _inject_shim_and_nav(html, "dashboard")
         return web.Response(text=html, content_type="text/html", charset="utf-8")
@@ -2045,6 +2139,9 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_webui_manifest(request: web.Request) -> web.Response:
+        return web.json_response({"success": True, "manifest": _legacy_page_manifest()})
+
     app.router.add_get("/", handle_portal)
     app.router.add_get("/sylanne", handle_sylanne_redirect)
     app.router.add_get("/sylanne/", handle_sylanne_index)
@@ -2076,6 +2173,7 @@ if (window.self !== window.top) {
     app.router.add_get("/api/personality_drift", handle_personality_drift)
     app.router.add_get("/api/export", handle_export)
     app.router.add_get("/api/config", handle_config)
+    app.router.add_get("/api/webui_manifest", handle_webui_manifest)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/metrics", handle_metrics)
     app.router.add_get("/api/state", handle_state)
@@ -2153,6 +2251,18 @@ if (window.self !== window.top) {
         return ws
 
     app.router.add_get("/ws/state", handle_ws_state)
+
+    manifest = _legacy_page_manifest()
+    logger.info(
+        "[Anima][WebUI] aiohttp manifest: version=%s module_file=%s plugin_root=%s legacy_pages=%s exists=%s routes=%s state_inspector=%s",
+        manifest.get("version"),
+        manifest.get("module_file"),
+        manifest.get("plugin_root"),
+        manifest.get("legacy_pages_dir"),
+        manifest.get("legacy_pages_dir_exists"),
+        len(manifest.get("routes") or []),
+        "/api/state_inspector" in set(manifest.get("routes") or []),
+    )
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -2347,13 +2457,91 @@ def start_webui_thread_server(
             token_val = auth[7:] if auth.startswith("Bearer ") else query.get("token", "")
             return token_val == _active_token
 
+        def _legacy_page_manifest(self) -> dict[str, Any]:
+            pages_dir = plugin_root / "UI" / "plugin_pages"
+            pages: dict[str, dict[str, Any]] = {}
+            for page in ("dashboard", "capability-tree"):
+                page_dir = pages_dir / page
+                pages[page] = {
+                    "dir": str(page_dir),
+                    "dir_exists": page_dir.exists(),
+                    "index_exists": (page_dir / "index.html").exists(),
+                    "app_js_exists": (page_dir / "app.js").exists(),
+                    "style_css_exists": (page_dir / "style.css").exists(),
+                }
+            return {
+                "schema": "anima.webui_manifest.v1",
+                "version": _get_plugin_version(),
+                "server": "stdlib",
+                "module": __name__,
+                "module_file": __file__,
+                "plugin_root": str(plugin_root),
+                "legacy_pages_dir": str(pages_dir),
+                "legacy_pages_dir_exists": pages_dir.exists(),
+                "pages": pages,
+            }
+
+        def _fallback_legacy_page_html(self, page: str, active_page: str) -> str:
+            label = "Capability Tree" if page == "capability-tree" else "Runtime Dashboard"
+            endpoint = "/api/capabilities" if page == "capability-tree" else "/api/state"
+            token = quote(_active_token or "", safe="")
+            html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Anima {label}</title>
+  <style>
+    body {{ margin:0; padding:18px; background:#0f172a; color:#e2e8f0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif; }}
+    .panel {{ border:1px solid rgba(148,163,184,.24); border-radius:16px;
+      background:rgba(15,23,42,.86); padding:16px; }}
+    h1 {{ margin:0 0 8px; font-size:18px; }}
+    p {{ color:#94a3b8; line-height:1.65; font-size:13px; }}
+    pre {{ white-space:pre-wrap; word-break:break-word; color:#bae6fd;
+      background:#020617; border:1px solid rgba(56,189,248,.18);
+      border-radius:12px; padding:12px; max-height:60vh; overflow:auto; }}
+    .bad {{ color:#fb7185; }}
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Anima {label}</h1>
+    <p>
+      The packaged legacy page assets were not found, so Anima is showing a
+      lightweight read-only fallback. Reinstalling the plugin package should
+      restore the full embedded page.
+    </p>
+    <pre id="out">loading {endpoint}...</pre>
+  </div>
+  <script>
+    const out = document.getElementById('out');
+    fetch('{endpoint}?token={token}', {{ headers: {{ Accept: 'application/json' }} }})
+      .then(r => r.json().then(data => [r, data]))
+      .then(([r, data]) => {{
+        out.textContent = JSON.stringify({{ status: r.status, data }}, null, 2);
+      }})
+      .catch(err => {{
+        out.className = 'bad';
+        out.textContent = err && err.message ? err.message : 'request failed';
+      }});
+  </script>
+</body>
+</html>"""
+            return _inject_shim_and_nav(html, active_page)
+
         def _send_legacy_page(self, page: str, active_page: str) -> None:
             index_path = plugin_root / "UI" / "plugin_pages" / page / "index.html"
             if not index_path.exists():
+                logger.warning(
+                    "[Anima][WebUI] %s index missing in stdlib server; serving fallback. path=%s",
+                    page,
+                    index_path,
+                )
                 self._send_text(
-                    f"{page} index.html not found.",
-                    status=404,
-                    content_type="text/plain; charset=utf-8",
+                    self._fallback_legacy_page_html(page, active_page),
+                    status=200,
+                    content_type="text/html; charset=utf-8",
                 )
                 return
             html = _inject_shim_and_nav(index_path.read_text(encoding="utf-8"), active_page)
@@ -2456,6 +2644,8 @@ def start_webui_thread_server(
                         "style.css",
                         "text/css; charset=utf-8",
                     )
+                elif path == "/api/webui_manifest":
+                    self._send_json({"success": True, "manifest": self._legacy_page_manifest()})
                 elif path == "/api/state":
                     # 自动关闭 diagnostics：超过 30s 无 computation_logs 请求
                     if _last_diag_request and time.time() - _last_diag_request > 30:
@@ -3315,6 +3505,16 @@ def start_webui_thread_server(
     )
     _httpd_thread.start()
     logger.info(f"Sylanne WebUI stdlib server started at http://{host}:{port}")
+    pages_dir = plugin_root / "UI" / "plugin_pages"
+    logger.info(
+        "[Anima][WebUI] stdlib manifest: version=%s module_file=%s plugin_root=%s legacy_pages=%s exists=%s state_inspector=%s",
+        _get_plugin_version(),
+        __file__,
+        plugin_root,
+        pages_dir,
+        pages_dir.exists(),
+        True,
+    )
 
 
 async def _provider_items(plugin: Any) -> list[dict[str, Any]]:

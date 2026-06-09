@@ -32,6 +32,8 @@ def test_standalone_webui_reads_legacy_assets_from_internal_directory():
     assert 'app.router.add_get("/dashboard/", handle_dashboard_index)' in server
     assert 'plugin_root / "UI" / "plugin_pages" / page / "index.html"' in server
     assert 'plugin_root / "UI" / "plugin_pages" / page / filename' in server
+    assert "_fallback_legacy_page_html" in server
+    assert "/api/webui_manifest" in server
 
 
 def test_legacy_iframe_bridge_paths_match_hosting_layer_contract():
@@ -54,6 +56,16 @@ def test_shared_plugin_page_registers_anima_alias_for_astrbot_frontend_route():
 
     assert '("/anima", "page_handler", ["GET"])' in plugin_api
     assert '("/anima/", "page_handler", ["GET"])' in plugin_api
+    assert '("/api/webui_manifest", "webui_manifest_handler", ["GET"])' in plugin_api
+
+
+def test_astrbot_static_entry_does_not_auto_redirect_to_shared_route():
+    html = (ROOT / "pages" / "anima" / "index.html").read_text(encoding="utf-8")
+
+    assert "window.location.replace" not in html
+    assert "runProbe()" in html
+    assert "/anima_dashboard_url" in html
+    assert "/astrbot_plugin_anima/health" in html
 
 
 def test_stdlib_standalone_webui_accepts_query_token_and_observatory_routes():

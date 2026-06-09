@@ -70,6 +70,7 @@ class PluginAPI:
                 ("/api/state_inspector", "state_inspector_handler", ["GET"]),
                 ("/api/state_store_audit", "state_store_audit_handler", ["GET"]),
                 ("/api/background_tasks", "background_tasks_handler", ["GET"]),
+                ("/api/webui_manifest", "webui_manifest_handler", ["GET"]),
                 ("/api/memory_explorer", "memory_explorer_handler", ["GET"]),
                 ("/api/memory_recall_replay", "memory_recall_replay_handler", ["GET"]),
                 ("/api/desire_dashboard", "desire_dashboard_handler", ["GET"]),

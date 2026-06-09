@@ -131,6 +131,16 @@ def test_background_tasks_route_registered_in_both_webui_layers():
     assert 'app.router.add_get("/api/background_tasks", handle_background_tasks)' in independent_server
 
 
+def test_webui_manifest_route_registered_in_both_webui_layers():
+    plugin_api = (ROOT / "plugin_api.py").read_text(encoding="utf-8")
+    shared_routes = (ROOT / "anima" / "sylanne_alpha" / "webui_routes.py").read_text(encoding="utf-8")
+    independent_server = (ROOT / "anima" / "sylanne_alpha" / "webui_server.py").read_text(encoding="utf-8")
+
+    assert '("/api/webui_manifest", "webui_manifest_handler", ["GET"])' in plugin_api
+    assert "async def webui_manifest_handler" in shared_routes
+    assert 'app.router.add_get("/api/webui_manifest", handle_webui_manifest)' in independent_server
+
+
 def test_memory_explorer_route_registered_in_both_webui_layers():
     plugin_api = (ROOT / "plugin_api.py").read_text(encoding="utf-8")
     shared_routes = (ROOT / "anima" / "sylanne_alpha" / "webui_routes.py").read_text(encoding="utf-8")
