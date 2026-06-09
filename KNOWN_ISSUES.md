@@ -1,4 +1,4 @@
-# Known Issues - v1.2.4 Release Candidate
+# Known Issues - v1.2.5 Release Candidate
 
 ## Remaining Risks
 
@@ -44,7 +44,7 @@ Next step:
 ### Cognitive Observatory UI is still incomplete
 
 The Portal now renders a Cognitive Timeline panel backed by runtime events.
-However, the full Observatory is not complete yet. Runtime Timeline, Prompt Debugger API, State Inspector API/card, Memory Explorer API/card, Memory Recall Replay API/card, Desire Dashboard API/card, Desire Evolution API/card, Scar Explorer API/card, Personality Drift API/card, Reasoning Trace API/card, and Session Replay API/card exist, but the Portal still lacks deeper drill-down and compare tools for long-horizon cognitive trends.
+However, the full Observatory is not complete yet. Runtime Timeline, Prompt Debugger API, State Inspector API/card, Background Tasks API/card, Memory Explorer API/card, Memory Recall Replay API/card, Desire Dashboard API/card, Desire Evolution API/card, Scar Explorer API/card, Personality Drift API/card, Reasoning Trace API/card, Session Replay API/card, and redacted Mutation History exist, but the Portal still lacks deeper drill-down and compare tools for long-horizon cognitive trends.
 
 Next step:
 
@@ -53,6 +53,8 @@ Next step:
 ### Some persistence paths remain outside a unified StateStore
 
 `anima_state.json`, `self_notes.md`, `desires.json`, Sylanne runtime files, runtime caches, and AstrBot KV are still separate state sources.
+
+State Inspector now embeds a read-only `anima.state_store_audit.v1` inventory so operators can see the current topology and missing StateStore capabilities. It also exposes metadata-only fingerprints for diff readiness, but it is not a write path and does not provide content snapshot/diff/rollback yet.
 
 Next step:
 

@@ -21,9 +21,11 @@ _TRACE_EVENT_TYPES = {
     "scar.explorer_snapshot",
     "personality.drift_snapshot",
     "state.inspector_snapshot",
+    "state.store_audit_snapshot",
     "persistence.shutdown_flush_started",
     "persistence.shutdown_flush_finished",
     "background_tasks.cancelled",
+    "background_tasks.snapshot",
 }
 
 
@@ -51,6 +53,67 @@ def _safe_request_shape(value: Any) -> dict[str, int | bool]:
             safe[str(key)[:80]] = item
         elif isinstance(item, int):
             safe[str(key)[:80]] = item
+    return safe
+
+
+def _safe_metadata_list(value: Any) -> list[Any]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    safe: list[Any] = []
+    for item in value[:20]:
+        if isinstance(item, bool):
+            safe.append(item)
+        elif isinstance(item, int):
+            safe.append(item)
+        elif isinstance(item, float):
+            safe.append(_safe_float(item))
+        elif isinstance(item, str):
+            safe.append(item[:120])
+    return safe
+
+
+def _generic_safe_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fallback evidence must never expose arbitrary state, prompt, or message bodies."""
+    safe: dict[str, Any] = {}
+    safe_string_keys = {
+        "schema",
+        "status",
+        "source",
+        "category",
+        "phase",
+        "state",
+        "warning_level",
+    }
+    safe_list_keys = {
+        "arg_keys",
+        "flags",
+        "injected_slots",
+        "payload_keys",
+        "skipped_slots",
+        "tags",
+        "warnings",
+    }
+    for raw_key, value in payload.items():
+        key = str(raw_key)[:80]
+        key_lower = key.lower()
+        if isinstance(value, bool):
+            safe[key] = value
+        elif isinstance(value, int):
+            safe[key] = value
+        elif isinstance(value, float):
+            safe[key] = _safe_float(value)
+        elif isinstance(value, str):
+            if (
+                key_lower in safe_string_keys
+                or key_lower.endswith("_id")
+                or "fingerprint" in key_lower
+                or "hash" in key_lower
+            ):
+                safe[key] = value[:120]
+        elif key_lower in safe_list_keys:
+            items = _safe_metadata_list(value)
+            if items:
+                safe[key] = items
     return safe
 
 
@@ -130,13 +193,22 @@ def _event_step(event: dict[str, Any]) -> dict[str, Any]:
             "result_count": _safe_int(payload.get("result_count", 0)),
             "l2_recalled_count": _safe_int(payload.get("l2_recalled_count", 0)),
         }
+    elif event_type == "state.store_audit_snapshot":
+        step["decision"] = "state_store_audit_snapshot"
+        step["evidence"] = {
+            "configured_files": _safe_int(payload.get("configured_files", 0)),
+            "existing_files": _safe_int(payload.get("existing_files", 0)),
+            "missing_files": _safe_int(payload.get("missing_files", 0)),
+            "runtime_sources": _safe_int(payload.get("runtime_sources", 0)),
+            "runtime_entries": _safe_int(payload.get("runtime_entries", 0)),
+            "diff_ready_sources": _safe_int(payload.get("diff_ready_sources", 0)),
+            "source_fingerprint": str(payload.get("source_fingerprint", "") or "")[:40],
+            "kv_api_available": bool(payload.get("kv_api_available", False)),
+            "timeline_available": bool(payload.get("timeline_available", False)),
+        }
     else:
         step["decision"] = event_type.replace(".", "_")[:120]
-        step["evidence"] = {
-            key: value
-            for key, value in payload.items()
-            if isinstance(value, (bool, int, float, str, list, dict))
-        }
+        step["evidence"] = _generic_safe_evidence(payload)
     return step
 
 

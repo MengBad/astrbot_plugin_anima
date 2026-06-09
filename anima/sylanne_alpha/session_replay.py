@@ -19,6 +19,7 @@ _REPLAY_EVENT_TYPES = {
     "memory.recall_replay_snapshot",
     "reasoning.trace_snapshot",
     "state.inspector_snapshot",
+    "state.store_audit_snapshot",
     "memory.explorer_snapshot",
     "desire.dashboard_snapshot",
     "scar.explorer_snapshot",
@@ -26,6 +27,7 @@ _REPLAY_EVENT_TYPES = {
     "persistence.shutdown_flush_started",
     "persistence.shutdown_flush_finished",
     "background_tasks.cancelled",
+    "background_tasks.snapshot",
 }
 
 
@@ -124,6 +126,18 @@ def _event_shape(event: dict[str, Any]) -> dict[str, Any]:
             "recall_limit": _safe_int(payload.get("recall_limit", 0)),
             "result_count": _safe_int(payload.get("result_count", 0)),
             "l2_recalled_count": _safe_int(payload.get("l2_recalled_count", 0)),
+        }
+    elif event_type == "state.store_audit_snapshot":
+        shape["evidence"] = {
+            "configured_files": _safe_int(payload.get("configured_files", 0)),
+            "existing_files": _safe_int(payload.get("existing_files", 0)),
+            "missing_files": _safe_int(payload.get("missing_files", 0)),
+            "runtime_sources": _safe_int(payload.get("runtime_sources", 0)),
+            "runtime_entries": _safe_int(payload.get("runtime_entries", 0)),
+            "diff_ready_sources": _safe_int(payload.get("diff_ready_sources", 0)),
+            "source_fingerprint": str(payload.get("source_fingerprint", "") or "")[:40],
+            "kv_api_available": bool(payload.get("kv_api_available", False)),
+            "timeline_available": bool(payload.get("timeline_available", False)),
         }
     else:
         shape["evidence"] = {

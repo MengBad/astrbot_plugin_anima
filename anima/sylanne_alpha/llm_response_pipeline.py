@@ -26,6 +26,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from sylanne_alpha.compat import realtime_plan, strip_draft_blocks
+from sylanne_alpha.task_registry import ensure_background_tasks
 from sylanne_alpha.utils import safe_ensure_future
 
 try:
@@ -103,16 +104,13 @@ class LLMResponsePipeline:
         """Schedule one non-blocking response observation for memory consistency."""
         if not str(text or "").strip():
             return
-        if not hasattr(self._p, "_background_tasks"):
-            self._p._background_tasks = set()
+        tasks = ensure_background_tasks(self._p)
         obs_task = safe_ensure_future(
             self._background_observe_response(session_key, text),
             name="background_observe_response",
         )
-        self._p._background_tasks.add(obs_task)
-        obs_task.add_done_callback(
-            lambda t: self._p._background_tasks.discard(t)
-        )
+        tasks.add(obs_task)
+        obs_task.add_done_callback(lambda t, tasks=tasks: tasks.discard(t))
 
     # ------------------------------------------------------------------
     # Main response handler
@@ -130,6 +128,7 @@ class LLMResponsePipeline:
             event: AstrBot 事件对象。
             response: LLM 响应对象，包含 completion_text。
         """
+        ensure_background_tasks(self._p)
         session_key = self._p._session_key(event)
         cfg = self._p._config or {}
         realtime_enabled = bool(

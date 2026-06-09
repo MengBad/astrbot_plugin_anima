@@ -1,3 +1,37 @@
+## v1.2.6 - 任务观测器与数据源审计：Background Task 监控、StateStore 只读审计及共享路由修复
+
+本版主要引入了后台异步任务监控（Background Task Observatory）和数据存储审计（StateStore Audit），并彻底修复了通过共享路由（AstrBot 插件管理页面）访问时的 API 数据加载及 iframe 指向异常。此外，重写了项目文档，并将测试用例扩充至 402 项且全绿通过。
+
+### 后台任务观测台 (Background Task Observatory)
+- 新增脱敏的 `anima.background_task_observer.v1` 协程任务快照，监控正在运行的 asyncio 任务、时间碎片定时器、分段响应任务、Checkpoint 任务和后台投递队列。
+- 在 Portal 中新增 Background Tasks 卡片，展示任务状态、异常类型、队列深度、重试次数及死信计数，绝不泄漏回复正文和敏感 Context 键。
+- 重构并统一内部 `_background_tasks` 注册机制为 Set 容器，防止插件在请求处理、实时派发、接管及卸载时发生注册集合分歧或内存泄漏。
+- 注册独立 `/api/background_tasks` 接口。
+
+### 状态存储审计 (State Store Audit)
+- 引入 `anima.state_store_audit.v1` 只读审计子快照，盘点 `anima_state.json`、`self_notes.md`、`desires.json`、会话文件、运行时缓存与 KV 可用性。
+- 通过元数据及大小信息生成 `metadata_fingerprint` 与全局 `source_fingerprint`，作为未来 StateStore diff 的只读前置证据，绝对不读取或哈希文件正文。
+- 注册 `/api/state_store_audit` 接口，并在 Portal 中新增 StateStore Audit 卡片，便于定位状态源一致性状态。
+
+### WebUI 共享路由修复 (WebUI Shared-Route Fix)
+- 彻底修复通过 AstrBot 共享插件页面路由（`/astrbot_plugin_anima/`）访问时的 Portal 数据拉取路径。通过新引入的 `routePath()` 助手，动态适配共享端口（`/astrbot_plugin_anima/api/...`）与独立端口（`/api/...`）。
+- 将遗留的 dashboard/capability-tree 页面资产、静态资源和人格回滚接口注册至 AstrBot 共享 WebUI 层，解决 Portal 嵌入卡片在共享页面中加载失败的问题。
+- 加固人格回滚接口，复用插件 IO 锁和原子文本写入，且在共享与独立路由上记录一致的脱敏 `回滚恢复` 演化日志。
+- 脱敏人设突变历史数据，在 `/api/mutation_history` 返回 `schema_version="anima.mutation_history.v1"` 并抹除具体的 core-beliefs 变更细节，仅保留哈希指纹与统计描述。
+
+### 决策路径与会话回放扩展
+- 决策路径（Reasoning Trace）与会话回放（Session Replay）支持 `state.store_audit_snapshot` 诊断快照事件流，并在 Timeline 中以元数据形式安全呈现。
+- 收紧了 Reasoning Trace 通用事件回退机制的白名单限制，防止未来扩展事件时意外泄漏复杂嵌套对象。
+
+### 文档重构
+- 重新整理和编写了 `README.md` 中文文档，清晰描述了系统架构、数据流图、核心配置指南、可观测性安全边界、会话隔离与 test suites 运行指引。
+
+### 测试
+- 新增覆盖后台任务容器、共享路由 API 映射、StateStore 只读指纹、人格回滚 IO 安全及 API 响应脱敏规范的契约测试。
+- 测试用例总数提升至 `402` 个，全部通过（402 passed）。
+
+---
+
 ## v1.2.5 - 认知观测台加固：Prompt 调试器、状态检查器与多维分析器
 
 本版基于 Phase 2 稳定性发布（v1.2.4）进行观测性加固。新增了认知观测台（Cognitive Observatory）的一系列子视图和诊断 API，对 Prompt 注入预算、会话状态一致性、三层记忆拓扑、欲望队列积压、创伤代数指标以及人格漂移趋势进行无敏感数据泄漏的安全可视化。所有 API 接口均在共享 WebUI 端口与独立 WebUI 端口同步暴露。

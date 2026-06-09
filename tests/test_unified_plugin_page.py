@@ -30,3 +30,18 @@ def test_standalone_webui_reads_legacy_assets_from_internal_directory():
     assert 'return plugin_root / "UI" / "plugin_pages"' in server
     assert 'app.router.add_get("/capability-tree/", handle_captree_index)' in server
     assert 'app.router.add_get("/dashboard/", handle_dashboard_index)' in server
+
+
+def test_legacy_iframe_bridge_paths_match_hosting_layer_contract():
+    plugin_api = (ROOT / "plugin_api.py").read_text(encoding="utf-8")
+    shared_routes = (ROOT / "anima" / "sylanne_alpha" / "webui_routes.py").read_text(encoding="utf-8")
+    standalone_server = (ROOT / "anima" / "sylanne_alpha" / "webui_server.py").read_text(encoding="utf-8")
+
+    for route in ("/stats", "/runtime_stats", "/stats_history", "/capabilities", "/events", "/export"):
+        assert f'("{route}", ' in plugin_api
+
+    for route in ("/api/stats", "/api/runtime_stats", "/api/stats_history", "/api/capabilities", "/api/events"):
+        assert f'app.router.add_get("{route}", ' in standalone_server
+
+    assert "routeBase() + '/' + path" in shared_routes
+    assert "return fetch('/api/' + path" in standalone_server

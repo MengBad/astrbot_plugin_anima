@@ -142,6 +142,172 @@ class WebUIRoutes:
         html = dashboard_path.read_text(encoding="utf-8")
         return Response(html, content_type="text/html; charset=utf-8")
 
+    def _legacy_plugin_pages_dir(self) -> Path:
+        return Path(self._plugin_dir) / "UI" / "plugin_pages"
+
+    def _inject_shared_plugin_page_shim(self, html: str) -> str:
+        """Provide Plugin Pages bridge APIs when legacy pages run in an iframe."""
+        shim = """
+<script>
+(function () {
+  if (window.AstrBotPluginPage && window.AstrBotPluginPage.apiGet) {
+    return;
+  }
+  function routeBase() {
+    return window.location.pathname.indexOf('/astrbot_plugin_anima') === 0
+      ? '/astrbot_plugin_anima'
+      : '';
+  }
+  window.AstrBotPluginPage = {
+    ready: function () { return Promise.resolve({}); },
+    apiGet: function (path, params) {
+      var q = new URLSearchParams();
+      var token = new URLSearchParams(window.location.search).get('token') || '';
+      if (token) { q.set('token', token); }
+      if (params) {
+        for (var key in params) {
+          if (Object.prototype.hasOwnProperty.call(params, key)) {
+            q.set(key, params[key]);
+          }
+        }
+      }
+      return fetch(routeBase() + '/' + path + '?' + q.toString(), {
+        headers: { 'Accept': 'application/json' }
+      }).then(function (response) { return response.json(); });
+    }
+  };
+  if (window.self !== window.top) {
+    var css = '.anima-nav{display:none!important}body{padding-top:0!important;margin-top:0!important}';
+    var style = document.createElement('style');
+    style.type = 'text/css';
+    style.appendChild(document.createTextNode(css));
+    (document.head || document.documentElement).appendChild(style);
+  }
+})();
+</script>
+"""
+        if "</head>" in html:
+            return html.replace("</head>", shim + "</head>", 1)
+        return shim + html
+
+    async def _legacy_page_handler(self, page: str) -> Any:
+        from quart import Response, redirect, request as quart_request
+
+        if not quart_request.path.endswith("/"):
+            query = quart_request.query_string.decode("utf-8")
+            target = quart_request.path.rstrip("/") + "/"
+            if query:
+                target += "?" + query
+            return redirect(target)
+
+        index_path = self._legacy_plugin_pages_dir() / page / "index.html"
+        if not index_path.exists():
+            return Response(f"{page} index.html not found", status=404)
+        html = index_path.read_text(encoding="utf-8")
+        html = self._inject_shared_plugin_page_shim(html)
+        return Response(html, content_type="text/html; charset=utf-8")
+
+    async def _legacy_asset_handler(self, page: str, filename: str, content_type: str) -> Any:
+        from quart import Response
+
+        asset_path = self._legacy_plugin_pages_dir() / page / filename
+        if not asset_path.exists():
+            return Response(f"{filename} not found", status=404)
+        text = asset_path.read_text(encoding="utf-8")
+        return Response(text, content_type=content_type)
+
+    async def dashboard_handler(self) -> Any:
+        """Return the legacy runtime dashboard page for shared Plugin Pages."""
+        return await self._legacy_page_handler("dashboard")
+
+    async def dashboard_asset_js_handler(self) -> Any:
+        return await self._legacy_asset_handler(
+            "dashboard",
+            "app.js",
+            "application/javascript; charset=utf-8",
+        )
+
+    async def dashboard_asset_css_handler(self) -> Any:
+        return await self._legacy_asset_handler(
+            "dashboard",
+            "style.css",
+            "text/css; charset=utf-8",
+        )
+
+    async def capability_tree_handler(self) -> Any:
+        """Return the legacy capability tree page for shared Plugin Pages."""
+        return await self._legacy_page_handler("capability-tree")
+
+    async def capability_tree_asset_js_handler(self) -> Any:
+        return await self._legacy_asset_handler(
+            "capability-tree",
+            "app.js",
+            "application/javascript; charset=utf-8",
+        )
+
+    async def capability_tree_asset_css_handler(self) -> Any:
+        return await self._legacy_asset_handler(
+            "capability-tree",
+            "style.css",
+            "text/css; charset=utf-8",
+        )
+
+    async def mutation_history_handler(self) -> dict[str, Any]:
+        from quart import request as quart_request
+        from sylanne_alpha.mutation_history_view import build_redacted_mutation_history
+
+        state = self._p._load_state()
+        return build_redacted_mutation_history(
+            state if isinstance(state, dict) else {},
+            limit=quart_request.args.get("limit", 50),
+        )
+
+    async def mutation_rollback_handler(self) -> dict[str, Any]:
+        import os
+        from contextlib import nullcontext
+
+        config = getattr(self._p, "config", None) or getattr(self._p, "_config", {}) or {}
+        if config.get("persona_lock", False):
+            return {"ok": False, "error": "Persona core is locked."}
+
+        persona_core_path = getattr(self._p, "persona_core_path", "")
+        backup_path = persona_core_path + ".bak" if persona_core_path else ""
+        if not persona_core_path or not backup_path or not os.path.exists(backup_path):
+            return {"ok": False, "error": "No rollback backup found."}
+
+        try:
+            io_lock = getattr(self._p, "_io_lock", None)
+            lock_ctx = io_lock if io_lock is not None else nullcontext()
+            atomic_write = getattr(self._p, "_atomic_write_text_locked", None)
+
+            def _write_text(path: str, content: str) -> None:
+                if callable(atomic_write):
+                    atomic_write(path, content)
+                else:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(content)
+
+            with lock_ctx:
+                with open(backup_path, "r", encoding="utf-8") as f:
+                    backup_content = f.read()
+                current_content = ""
+                if os.path.exists(persona_core_path):
+                    with open(persona_core_path, "r", encoding="utf-8") as f:
+                        current_content = f.read()
+                _write_text(persona_core_path, backup_content)
+                if current_content:
+                    _write_text(backup_path, current_content)
+            record_mutation = getattr(self._p, "_record_mutation", None)
+            if callable(record_mutation):
+                record_mutation(
+                    "回滚恢复",
+                    "用户手动触发回滚：已恢复上一版本的核心人设配置。",
+                    triggered_by="user_webui",
+                )
+            return {"ok": True, "message": "Rollback successful."}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     async def state_handler(self) -> dict[str, Any]:
         """返回完整状态 JSON，供 WebUI dashboard 渲染。
 
@@ -533,6 +699,43 @@ class WebUIRoutes:
                 source="webui_routes",
                 payload=snapshot.get("summary", {}),
                 tags=["state", "inspector"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def state_store_audit_handler(self) -> dict[str, Any]:
+        """Return a redacted read-only StateStore precursor audit."""
+        from sylanne_alpha.state_store_audit import build_state_store_audit_snapshot
+
+        snapshot = build_state_store_audit_snapshot(self._p)
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "state.store_audit_snapshot",
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["state", "store", "audit"],
+            )
+        return {"success": True, "snapshot": snapshot}
+
+    async def background_tasks_handler(self) -> dict[str, Any]:
+        """Return redacted background task and queue diagnostics."""
+        from quart import request as quart_request
+        from sylanne_alpha.background_task_observer import build_background_task_observer_snapshot
+
+        try:
+            limit = int(quart_request.args.get("limit") or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        snapshot = build_background_task_observer_snapshot(self._p, limit=limit)
+        emitter = getattr(self._p, "_emit_runtime_event", None)
+        if callable(emitter):
+            emitter(
+                "background_tasks.snapshot",
+                severity="debug",
+                source="webui_routes",
+                payload=snapshot.get("summary", {}),
+                tags=["tasks", "background", "observatory"],
             )
         return {"success": True, "snapshot": snapshot}
 
@@ -1643,16 +1846,6 @@ class WebUIRoutes:
             return Response("Not Found", status=404)
         data = logo_path.read_bytes()
         return Response(data, content_type="image/png")
-
-    async def dashboard_handler(self) -> Any:
-        """通过 AstrBot 内置 Web 服务器提供 WebUI dashboard HTML 页面。"""
-        from quart import Response
-
-        dashboard_path = Path(self._plugin_dir) / "UI" / "index.html"
-        if not dashboard_path.exists():
-            return Response("Dashboard not found", status=404)
-        html = dashboard_path.read_text(encoding="utf-8")
-        return Response(html, content_type="text/html; charset=utf-8")
 
     # ------------------------------------------------------------------
     # Item 47: /health 健康检查（不需要认证）

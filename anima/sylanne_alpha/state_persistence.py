@@ -17,6 +17,7 @@ import math
 import zlib
 from typing import TYPE_CHECKING, Any
 
+from sylanne_alpha.task_registry import ensure_background_tasks
 from sylanne_alpha.utils import safe_ensure_future
 
 if TYPE_CHECKING:
@@ -1350,17 +1351,13 @@ class StatePersistence:
         p._proactive_candidate_sessions = {}
         p._proactive_scheduler_locks = {}
         # Cancel all background tasks
-        tasks = getattr(p, "_background_tasks", [])
+        tasks = ensure_background_tasks(p)
         for t in list(tasks):
             if not t.done():
                 t.cancel()
         if tasks:
             await asyncio.gather(*list(tasks), return_exceptions=True)
-        if isinstance(tasks, set):
-            tasks.clear()
-        elif isinstance(tasks, list):
-            tasks.clear()
-        p._background_tasks = []
+        tasks.clear()
         # Save final checkpoints for background post queues
         bg_queues = p._background_post_queues
         checkpoint_enabled = bool(

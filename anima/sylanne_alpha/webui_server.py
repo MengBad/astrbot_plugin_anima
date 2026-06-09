@@ -327,15 +327,21 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
         return web.Response(text=html, content_type="text/html", charset="utf-8")
 
     async def handle_mutation_history(request: web.Request) -> web.Response:
+        from sylanne_alpha.mutation_history_view import build_redacted_mutation_history
+
         current_plugin = _plugin(plugin)
         if current_plugin is None:
             return web.json_response({"ok": False, "error": "Plugin not loaded"})
         state = current_plugin._load_state()
-        history = state.get("mutation_history", [])
-        return web.json_response({"ok": True, "history": history})
+        payload = build_redacted_mutation_history(
+            state if isinstance(state, dict) else {},
+            limit=request.query.get("limit", 50),
+        )
+        return web.json_response(payload)
 
     async def handle_mutation_rollback(request: web.Request) -> web.Response:
         import os
+        from contextlib import nullcontext
         current_plugin = _plugin(plugin)
         if current_plugin is None:
             return web.json_response({"ok": False, "error": "Plugin not loaded"})
@@ -347,17 +353,27 @@ async def start_webui_server(plugin: Any, host: str = "127.0.0.1", port: int = 2
             return web.json_response({"ok": False, "error": "No rollback backup found."})
         
         try:
-            with open(backup_path, "r", encoding="utf-8") as f:
-                backup_content = f.read()
-            current_content = ""
-            if os.path.exists(current_plugin.persona_core_path):
-                with open(current_plugin.persona_core_path, "r", encoding="utf-8") as f:
-                    current_content = f.read()
-            with open(current_plugin.persona_core_path, "w", encoding="utf-8") as f:
-                f.write(backup_content)
-            if current_content:
-                with open(backup_path, "w", encoding="utf-8") as f:
-                    f.write(current_content)
+            io_lock = getattr(current_plugin, "_io_lock", None)
+            lock_ctx = io_lock if io_lock is not None else nullcontext()
+            atomic_write = getattr(current_plugin, "_atomic_write_text_locked", None)
+
+            def _write_text(path: str, content: str) -> None:
+                if callable(atomic_write):
+                    atomic_write(path, content)
+                else:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(content)
+
+            with lock_ctx:
+                with open(backup_path, "r", encoding="utf-8") as f:
+                    backup_content = f.read()
+                current_content = ""
+                if os.path.exists(current_plugin.persona_core_path):
+                    with open(current_plugin.persona_core_path, "r", encoding="utf-8") as f:
+                        current_content = f.read()
+                _write_text(current_plugin.persona_core_path, backup_content)
+                if current_content:
+                    _write_text(backup_path, current_content)
             
             current_plugin._record_mutation(
                 "回滚恢复", 
@@ -1762,6 +1778,52 @@ if (window.self !== window.top) {
         except Exception as e:
             return web.json_response({"success": False, "error": str(e)})
 
+    async def handle_state_store_audit(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.state_store_audit import build_state_store_audit_snapshot
+
+            snapshot = build_state_store_audit_snapshot(current_plugin)
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "state.store_audit_snapshot",
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["state", "store", "audit"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
+    async def handle_background_tasks(request: web.Request) -> web.Response:
+        current_plugin = _plugin(plugin)
+        if current_plugin is None:
+            return web.json_response({"success": False, "error": "Plugin instance not active"})
+        try:
+            from sylanne_alpha.background_task_observer import build_background_task_observer_snapshot
+
+            try:
+                limit = int(request.query.get("limit", 20))
+            except (TypeError, ValueError):
+                limit = 20
+            snapshot = build_background_task_observer_snapshot(current_plugin, limit=limit)
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    "background_tasks.snapshot",
+                    severity="debug",
+                    source="webui_server",
+                    payload=snapshot.get("summary", {}),
+                    tags=["tasks", "background", "observatory"],
+                )
+            return web.json_response({"success": True, "snapshot": snapshot})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)})
+
     async def handle_memory_explorer(request: web.Request) -> web.Response:
         current_plugin = _plugin(plugin)
         if current_plugin is None:
@@ -2004,6 +2066,8 @@ if (window.self !== window.top) {
     app.router.add_get("/api/reasoning_trace", handle_reasoning_trace)
     app.router.add_get("/api/session_replay", handle_session_replay)
     app.router.add_get("/api/state_inspector", handle_state_inspector)
+    app.router.add_get("/api/state_store_audit", handle_state_store_audit)
+    app.router.add_get("/api/background_tasks", handle_background_tasks)
     app.router.add_get("/api/memory_explorer", handle_memory_explorer)
     app.router.add_get("/api/memory_recall_replay", handle_memory_recall_replay)
     app.router.add_get("/api/desire_dashboard", handle_desire_dashboard)
@@ -4117,7 +4181,9 @@ class WebUILifecycle:
             self.start_if_enabled()
 
         task = loop.create_task(_takeover())
-        self._p._background_tasks.add(task)
+        from sylanne_alpha.task_registry import ensure_background_tasks
+
+        ensure_background_tasks(self._p).add(task)
 
     def _current_webui_module_ref(self) -> Any:
         """Return the current webui_server module reference from sys.modules."""

@@ -24,6 +24,7 @@ from sylanne_alpha.content_sanitizer import (
     wrap_system_prompt_for_analysis,
     is_content_filter_refusal,
 )
+from sylanne_alpha.task_registry import ensure_background_tasks
 from sylanne_alpha.utils import safe_ensure_future
 
 try:
@@ -789,8 +790,7 @@ class LLMRequestPipeline:
             p._segmented_tasks = {}
         if not hasattr(p, "_unfinished_replies"):
             p._unfinished_replies = {}
-        if not hasattr(p, "_background_tasks"):
-            p._background_tasks = []
+        ensure_background_tasks(p)
         if not hasattr(p, "_last_request_budgets"):
             p._last_request_budgets = {}
         if not hasattr(p, "_fragment_buffers"):

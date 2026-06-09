@@ -6,6 +6,7 @@ import os
 import time
 from typing import Any
 
+from sylanne_alpha.state_store_audit import build_state_store_audit_snapshot
 from sylanne_alpha.state_persistence import dirty_snapshot
 
 
@@ -121,6 +122,7 @@ def build_state_inspector_snapshot(plugin: Any) -> dict[str, Any]:
         isolation_violations = validate_session_isolation(hosts)
     except Exception:
         isolation_violations = []
+    state_store_audit = build_state_store_audit_snapshot(plugin)
 
     snapshot = {
         "schema": STATE_INSPECTOR_SCHEMA,
@@ -141,6 +143,12 @@ def build_state_inspector_snapshot(plugin: Any) -> dict[str, Any]:
                 getattr(plugin, "_sylanne_ready", lambda: False)()
             ),
             "isolation_violation_count": len(isolation_violations),
+            "state_sources": int(
+                state_store_audit.get("summary", {}).get("configured_files", 0) or 0
+            ),
+            "state_store_complete": bool(
+                state_store_audit.get("summary", {}).get("state_store_complete", False)
+            ),
         },
         "sessions": sessions,
         "persistence_files": {
@@ -151,6 +159,7 @@ def build_state_inspector_snapshot(plugin: Any) -> dict[str, Any]:
                 os.path.join(str(getattr(plugin, "data_dir", "") or ""), "runtime_events.jsonl")
             ),
         },
+        "state_store_audit": state_store_audit,
         "dirty": dirty,
         "isolation_violations": isolation_violations[:20],
     }

@@ -136,3 +136,74 @@ def test_reasoning_trace_respects_session_filter():
     assert snapshot["summary"]["steps"] == 1
     assert snapshot["steps"][0]["session_key"] == "session-b"
     assert snapshot["steps"][0]["evidence"]["text_chars"] == 20
+
+
+def test_reasoning_trace_includes_state_store_audit_snapshot_without_state_bodies():
+    secret_state_body = "private self narrative should not leak"
+    bus = RuntimeEventBus(max_events=10)
+    bus.emit(
+        "state.store_audit_snapshot",
+        payload={
+            "configured_files": 16,
+            "existing_files": 4,
+            "diff_ready_sources": 4,
+            "source_fingerprint": "abc123def4567890",
+            "state_body": secret_state_body,
+        },
+    )
+    plugin = types.SimpleNamespace(
+        _runtime_event_bus=bus,
+        _prompt_debug_snapshots={},
+        _last_request_budgets={},
+    )
+
+    snapshot = build_reasoning_trace_snapshot(plugin)
+    encoded = json.dumps(snapshot, ensure_ascii=False)
+
+    assert snapshot["summary"]["steps"] == 1
+    assert snapshot["summary"]["by_type"]["state.store_audit_snapshot"] == 1
+    assert snapshot["steps"][0]["decision"] == "state_store_audit_snapshot"
+    assert snapshot["steps"][0]["evidence"]["configured_files"] == 16
+    assert "abc123def4567890" in encoded
+    assert secret_state_body not in encoded
+
+
+def test_reasoning_trace_generic_fallback_drops_arbitrary_payload_values():
+    secret_text = "private fallback payload should not leak"
+    secret_dict = {"body": "private nested body should not leak"}
+    secret_list = ["private list body should not leak"]
+    bus = RuntimeEventBus(max_events=10)
+    bus.emit(
+        "memory.explorer_snapshot",
+        payload={
+            "item_count": 12,
+            "confidence": 0.876543,
+            "source_fingerprint": "safe-fingerprint-123",
+            "status": "ok",
+            "tags": ["memory", "safe"],
+            "secret_text": secret_text,
+            "raw_state": secret_dict,
+            "raw_list": secret_list,
+        },
+    )
+    plugin = types.SimpleNamespace(
+        _runtime_event_bus=bus,
+        _prompt_debug_snapshots={},
+        _last_request_budgets={},
+    )
+
+    snapshot = build_reasoning_trace_snapshot(plugin)
+    encoded = json.dumps(snapshot, ensure_ascii=False)
+    evidence = snapshot["steps"][0]["evidence"]
+
+    assert evidence["item_count"] == 12
+    assert evidence["confidence"] == 0.8765
+    assert evidence["source_fingerprint"] == "safe-fingerprint-123"
+    assert evidence["status"] == "ok"
+    assert evidence["tags"] == ["memory", "safe"]
+    assert "secret_text" not in evidence
+    assert "raw_state" not in evidence
+    assert "raw_list" not in evidence
+    assert secret_text not in encoded
+    assert secret_dict["body"] not in encoded
+    assert secret_list[0] not in encoded

@@ -535,7 +535,37 @@
             <div id="state-inspector-summary" class="inspector-grid">
               <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
             </div>
-            <div id="state-inspector-sessions" style="margin-top:10px;"></div>
+          <div id="state-inspector-sessions" style="margin-top:10px;"></div>
+          </div>
+          <div id="state-store-audit-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#d9f99d;">StateStore Audit</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Read-only inventory of file/runtime/KV state sources and future snapshot/diff/rollback capability gaps.</div>
+              </div>
+              <button onclick="loadStateStoreAudit()" style="background:rgba(132,204,22,0.12); border:1px solid rgba(132,204,22,0.25); color:#bef264; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Store
+              </button>
+            </div>
+            <div id="state-store-audit-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="state-store-audit-items" style="margin-top:10px;"></div>
+          </div>
+          <div id="background-tasks-card" class="inspector-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <div style="font-size:13px; font-weight:700; color:#f9a8d4;">Background Tasks</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted task lifecycle, fragment timers, checkpoint tasks, background-post queues, leases, and dead letters.</div>
+              </div>
+              <button onclick="loadBackgroundTasks()" style="background:rgba(236,72,153,0.12); border:1px solid rgba(236,72,153,0.25); color:#f9a8d4; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
+                Refresh Tasks
+              </button>
+            </div>
+            <div id="background-tasks-summary" class="inspector-grid">
+              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
+            </div>
+            <div id="background-tasks-items" style="margin-top:10px;"></div>
           </div>
           <div id="memory-explorer-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
@@ -694,15 +724,23 @@
     const token = params.get('token') || '';
     let csrfToken = '';
 
+    const routeBase = window.location.pathname.startsWith('/astrbot_plugin_anima')
+      ? '/astrbot_plugin_anima'
+      : '';
+
+    function routePath(path) {
+      return `${routeBase}${path}`;
+    }
+
     function escHtml(s) {
       if (s == null) return '';
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
     const urls = {
-      sylanne: `/sylanne/?token=${encodeURIComponent(token)}`,
-      dashboard: `/dashboard/?token=${encodeURIComponent(token)}`,
-      captree: `/capability-tree/?token=${encodeURIComponent(token)}`
+      sylanne: routePath(`/sylanne/?token=${encodeURIComponent(token)}`),
+      dashboard: routePath(`/dashboard/?token=${encodeURIComponent(token)}`),
+      captree: routePath(`/capability-tree/?token=${encodeURIComponent(token)}`)
     };
 
     // Load iframe sources on initial load
@@ -712,13 +750,15 @@
       document.getElementById('captree-iframe').src = urls.captree;
 
       // Fetch state once to get CSRF token and then load timeline
-      fetch(`/api/state?token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/state?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           csrfToken = data.csrf_token || '';
           loadMutationHistory();
           loadCognitiveTimeline();
           loadStateInspector();
+          loadStateStoreAudit();
+          loadBackgroundTasks();
           loadMemoryExplorer();
           loadMemoryRecallReplay();
           loadDesireDashboard();
@@ -733,6 +773,8 @@
           loadMutationHistory();
           loadCognitiveTimeline();
           loadStateInspector();
+          loadStateStoreAudit();
+          loadBackgroundTasks();
           loadMemoryExplorer();
           loadMemoryRecallReplay();
           loadDesireDashboard();
@@ -837,7 +879,7 @@
       const summaryEl = document.getElementById('state-inspector-summary');
       const sessionsEl = document.getElementById('state-inspector-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(`/api/state_inspector?token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/state_inspector?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -848,11 +890,15 @@
           const snap = data.snapshot;
           const summary = snap.summary || {};
           const files = snap.persistence_files || {};
+          const storeAudit = snap.state_store_audit || {};
+          const storeSummary = storeAudit.summary || {};
           summaryEl.innerHTML = [
             renderInspectorMetric('Hosts', summary.active_hosts || 0),
             renderInspectorMetric('Dirty Sessions', summary.dirty_sessions || 0),
             renderInspectorMetric('KV API', summary.kv_api_available ? 'yes' : 'no'),
             renderInspectorMetric('Isolation', summary.isolation_violation_count || 0),
+            renderInspectorMetric('State Sources', storeSummary.configured_files || summary.state_sources || 0),
+            renderInspectorMetric('StateStore', storeSummary.state_store_complete ? 'complete' : 'partial'),
             renderInspectorMetric('Memory Systems', summary.memory_systems || 0),
             renderInspectorMetric('Buffers', summary.conversation_buffers || 0),
             renderInspectorMetric('Self Notes', files.self_notes && files.self_notes.exists ? `${files.self_notes.size_bytes || 0}b` : 'missing'),
@@ -866,6 +912,111 @@
         .catch(e => {
           summaryEl.innerHTML = renderInspectorMetric('State', 'error');
           sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/state_inspector.</div>';
+        });
+    }
+
+    function renderStateSource(item) {
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#ecfccb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.name || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">${escHtml(item.kind || '-')} / ${escHtml(item.scope || '-')} / ${escHtml(item.role || '-')}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">${escHtml(item.exists === false && item.kind === 'file' ? 'missing' : 'present')}</span>
+            <span class="inspector-pill">${escHtml(item.format || item.entries || 0)}</span>
+            ${item.size_bytes !== undefined ? `<span class="inspector-pill">${escHtml(item.size_bytes)}b</span>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function loadStateStoreAudit() {
+      const summaryEl = document.getElementById('state-store-audit-summary');
+      const itemsEl = document.getElementById('state-store-audit-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(routePath(`/api/state_store_audit?token=${encodeURIComponent(token)}`))
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('StateStore', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">StateStore Audit API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          const caps = snap.capabilities || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Configured Files', summary.configured_files || 0),
+            renderInspectorMetric('Existing Files', summary.existing_files || 0),
+            renderInspectorMetric('Runtime Sources', summary.runtime_sources || 0),
+            renderInspectorMetric('Runtime Entries', summary.runtime_entries || 0),
+            renderInspectorMetric('KV API', summary.kv_api_available ? 'yes' : 'no'),
+            renderInspectorMetric('Snapshot', caps.snapshot || 'unknown'),
+            renderInspectorMetric('Diff', caps.diff || 'unknown'),
+            renderInspectorMetric('Rollback', caps.rollback || 'unknown')
+          ].join('');
+          const files = Array.isArray(snap.files) ? snap.files.slice(0, 8) : [];
+          itemsEl.innerHTML = files.length
+            ? files.map(renderStateSource).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No configured state files observed yet.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('StateStore', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/state_store_audit.</div>';
+        });
+    }
+
+    function renderBackgroundTaskSession(session) {
+      return `
+        <div class="inspector-session">
+          <div style="min-width:0;">
+            <div style="font-weight:700; color:#fce7f3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
+            <div style="color:var(--text-muted); margin-top:3px;">lag ${escHtml(session.state_lag_count || 0)} / checkpoint ${escHtml(session.checkpoint_task_state || 'none')}</div>
+          </div>
+          <div style="text-align:right;">
+            <span class="inspector-pill">q ${escHtml(session.queue_depth || 0)}</span>
+            <span class="inspector-pill">active ${escHtml(session.active_workers || 0)}</span>
+            <span class="inspector-pill">dead ${escHtml(session.dead_letter_count || 0)}</span>
+            <span class="inspector-pill">${escHtml(session.warning_level || 'ok')}</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function loadBackgroundTasks() {
+      const summaryEl = document.getElementById('background-tasks-summary');
+      const itemsEl = document.getElementById('background-tasks-items');
+      if (!summaryEl || !itemsEl) return;
+      fetch(routePath(`/api/background_tasks?limit=8&token=${encodeURIComponent(token)}`))
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.snapshot) {
+            summaryEl.innerHTML = renderInspectorMetric('Tasks', 'offline');
+            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Background Tasks API returned no snapshot.</div>';
+            return;
+          }
+          const snap = data.snapshot;
+          const summary = snap.summary || {};
+          summaryEl.innerHTML = [
+            renderInspectorMetric('Managed', summary.managed_tasks || 0),
+            renderInspectorMetric('Pending', summary.pending_tasks || 0),
+            renderInspectorMetric('Exceptions', summary.task_exceptions || 0),
+            renderInspectorMetric('Post Sessions', summary.background_post_sessions || 0),
+            renderInspectorMetric('Queued', summary.background_post_queued || 0),
+            renderInspectorMetric('Dead Letters', summary.background_post_dead_letters || 0),
+            renderInspectorMetric('Warnings', summary.background_post_warnings || 0),
+            renderInspectorMetric('Redaction', 'metadata')
+          ].join('');
+          const post = snap.background_post || {};
+          const sessions = Array.isArray(post.sessions) ? post.sessions.slice(0, 8) : [];
+          itemsEl.innerHTML = sessions.length
+            ? sessions.map(renderBackgroundTaskSession).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No background post queue sessions observed.</div>';
+        })
+        .catch(e => {
+          summaryEl.innerHTML = renderInspectorMetric('Tasks', 'error');
+          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/background_tasks.</div>';
         });
     }
 
@@ -892,7 +1043,7 @@
       const summaryEl = document.getElementById('memory-explorer-summary');
       const sessionsEl = document.getElementById('memory-explorer-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(`/api/memory_explorer?limit=5&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/memory_explorer?limit=5&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -949,7 +1100,7 @@
       const summaryEl = document.getElementById('memory-recall-replay-summary');
       const itemsEl = document.getElementById('memory-recall-replay-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(`/api/memory_recall_replay?limit=20&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/memory_recall_replay?limit=20&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -998,7 +1149,7 @@
       const summaryEl = document.getElementById('desire-dashboard-summary');
       const itemsEl = document.getElementById('desire-dashboard-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(`/api/desire_dashboard?limit=8&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/desire_dashboard?limit=8&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1056,7 +1207,7 @@
       const summaryEl = document.getElementById('desire-evolution-summary');
       const itemsEl = document.getElementById('desire-evolution-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(`/api/desire_evolution?limit=20&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/desire_evolution?limit=20&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1111,7 +1262,7 @@
       const summaryEl = document.getElementById('scar-explorer-summary');
       const sessionsEl = document.getElementById('scar-explorer-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(`/api/scar_explorer?limit=8&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/scar_explorer?limit=8&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1164,7 +1315,7 @@
       const summaryEl = document.getElementById('personality-drift-summary');
       const sessionsEl = document.getElementById('personality-drift-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(`/api/personality_drift?limit=8&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/personality_drift?limit=8&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1220,7 +1371,7 @@
       const summaryEl = document.getElementById('reasoning-trace-summary');
       const stepsEl = document.getElementById('reasoning-trace-steps');
       if (!summaryEl || !stepsEl) return;
-      fetch(`/api/reasoning_trace?limit=80&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/reasoning_trace?limit=80&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1281,7 +1432,7 @@
       const summaryEl = document.getElementById('session-replay-summary');
       const itemsEl = document.getElementById('session-replay-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(`/api/session_replay?limit=80&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/session_replay?limit=80&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
@@ -1349,7 +1500,7 @@
     function loadCognitiveTimeline() {
       const container = document.getElementById('cognitive-timeline-container');
       const statsEl = document.getElementById('cognitive-stats');
-      fetch(`/api/runtime_events?limit=80&token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/runtime_events?limit=80&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !Array.isArray(data.events) || data.events.length === 0) {
@@ -1373,7 +1524,7 @@
     // Load mutations history via API
     function loadMutationHistory() {
       const container = document.getElementById('timeline-container');
-      fetch(`/api/mutation_history?token=${encodeURIComponent(token)}`)
+      fetch(routePath(`/api/mutation_history?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.ok || !data.history || data.history.length === 0) {
@@ -1384,11 +1535,14 @@
           const history = [...data.history].reverse();
           container.innerHTML = history.map(item => {
             const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString('zh-CN') : '未知时间';
+            const descMeta = item.description_redacted
+              ? `描述已脱敏 · len=${Number(item.description_length || 0)} · fp=${escHtml(item.description_fingerprint || 'none')}`
+              : escHtml(item.description || '无具体内容描述');
             return `
               <div class="timeline-item">
                 <div class="timeline-time">${escHtml(timeStr)}</div>
                 <span class="timeline-type">${escHtml(item.type || '突变')}</span>
-                <div class="timeline-desc">${escHtml(item.description || '无具体内容描述')}</div>
+                <div class="timeline-desc">${descMeta}</div>
               </div>
             `;
           }).join('');
@@ -1403,7 +1557,7 @@
       if (!confirm("确定要撤销最新核心突变并回退到上一个版本的人设配置文件吗？\n警告：这将会覆盖当前的 core_beliefs 并且重载人格。")) {
         return;
       }
-      fetch(`/api/mutation_rollback?token=${encodeURIComponent(token)}`, {
+      fetch(routePath(`/api/mutation_rollback?token=${encodeURIComponent(token)}`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1435,6 +1589,8 @@
       loadMutationHistory();
       loadCognitiveTimeline();
       loadStateInspector();
+      loadStateStoreAudit();
+      loadBackgroundTasks();
       loadMemoryExplorer();
       loadMemoryRecallReplay();
       loadDesireDashboard();

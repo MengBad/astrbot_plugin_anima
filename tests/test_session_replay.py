@@ -109,3 +109,38 @@ def test_session_replay_respects_session_filter():
     assert snapshot["sessions"][0]["session_key"] == "session-b"
     assert snapshot["summary"]["buffer_messages"] == 1
     assert "a-only" not in json.dumps(snapshot, ensure_ascii=False)
+
+
+def test_session_replay_includes_state_store_audit_snapshot_without_state_bodies():
+    secret_state_body = "private state body should not leak"
+    bus = RuntimeEventBus(max_events=10)
+    bus.emit(
+        "state.store_audit_snapshot",
+        session_key="session-a",
+        ts=3.0,
+        payload={
+            "configured_files": 16,
+            "existing_files": 4,
+            "diff_ready_sources": 4,
+            "source_fingerprint": "abc123def4567890",
+            "state_body": secret_state_body,
+        },
+    )
+    plugin = types.SimpleNamespace(
+        _runtime_event_bus=bus,
+        _conversation_buffers={},
+        _hosts={},
+        _memory_systems={},
+        _prompt_debug_snapshots={},
+        _last_request_budgets={},
+    )
+
+    snapshot = build_session_replay_snapshot(plugin)
+    encoded = json.dumps(snapshot, ensure_ascii=False)
+    timeline = snapshot["sessions"][0]["timeline"]
+    event = next(item for item in timeline if item["type"] == "state.store_audit_snapshot")
+
+    assert event["action"] == "state_store_audit_snapshot"
+    assert event["evidence"]["configured_files"] == 16
+    assert event["evidence"]["source_fingerprint"] == "abc123def4567890"
+    assert secret_state_body not in encoded
