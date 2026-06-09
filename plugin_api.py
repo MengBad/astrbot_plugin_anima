@@ -43,6 +43,8 @@ class PluginAPI:
         if webui_routes:
             webui_mappings = [
                 ("", "page_handler", ["GET"]),
+                ("/anima", "page_handler", ["GET"]),
+                ("/anima/", "page_handler", ["GET"]),
                 ("/sylanne", "sylanne_page_handler", ["GET"]),
                 ("/sylanne/", "sylanne_page_handler", ["GET"]),
                 ("/dashboard", "dashboard_handler", ["GET"]),

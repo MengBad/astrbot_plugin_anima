@@ -158,3 +158,45 @@ def test_state_store_audit_metadata_fingerprint_changes_on_file_metadata_change(
     assert first["summary"]["source_fingerprint"] != second["summary"]["source_fingerprint"]
     encoded = json.dumps(second, ensure_ascii=False)
     assert "private self narrative" not in encoded
+
+
+def test_state_store_audit_fingerprints_unconfigured_sources(tmp_path):
+    class MinimalPlugin:
+        data_dir = str(tmp_path)
+        self_notes_path = str(tmp_path / "self_notes.md")
+        _hosts = {}
+
+    first = build_state_store_audit_snapshot(MinimalPlugin())
+    second = build_state_store_audit_snapshot(FakePlugin(tmp_path))
+
+    first_by_name = {item["name"]: item for item in first["files"]}
+    second_by_name = {item["name"]: item for item in second["files"]}
+
+    assert first_by_name["anima_state"]["configured"] is False
+    assert first_by_name["anima_state"]["metadata_fingerprint"]
+    assert first_by_name["self_notes"]["configured"] is True
+    assert first_by_name["self_notes"]["metadata_fingerprint"]
+    assert first["summary"]["source_fingerprint"] != second["summary"]["source_fingerprint"]
+    assert all("metadata_fingerprint" in item for item in first["files"])
+    assert str(tmp_path) not in json.dumps(first, ensure_ascii=False)
+    assert str(tmp_path) not in json.dumps(second_by_name["anima_state"], ensure_ascii=False)
+
+
+def test_state_store_audit_fingerprints_runtime_and_session_aggregates(tmp_path):
+    plugin = FakePlugin(tmp_path)
+    first = build_state_store_audit_snapshot(plugin)
+
+    plugin._memory_systems["session-b"] = object()
+    sessions_dir = tmp_path / "sessions" / "private-session-key"
+    sessions_dir.mkdir(parents=True)
+    (sessions_dir / "worldview.json").write_text('{"secret": true}', encoding="utf-8")
+    second = build_state_store_audit_snapshot(plugin)
+
+    first_runtime = {item["name"]: item for item in first["runtime"]}
+    second_runtime = {item["name"]: item for item in second["runtime"]}
+
+    assert all("metadata_fingerprint" in item for item in first["runtime"])
+    assert first_runtime["memory_systems"]["metadata_fingerprint"] != second_runtime["memory_systems"]["metadata_fingerprint"]
+    assert first["session_files"]["metadata_fingerprint"] != second["session_files"]["metadata_fingerprint"]
+    assert first["summary"]["source_fingerprint"] != second["summary"]["source_fingerprint"]
+    assert "private-session-key" not in json.dumps(second, ensure_ascii=False)

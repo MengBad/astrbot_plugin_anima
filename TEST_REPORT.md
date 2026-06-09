@@ -41,6 +41,8 @@ py -3 -m pytest -q
 - State Inspector redaction and non-destructive dirty flag diagnostics
 - embedded StateStore Audit read-only inventory for file/runtime/KV state-source topology and future StateStore capability gaps
 - StateStore Audit metadata-only fingerprints for file-source diff readiness without reading or hashing state bodies
+- StateStore Audit full-topology fingerprints for declared-but-unconfigured file sources, making missing sources observable before a unified StateStore migration
+- StateStore Audit runtime-container and session-aggregate fingerprints for cache/session topology diff readiness without exposing keys, message text, or session directory names
 - StateStore Audit runtime event visibility in Reasoning Trace and Session Replay with dedicated redaction whitelist
 - shared WebUI and independent WebUI `/api/state_inspector` route registration
 - shared WebUI and independent WebUI `/api/state_store_audit` route registration
@@ -85,6 +87,8 @@ py -3 -m pytest -q
 - legacy dashboard/capability-tree assets preserved under internal WebUI assets
 - standalone WebUI legacy route asset directory wiring
 - legacy iframe bridge path contract for shared `/astrbot_plugin_anima/<path>` APIs vs standalone `/api/<path>` APIs
+- shared AstrBot Plugin Page `/anima` alias registration for frontend `#/plugin-page/astrbot_plugin_anima/anima` URLs
+- stdlib standalone WebUI fallback query-token authentication, Observatory API parity, legacy iframe pages, and mutation rollback POST route coverage
 - shared mutation rollback uses plugin IO lock/atomic text writer while swapping `persona_core.yaml` and `.bak`
 - shared mutation rollback records the same `回滚恢复` mutation-history entry as the independent WebUI route
 - shared WebUI and independent WebUI mutation-history responses expose `anima.mutation_history.v1`, redact raw mutation descriptions into length/fingerprint metadata, and bound timestamp/type/trigger metadata
@@ -96,16 +100,16 @@ py -3 -m pytest -q
 - bundled Python read-only `compile(...)` syntax check for task registry and touched lifecycle modules: passed
 - `node -e "... vm.Script(...portal script ...)"`: passed
 - `py -3 -m pytest tests\test_background_task_observer.py tests\test_phase2_stability_fixes.py tests\test_runtime_observability.py -q`: `14 passed`
-- `py -3 -m pytest tests\test_state_inspector.py tests\test_cognitive_timeline_webui.py -q`: `22 passed`
+- `py -3 -m pytest tests\test_state_inspector.py tests\test_cognitive_timeline_webui.py -q`: `25 passed`
 - `py -3 -m pytest tests\test_state_inspector.py tests\test_cognitive_timeline_webui.py tests\test_unified_plugin_page.py -q`: `27 passed`
 - `py -3 -m pytest tests\test_reasoning_trace.py tests\test_session_replay.py tests\test_runtime_observability.py -q`: `11 passed`
 - `py -3 -m pytest tests\test_reasoning_trace.py tests\test_session_replay.py tests\test_runtime_observability.py tests\test_cognitive_timeline_webui.py tests\test_state_inspector.py -q`: `33 passed`
-- `py -3 -m pytest tests\test_cognitive_timeline_webui.py tests\test_unified_plugin_page.py -q`: `23 passed`
+- `py -3 -m pytest tests\test_cognitive_timeline_webui.py tests\test_unified_plugin_page.py -q`: `26 passed`
 - `py -3 -m pytest tests\test_background_task_observer.py tests\test_cognitive_timeline_webui.py tests\test_state_inspector.py tests\test_runtime_observability.py tests\test_session_replay.py tests\test_reasoning_trace.py -q`: `24 passed`
 - `py -3 -m pytest tests\test_memory_recall_replay.py tests\test_memory_explorer.py tests\test_cognitive_timeline_webui.py tests\test_session_replay.py tests\test_reasoning_trace.py -q`: `18 passed`
 - `py -3 -m pytest tests\test_desire_evolution.py tests\test_desire_dashboard.py tests\test_cognitive_timeline_webui.py tests\test_phase2_stability_fixes.py -q`: `19 passed`
 - `py -3 -m pytest tests\test_desire_evolution.py tests\test_desire_dashboard.py tests\test_cognitive_timeline_webui.py tests\test_runtime_observability.py tests\test_unified_plugin_page.py -q`: `20 passed`
-- `py -3 -m pytest tests\test_unified_plugin_page.py -q`: `3 passed`
+- `py -3 -m pytest tests\test_unified_plugin_page.py -q`: `6 passed`
 - `py -3 -m pytest tests\test_session_replay.py tests\test_reasoning_trace.py tests\test_cognitive_timeline_webui.py tests\test_runtime_observability.py -q`: `18 passed`
 - `py -3 -m pytest tests\test_reasoning_trace.py tests\test_cognitive_timeline_webui.py tests\test_runtime_observability.py -q`: `15 passed`
 - `py -3 -m pytest tests\test_desire_dashboard.py tests\test_cognitive_timeline_webui.py -q`: `7 passed`
@@ -115,7 +119,7 @@ py -3 -m pytest -q
 - `py -3 -m pytest tests\test_state_inspector.py tests\test_cognitive_timeline_webui.py -q`: `5 passed`
 - `py -3 -m pytest tests\test_cognitive_timeline_webui.py tests\test_runtime_observability.py -q`: `7 passed`
 - `py -3 -m pytest tests\test_runtime_observability.py tests\test_phase2_stability_fixes.py -q`: `9 passed`
-- `py -3 -m pytest -q`: `402 passed, 50 warnings`
+- `py -3 -m pytest -q`: `406 passed, 50 warnings`
 
 ## Warnings
 

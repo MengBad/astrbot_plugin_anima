@@ -1,6 +1,6 @@
-## v1.2.6 - 任务观测器与数据源审计：Background Task 监控、StateStore 只读审计及共享路由修复
+## v1.2.7 - WebUI 入口与 fallback 数据接口热修复
 
-本版主要引入了后台异步任务监控（Background Task Observatory）和数据存储审计（StateStore Audit），并彻底修复了通过共享路由（AstrBot 插件管理页面）访问时的 API 数据加载及 iframe 指向异常。此外，重写了项目文档，并将测试用例扩充至 402 项且全绿通过。
+本版基于 v1.2.6 继续加固 WebUI 发布路径，重点修复 AstrBot Plugin Page 打开 `/astrbot_plugin_anima/anima` 时可能进入 404、独立 Sylanne WebUI fallback 模式下 dashboard/capability-tree 与 Observatory API 无法加载的问题。同时补强 StateStore 只读审计指纹与测试覆盖，将测试用例扩充至 406 项且全绿通过。
 
 ### 后台任务观测台 (Background Task Observatory)
 - 新增脱敏的 `anima.background_task_observer.v1` 协程任务快照，监控正在运行的 asyncio 任务、时间碎片定时器、分段响应任务、Checkpoint 任务和后台投递队列。
@@ -11,11 +11,15 @@
 ### 状态存储审计 (State Store Audit)
 - 引入 `anima.state_store_audit.v1` 只读审计子快照，盘点 `anima_state.json`、`self_notes.md`、`desires.json`、会话文件、运行时缓存与 KV 可用性。
 - 通过元数据及大小信息生成 `metadata_fingerprint` 与全局 `source_fingerprint`，作为未来 StateStore diff 的只读前置证据，绝对不读取或哈希文件正文。
+- 未配置但已声明的状态源现在同样生成 `metadata_fingerprint`，全局 `source_fingerprint` 覆盖完整拓扑，便于观察缺失状态源、配置变化和未来 StateStore 迁移差异。
+- runtime 容器与 session 文件聚合统计现在同样生成元数据指纹，便于定位运行时缓存、会话文件数量或 StateStore 迁移基线变化。
 - 注册 `/api/state_store_audit` 接口，并在 Portal 中新增 StateStore Audit 卡片，便于定位状态源一致性状态。
 
 ### WebUI 共享路由修复 (WebUI Shared-Route Fix)
 - 彻底修复通过 AstrBot 共享插件页面路由（`/astrbot_plugin_anima/`）访问时的 Portal 数据拉取路径。通过新引入的 `routePath()` 助手，动态适配共享端口（`/astrbot_plugin_anima/api/...`）与独立端口（`/api/...`）。
+- 新增 `/astrbot_plugin_anima/anima` 与 `/astrbot_plugin_anima/anima/` 页面别名，兼容 AstrBot 前端 Plugin Page URL，避免打开 `#/plugin-page/astrbot_plugin_anima/anima` 时落入 404。
 - 将遗留的 dashboard/capability-tree 页面资产、静态资源和人格回滚接口注册至 AstrBot 共享 WebUI 层，解决 Portal 嵌入卡片在共享页面中加载失败的问题。
+- 补齐独立 Sylanne WebUI 的 stdlib fallback 路由：fallback 模式现在同样服务 Portal、dashboard/capability-tree 内部页、Observatory API、`?token=` 鉴权和 mutation rollback POST，避免缺少 aiohttp 或 fallback 启动时出现 `index.html not found` 与 `/api/...` 加载失败。
 - 加固人格回滚接口，复用插件 IO 锁和原子文本写入，且在共享与独立路由上记录一致的脱敏 `回滚恢复` 演化日志。
 - 脱敏人设突变历史数据，在 `/api/mutation_history` 返回 `schema_version="anima.mutation_history.v1"` 并抹除具体的 core-beliefs 变更细节，仅保留哈希指纹与统计描述。
 
@@ -28,7 +32,7 @@
 
 ### 测试
 - 新增覆盖后台任务容器、共享路由 API 映射、StateStore 只读指纹、人格回滚 IO 安全及 API 响应脱敏规范的契约测试。
-- 测试用例总数提升至 `402` 个，全部通过（402 passed）。
+- 测试用例总数提升至 `406` 个，全部通过（406 passed）。
 
 ---
 

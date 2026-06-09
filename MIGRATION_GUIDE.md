@@ -1,4 +1,4 @@
-# Migration Guide - v1.2.5
+# Migration Guide - v1.2.7
 
 ## Who Needs Action?
 
@@ -69,7 +69,9 @@ Desire Evolution History is observability-only too: it connects current desire q
 Mutation History is observability-only too: it exposes schema-versioned, redacted mutation metadata with length/fingerprint evidence instead of raw mutation descriptions.
 
 StateStore Audit is observability-only too: it is available as `/api/state_store_audit`, also embedded inside `/api/state_inspector` as `anima.state_store_audit.v1`, and reports only state-source metadata, runtime container counts, session-file aggregate counts, KV availability, future StateStore capability gaps, and metadata-only fingerprints for diff readiness.
-Those fingerprints are based on source metadata such as basename, existence, size, and mtime. They are not content hashes and do not read state bodies.
+Those fingerprints are based on source metadata such as basename, configured/existing state, size, and mtime. They are not content hashes and do not read state bodies.
+Declared but unconfigured state sources also receive metadata fingerprints, so topology gaps and future StateStore migration differences are observable without creating files.
+Runtime containers and session-file aggregate counts also receive metadata fingerprints, so cache/session topology changes are observable without exposing keys, message text, or session directory names.
 
 ### Background task lifecycle registry
 
@@ -82,19 +84,21 @@ After upgrading:
 
 1. Restart or reload the plugin.
 2. Confirm `/astrbot_plugin_anima/health` responds if WebUI routes are enabled.
-3. Open `/astrbot_plugin_anima/api/runtime_events?limit=20`.
-4. If using the independent WebUI, open `/api/runtime_events?limit=20&token=<token>`.
-5. Open Anima Portal and check the `Cognitive Timeline` panel.
-6. Check that `Reasoning Trace`, `Session Replay`, `State Inspector`, `Background Tasks`, `Memory Explorer`, `Memory Recall Replay`, `Desire Dashboard`, `Desire Evolution`, `Scar Explorer`, and `Personality Drift` cards render in the same panel.
-7. If opening from AstrBot's Plugin Page list, confirm network requests use `/astrbot_plugin_anima/api/...`; if opening the independent Sylanne WebUI, confirm requests still use `/api/...`.
-8. In the unified Portal, open the Dashboard and Capability Tree iframe tabs and confirm their internal API calls resolve under `/astrbot_plugin_anima/...` on the shared WebUI path.
-9. Run one normal conversation turn.
-10. Confirm a `response.observed` event appears.
-11. If a tool is used, confirm `tool.invocation_started` / `tool.invocation_finished` metadata appears without raw arguments or results.
-12. Check logs for any `corrupt-json` backup notices.
+3. Open `/astrbot_plugin_anima/anima` from AstrBot's Plugin Page route and confirm it no longer falls through to the AstrBot 404 helper page.
+4. Open `/astrbot_plugin_anima/api/runtime_events?limit=20`.
+5. If using the independent WebUI, open `/api/runtime_events?limit=20&token=<token>`.
+6. If the independent WebUI is running on the stdlib fallback server, confirm dashboard/capability-tree iframes and Observatory cards load instead of showing `index.html not found` or failed `/api/...` messages.
+7. Open Anima Portal and check the `Cognitive Timeline` panel.
+8. Check that `Reasoning Trace`, `Session Replay`, `State Inspector`, `Background Tasks`, `Memory Explorer`, `Memory Recall Replay`, `Desire Dashboard`, `Desire Evolution`, `Scar Explorer`, and `Personality Drift` cards render in the same panel.
+9. If opening from AstrBot's Plugin Page list, confirm network requests use `/astrbot_plugin_anima/api/...`; if opening the independent Sylanne WebUI, confirm requests still use `/api/...`.
+10. In the unified Portal, open the Dashboard and Capability Tree iframe tabs and confirm their internal API calls resolve under `/astrbot_plugin_anima/...` on the shared WebUI path.
+11. Run one normal conversation turn.
+12. Confirm a `response.observed` event appears.
+13. If a tool is used, confirm `tool.invocation_started` / `tool.invocation_finished` metadata appears without raw arguments or results.
+14. Check logs for any `corrupt-json` backup notices.
 
 ## Rollback
 
 Rollback to the previous plugin version is safe.
 
-If `.bak` files were created for corrupt JSON, keep them for manual inspection. They are not required by v1.2.5 at runtime.
+If `.bak` files were created for corrupt JSON, keep them for manual inspection. They are not required by v1.2.7 at runtime.

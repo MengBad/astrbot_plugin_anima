@@ -2237,9 +2237,15 @@ def start_webui_thread_server(
     from pathlib import Path
 
     plugin_root = Path(__file__).resolve().parent.parent
-    dashboard_path = plugin_root / "UI" / "index.html"
-    if dashboard_path.exists():
-        dashboard_html = dashboard_path.read_text(encoding="utf-8")
+    portal_path = plugin_root / "UI" / "portal.html"
+    if portal_path.exists():
+        portal_html = portal_path.read_text(encoding="utf-8")
+    else:
+        portal_html = "<html><body><h1>Portal unavailable</h1></body></html>"
+
+    sylanne_dashboard_path = plugin_root / "UI" / "index.html"
+    if sylanne_dashboard_path.exists():
+        dashboard_html = sylanne_dashboard_path.read_text(encoding="utf-8")
     else:
         dashboard_html = (
             "<html><body><h1>Sylanne Dashboard unavailable</h1></body></html>"
@@ -2288,10 +2294,13 @@ def start_webui_thread_server(
             self.wfile.write(data)
 
         def _send_text(
-            self, text: str, content_type: str = "text/html; charset=utf-8"
+            self,
+            text: str,
+            content_type: str = "text/html; charset=utf-8",
+            status: int = 200,
         ) -> None:
             data = text.encode("utf-8")
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
@@ -2317,6 +2326,73 @@ def start_webui_thread_server(
                 if values
             }
 
+        def _authorized(self, path: str, query: dict[str, str]) -> bool:
+            if path in (
+                "/",
+                "/favicon.ico",
+                "/health",
+                "/metrics",
+                "/logo.png",
+                "/assets/logo.png",
+                "/sylanne",
+                "/dashboard",
+                "/dashboard/app.js",
+                "/dashboard/style.css",
+                "/capability-tree",
+                "/capability-tree/app.js",
+                "/capability-tree/style.css",
+            ):
+                return True
+            auth = self.headers.get("Authorization", "")
+            token_val = auth[7:] if auth.startswith("Bearer ") else query.get("token", "")
+            return token_val == _active_token
+
+        def _send_legacy_page(self, page: str, active_page: str) -> None:
+            index_path = plugin_root / "UI" / "plugin_pages" / page / "index.html"
+            if not index_path.exists():
+                self._send_text(
+                    f"{page} index.html not found.",
+                    status=404,
+                    content_type="text/plain; charset=utf-8",
+                )
+                return
+            html = _inject_shim_and_nav(index_path.read_text(encoding="utf-8"), active_page)
+            self._send_text(html)
+
+        def _send_legacy_asset(self, page: str, filename: str, content_type: str) -> None:
+            asset_path = plugin_root / "UI" / "plugin_pages" / page / filename
+            if not asset_path.exists():
+                self._send_text(
+                    f"{filename} not found",
+                    status=404,
+                    content_type="text/plain; charset=utf-8",
+                )
+                return
+            self._send_text(
+                asset_path.read_text(encoding="utf-8"),
+                content_type=content_type,
+            )
+
+        def _emit_snapshot_event(
+            self,
+            current_plugin: Any,
+            event_type: str,
+            payload: dict[str, Any],
+            *,
+            session_key: str = "",
+            tags: list[str] | None = None,
+        ) -> None:
+            emitter = getattr(current_plugin, "_emit_runtime_event", None)
+            if callable(emitter):
+                emitter(
+                    event_type,
+                    session_key=session_key,
+                    severity="debug",
+                    source="webui_server_stdlib",
+                    payload=payload,
+                    tags=tags or [],
+                )
+
         def do_OPTIONS(self) -> None:
             self.send_response(204)
             self.send_header(
@@ -2336,21 +2412,50 @@ def start_webui_thread_server(
                 return
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
-            if path not in ("/", "/favicon.ico", "/health", "/metrics", "/logo.png", "/assets/logo.png"):
-                auth = self.headers.get("Authorization", "")
-                if not auth.startswith("Bearer ") or auth[7:] != _active_token:
-                    self._send_json({"error": "unauthorized"}, status=401)
-                    return
+            query = self._query()
+            if not self._authorized(path, query):
+                self._send_json({"error": "unauthorized"}, status=401)
+                return
             # S9: /metrics requires Bearer token when auth is configured
             if path == "/metrics" and _active_token:
                 auth = self.headers.get("Authorization", "")
-                if not auth.startswith("Bearer ") or auth[7:] != _active_token:
+                token_val = auth[7:] if auth.startswith("Bearer ") else query.get("token", "")
+                if token_val != _active_token:
                     self._send_json({"error": "unauthorized"}, status=401)
                     return
-            query = self._query()
             try:
                 if path == "/":
-                    self._send_text(dashboard_html)
+                    self._send_text(portal_html)
+                elif path == "/sylanne":
+                    self._send_text(_inject_shim_and_nav(dashboard_html, "sylanne"))
+                elif path == "/dashboard":
+                    self._send_legacy_page("dashboard", "dashboard")
+                elif path == "/dashboard/app.js":
+                    self._send_legacy_asset(
+                        "dashboard",
+                        "app.js",
+                        "application/javascript; charset=utf-8",
+                    )
+                elif path == "/dashboard/style.css":
+                    self._send_legacy_asset(
+                        "dashboard",
+                        "style.css",
+                        "text/css; charset=utf-8",
+                    )
+                elif path == "/capability-tree":
+                    self._send_legacy_page("capability-tree", "capability-tree")
+                elif path == "/capability-tree/app.js":
+                    self._send_legacy_asset(
+                        "capability-tree",
+                        "app.js",
+                        "application/javascript; charset=utf-8",
+                    )
+                elif path == "/capability-tree/style.css":
+                    self._send_legacy_asset(
+                        "capability-tree",
+                        "style.css",
+                        "text/css; charset=utf-8",
+                    )
                 elif path == "/api/state":
                     # 自动关闭 diagnostics：超过 30s 无 computation_logs 请求
                     if _last_diag_request and time.time() - _last_diag_request > 30:
@@ -2437,6 +2542,272 @@ def start_webui_thread_server(
                             "session": session,
                         }
                     )
+                elif path == "/api/runtime_events":
+                    try:
+                        limit = int(query.get("limit", "100"))
+                    except (TypeError, ValueError):
+                        limit = 100
+                    session_key = str(query.get("session", "") or "").strip()
+                    event_type = str(query.get("type", "") or "").strip()
+                    severity = str(query.get("severity", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        bus = getattr(current_plugin, "_runtime_event_bus", None)
+                    if bus is None:
+                        self._send_json({
+                            "success": True,
+                            "events": [],
+                            "stats": {"total": 0, "by_type": {}, "by_severity": {}},
+                        })
+                    else:
+                        self._send_json({
+                            "success": True,
+                            "events": bus.recent(
+                                limit=limit,
+                                session_key=session_key,
+                                event_type=event_type,
+                                severity=severity,
+                            ),
+                            "stats": bus.stats(),
+                        })
+                elif path == "/api/prompt_debug":
+                    try:
+                        limit = int(query.get("limit", "50"))
+                    except (TypeError, ValueError):
+                        limit = 50
+                    limit = max(1, min(200, limit))
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshots = getattr(current_plugin, "_prompt_debug_snapshots", None)
+                        values = list(snapshots.values()) if hasattr(snapshots, "values") else []
+                    if session_key:
+                        values = [
+                            item for item in values
+                            if isinstance(item, dict) and item.get("session_key") == session_key
+                        ]
+                    values = sorted(
+                        [item for item in values if isinstance(item, dict)],
+                        key=lambda item: float(item.get("timestamp") or 0),
+                        reverse=True,
+                    )[:limit]
+                    self._send_json({"success": True, "snapshots": values, "count": len(values)})
+                elif path == "/api/reasoning_trace":
+                    from sylanne_alpha.reasoning_trace import build_reasoning_trace_snapshot
+                    try:
+                        limit = int(query.get("limit", "80"))
+                    except (TypeError, ValueError):
+                        limit = 80
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_reasoning_trace_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "reasoning.trace_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["reasoning", "trace"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/session_replay":
+                    from sylanne_alpha.session_replay import build_session_replay_snapshot
+                    try:
+                        limit = int(query.get("limit", "80"))
+                    except (TypeError, ValueError):
+                        limit = 80
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_session_replay_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "session.replay_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["session", "replay"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/state_inspector":
+                    from sylanne_alpha.state_inspector import build_state_inspector_snapshot
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_state_inspector_snapshot(current_plugin)
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "state.inspector_snapshot",
+                            snapshot.get("summary", {}),
+                            tags=["state", "inspector"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/state_store_audit":
+                    from sylanne_alpha.state_store_audit import build_state_store_audit_snapshot
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_state_store_audit_snapshot(current_plugin)
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "state.store_audit_snapshot",
+                            snapshot.get("summary", {}),
+                            tags=["state", "store", "audit"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/background_tasks":
+                    from sylanne_alpha.background_task_observer import build_background_task_observer_snapshot
+                    try:
+                        limit = int(query.get("limit", "20"))
+                    except (TypeError, ValueError):
+                        limit = 20
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_background_task_observer_snapshot(current_plugin, limit=limit)
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "background_tasks.snapshot",
+                            snapshot.get("summary", {}),
+                            tags=["tasks", "background", "observatory"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/memory_explorer":
+                    from sylanne_alpha.memory_explorer import build_memory_explorer_snapshot
+                    try:
+                        limit = int(query.get("limit", "12"))
+                    except (TypeError, ValueError):
+                        limit = 12
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_memory_explorer_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "memory.explorer_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["memory", "explorer"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/memory_recall_replay":
+                    from sylanne_alpha.memory_recall_replay import build_memory_recall_replay_snapshot
+                    try:
+                        limit = int(query.get("limit", "20"))
+                    except (TypeError, ValueError):
+                        limit = 20
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_memory_recall_replay_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "memory.recall_replay_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["memory", "recall", "replay"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/desire_dashboard":
+                    from sylanne_alpha.desire_dashboard import build_desire_dashboard_snapshot
+                    try:
+                        limit = int(query.get("limit", "20"))
+                    except (TypeError, ValueError):
+                        limit = 20
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_desire_dashboard_snapshot(current_plugin, limit=limit)
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "desire.dashboard_snapshot",
+                            snapshot.get("summary", {}),
+                            tags=["desire", "dashboard"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/desire_evolution":
+                    from sylanne_alpha.desire_evolution import build_desire_evolution_snapshot
+                    try:
+                        limit = int(query.get("limit", "20"))
+                    except (TypeError, ValueError):
+                        limit = 20
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_desire_evolution_snapshot(current_plugin, limit=limit)
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "desire.evolution_snapshot",
+                            snapshot.get("summary", {}),
+                            tags=["desire", "evolution"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/scar_explorer":
+                    from sylanne_alpha.scar_explorer import build_scar_explorer_snapshot
+                    try:
+                        limit = int(query.get("limit", "12"))
+                    except (TypeError, ValueError):
+                        limit = 12
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_scar_explorer_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "scar.explorer_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["scar", "explorer"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/personality_drift":
+                    from sylanne_alpha.personality_drift_viewer import (
+                        build_personality_drift_viewer_snapshot,
+                    )
+                    try:
+                        limit = int(query.get("limit", "12"))
+                    except (TypeError, ValueError):
+                        limit = 12
+                    session_key = str(query.get("session", "") or "").strip()
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        snapshot = build_personality_drift_viewer_snapshot(
+                            current_plugin,
+                            session_key=session_key,
+                            limit=limit,
+                        )
+                        self._emit_snapshot_event(
+                            current_plugin,
+                            "personality.drift_snapshot",
+                            snapshot.get("summary", {}),
+                            session_key=session_key,
+                            tags=["personality", "drift"],
+                        )
+                    self._send_json({"success": True, "snapshot": snapshot})
+                elif path == "/api/mutation_history":
+                    from sylanne_alpha.mutation_history_view import build_redacted_mutation_history
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        state = current_plugin._load_state()
+                    payload = build_redacted_mutation_history(
+                        state if isinstance(state, dict) else {},
+                        limit=query.get("limit", 50),
+                    )
+                    self._send_json(payload)
                 elif path == "/api/memory_pools":
                     limit = max(1, min(100, int(query.get("limit", "50"))))
                     session = query.get("session", "")
@@ -2713,11 +3084,10 @@ def start_webui_thread_server(
                 return
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
-            if path not in ("/", "/favicon.ico", "/logo.png", "/assets/logo.png"):
-                auth = self.headers.get("Authorization", "")
-                if not auth.startswith("Bearer ") or auth[7:] != _active_token:
-                    self._send_json({"error": "unauthorized"}, status=401)
-                    return
+            query = self._query()
+            if not self._authorized(path, query):
+                self._send_json({"error": "unauthorized"}, status=401)
+                return
             # Item 24: CSRF 防护 — POST 需要 X-CSRF-Token header
             csrf_header = self.headers.get("X-CSRF-Token", "")
             if csrf_header != _csrf_token:
@@ -2774,6 +3144,56 @@ def start_webui_thread_server(
                     self._send_json({"ok": True, "updated": updated})
                 except Exception as exc:
                     logger.error(f"Sylanne WebUI POST /api/settings error: {exc}", exc_info=True)
+                    self._send_json({"ok": False, "error": "Internal server error"}, status=500)
+            elif path == "/api/mutation_rollback":
+                try:
+                    import os
+                    from contextlib import nullcontext
+
+                    with _plugin_access_lock:
+                        current_plugin = _plugin(plugin)
+                        if current_plugin is None:
+                            self._send_json({"ok": False, "error": "Plugin not loaded"})
+                            return
+                        if current_plugin.config.get("persona_lock", False):
+                            self._send_json({"ok": False, "error": "Persona core is locked."})
+                            return
+
+                        backup_path = current_plugin.persona_core_path + ".bak"
+                        if not os.path.exists(backup_path):
+                            self._send_json({"ok": False, "error": "No rollback backup found."})
+                            return
+
+                        io_lock = getattr(current_plugin, "_io_lock", None)
+                        lock_ctx = io_lock if io_lock is not None else nullcontext()
+                        atomic_write = getattr(current_plugin, "_atomic_write_text_locked", None)
+
+                        def _write_text(path_value: str, content: str) -> None:
+                            if callable(atomic_write):
+                                atomic_write(path_value, content)
+                            else:
+                                with open(path_value, "w", encoding="utf-8") as f:
+                                    f.write(content)
+
+                        with lock_ctx:
+                            with open(backup_path, "r", encoding="utf-8") as f:
+                                backup_content = f.read()
+                            current_content = ""
+                            if os.path.exists(current_plugin.persona_core_path):
+                                with open(current_plugin.persona_core_path, "r", encoding="utf-8") as f:
+                                    current_content = f.read()
+                            _write_text(current_plugin.persona_core_path, backup_content)
+                            if current_content:
+                                _write_text(backup_path, current_content)
+
+                        current_plugin._record_mutation(
+                            "rollback_restore",
+                            "User-triggered rollback restored the previous persona core snapshot.",
+                            triggered_by="user_webui",
+                        )
+                    self._send_json({"ok": True, "message": "Rollback successful."})
+                except Exception as exc:
+                    logger.error(f"Sylanne WebUI POST /api/mutation_rollback error: {exc}", exc_info=True)
                     self._send_json({"ok": False, "error": "Internal server error"}, status=500)
             elif path == "/api/memory_consolidate":
                 try:

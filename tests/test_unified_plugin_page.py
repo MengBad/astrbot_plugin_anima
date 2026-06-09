@@ -30,6 +30,8 @@ def test_standalone_webui_reads_legacy_assets_from_internal_directory():
     assert 'return plugin_root / "UI" / "plugin_pages"' in server
     assert 'app.router.add_get("/capability-tree/", handle_captree_index)' in server
     assert 'app.router.add_get("/dashboard/", handle_dashboard_index)' in server
+    assert 'plugin_root / "UI" / "plugin_pages" / page / "index.html"' in server
+    assert 'plugin_root / "UI" / "plugin_pages" / page / filename' in server
 
 
 def test_legacy_iframe_bridge_paths_match_hosting_layer_contract():
@@ -45,3 +47,37 @@ def test_legacy_iframe_bridge_paths_match_hosting_layer_contract():
 
     assert "routeBase() + '/' + path" in shared_routes
     assert "return fetch('/api/' + path" in standalone_server
+
+
+def test_shared_plugin_page_registers_anima_alias_for_astrbot_frontend_route():
+    plugin_api = (ROOT / "plugin_api.py").read_text(encoding="utf-8")
+
+    assert '("/anima", "page_handler", ["GET"])' in plugin_api
+    assert '("/anima/", "page_handler", ["GET"])' in plugin_api
+
+
+def test_stdlib_standalone_webui_accepts_query_token_and_observatory_routes():
+    server = (ROOT / "anima" / "sylanne_alpha" / "webui_server.py").read_text(encoding="utf-8")
+
+    assert 'token_val = auth[7:] if auth.startswith("Bearer ") else query.get("token", "")' in server
+    assert "query = self._query()" in server
+    assert "if not self._authorized(path, query):" in server
+    assert 'elif path == "/api/mutation_rollback":' in server
+    assert '"Rollback successful."' in server
+    for route in (
+        "/api/runtime_events",
+        "/api/prompt_debug",
+        "/api/state_inspector",
+        "/api/state_store_audit",
+        "/api/background_tasks",
+        "/api/memory_explorer",
+        "/api/memory_recall_replay",
+        "/api/desire_dashboard",
+        "/api/desire_evolution",
+        "/api/scar_explorer",
+        "/api/personality_drift",
+        "/api/reasoning_trace",
+        "/api/session_replay",
+        "/api/mutation_history",
+    ):
+        assert f'path == "{route}"' in server

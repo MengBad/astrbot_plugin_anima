@@ -7,9 +7,9 @@ move behind a unified StateStore without exposing state contents.
 
 from __future__ import annotations
 
-import os
 import hashlib
 import json
+import os
 import time
 from typing import Any
 
@@ -62,6 +62,22 @@ def _fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
+def _source_metadata_fingerprint(item: dict[str, Any]) -> str:
+    return _fingerprint({
+        "name": item.get("name", ""),
+        "kind": item.get("kind", ""),
+        "scope": item.get("scope", ""),
+        "format": item.get("format", ""),
+        "role": item.get("role", ""),
+        "configured": bool(item.get("configured")),
+        "exists": bool(item.get("exists")),
+        "path": item.get("path", ""),
+        "size_bytes": int(item.get("size_bytes", 0) or 0),
+        "mtime_ns": int(item.get("mtime_ns", 0) or 0),
+        "error": str(item.get("error", "") or ""),
+    })
+
+
 def _file_source(plugin: Any, name: str, attr: str, scope: str, fmt: str, role: str) -> dict[str, Any]:
     path = getattr(plugin, attr, None)
     item: dict[str, Any] = {
@@ -75,36 +91,24 @@ def _file_source(plugin: Any, name: str, attr: str, scope: str, fmt: str, role: 
         "path": _basename(path),
         "content": "redacted",
     }
-    if not path:
-        return item
-    try:
-        exists = os.path.exists(path)
-        item["exists"] = bool(exists)
-        if exists:
-            stat = os.stat(path)
-            item["size_bytes"] = int(stat.st_size)
-            item["mtime"] = float(stat.st_mtime)
-            item["mtime_ns"] = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
-    except Exception as exc:
-        item["error"] = type(exc).__name__
-    item["metadata_fingerprint"] = _fingerprint({
-        "name": item.get("name", ""),
-        "kind": item.get("kind", ""),
-        "scope": item.get("scope", ""),
-        "format": item.get("format", ""),
-        "role": item.get("role", ""),
-        "configured": bool(item.get("configured")),
-        "exists": bool(item.get("exists")),
-        "size_bytes": int(item.get("size_bytes", 0) or 0),
-        "mtime_ns": int(item.get("mtime_ns", 0) or 0),
-        "error": str(item.get("error", "") or ""),
-    })
+    if path:
+        try:
+            exists = os.path.exists(path)
+            item["exists"] = bool(exists)
+            if exists:
+                stat = os.stat(path)
+                item["size_bytes"] = int(stat.st_size)
+                item["mtime"] = float(stat.st_mtime)
+                item["mtime_ns"] = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
+        except Exception as exc:
+            item["error"] = type(exc).__name__
+    item["metadata_fingerprint"] = _source_metadata_fingerprint(item)
     return item
 
 
 def _runtime_source(plugin: Any, name: str, attr: str, scope: str, role: str) -> dict[str, Any]:
     value = getattr(plugin, attr, None)
-    return {
+    item = {
         "name": name,
         "kind": "runtime",
         "scope": scope,
@@ -113,6 +117,15 @@ def _runtime_source(plugin: Any, name: str, attr: str, scope: str, role: str) ->
         "entries": _safe_len(value),
         "content": "redacted",
     }
+    item["metadata_fingerprint"] = _fingerprint({
+        "name": item.get("name", ""),
+        "kind": item.get("kind", ""),
+        "scope": item.get("scope", ""),
+        "role": item.get("role", ""),
+        "configured": bool(item.get("configured")),
+        "entries": int(item.get("entries", 0) or 0),
+    })
+    return item
 
 
 def _session_file_summary(plugin: Any) -> dict[str, Any]:
@@ -138,6 +151,14 @@ def _session_file_summary(plugin: Any) -> dict[str, Any]:
                     summary["time_sense_files"] += 1
     except Exception as exc:
         summary["error"] = type(exc).__name__
+    summary["metadata_fingerprint"] = _fingerprint({
+        "configured": bool(summary.get("configured")),
+        "exists": bool(summary.get("exists")),
+        "session_dirs": int(summary.get("session_dirs", 0) or 0),
+        "worldview_files": int(summary.get("worldview_files", 0) or 0),
+        "time_sense_files": int(summary.get("time_sense_files", 0) or 0),
+        "error": str(summary.get("error", "") or ""),
+    })
     return summary
 
 
@@ -185,16 +206,16 @@ def build_state_store_audit_snapshot(plugin: Any) -> dict[str, Any]:
                 "name": item.get("name", ""),
                 "metadata_fingerprint": item.get("metadata_fingerprint", ""),
             }
-            for item in configured_files
+            for item in files
         ],
         "runtime": [
             {
                 "name": item.get("name", ""),
-                "entries": int(item.get("entries", 0) or 0),
+                "metadata_fingerprint": item.get("metadata_fingerprint", ""),
             }
             for item in runtime
         ],
-        "sessions": sessions,
+        "sessions": sessions.get("metadata_fingerprint", ""),
         "kv_api_available": kv_available,
     })
 

@@ -54,7 +54,7 @@ Next step:
 
 `anima_state.json`, `self_notes.md`, `desires.json`, Sylanne runtime files, runtime caches, and AstrBot KV are still separate state sources.
 
-State Inspector now embeds a read-only `anima.state_store_audit.v1` inventory so operators can see the current topology and missing StateStore capabilities. It also exposes metadata-only fingerprints for diff readiness, but it is not a write path and does not provide content snapshot/diff/rollback yet.
+State Inspector now embeds a read-only `anima.state_store_audit.v1` inventory so operators can see the current topology and missing StateStore capabilities. It also exposes metadata-only fingerprints for diff readiness, including declared-but-unconfigured sources, runtime containers, and session-file aggregate counts, but it is not a write path and does not provide content snapshot/diff/rollback yet.
 
 Next step:
 
