@@ -180,11 +180,19 @@
     async function probe(url, target) {
       try {
         const response = await fetch(url, { headers: { Accept: 'application/json' } });
-        target.textContent = `${response.status} ${response.statusText || ''}`.trim();
-        target.className = response.ok ? 'status ok' : 'status bad';
-        return response.ok;
+        const text = await response.text();
+        const contentType = response.headers.get('content-type') || '';
+        const astrbot404 = text.includes('404 Not found') || text.includes('docs.astrbot.app/faq');
+        const jsonLike = contentType.includes('json') || text.trim().startsWith('{');
+        const ok = response.ok && !astrbot404 && jsonLike;
+        target.textContent = ok
+          ? `${response.status} JSON`
+          : `${response.status} ${astrbot404 ? 'AstrBot default 404 body' : 'non-json response'}`;
+        target.className = ok ? 'status ok' : 'status bad';
+        return ok;
       } catch (error) {
-        target.textContent = error && error.message ? error.message : 'request failed';
+        const message = error && error.message ? error.message : 'request failed';
+        target.textContent = `probe unavailable: ${message}`;
         target.className = 'status bad';
         return false;
       }

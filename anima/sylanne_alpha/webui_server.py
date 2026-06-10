@@ -67,11 +67,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_WEBUI_ROUTE_VERSION = "1.2.9-webui-route-manifest"
+
 # 模块级全局状态：跨热重载保持监听器引用
 # 使用 globals().get() 是为了在 AstrBot hot-upload 重新 import 时保留已有值
 _server_task: asyncio.Task | None = globals().get("_server_task")
+_server_route_version: str = str(globals().get("_server_route_version") or "")
 _httpd: Any = globals().get("_httpd")
 _httpd_thread: threading.Thread | None = globals().get("_httpd_thread")
+_httpd_route_version: str = str(globals().get("_httpd_route_version") or "")
 _active_plugin: Any = globals().get("_active_plugin")
 _active_token: str = ""
 _meltdown_nonces: dict[str, str] = {}
@@ -1487,6 +1491,7 @@ if (window.self !== window.top) {
         return {
             "schema": "anima.webui_manifest.v1",
             "version": _get_plugin_version(),
+            "route_version": _WEBUI_ROUTE_VERSION,
             "server": "aiohttp",
             "module": __name__,
             "module_file": __file__,
@@ -2285,26 +2290,70 @@ if (window.self !== window.top) {
 
 def start_webui_background(plugin: Any, host: str = "127.0.0.1", port: int = 2718):
     """将 WebUI 服务器作为后台 asyncio task 启动。若无事件循环则回退到线程模式。"""
-    global _server_task
+    global _server_task, _server_route_version, _httpd, _httpd_thread, _httpd_route_version
     _set_active_plugin(plugin)
-    if _server_task and not _server_task.done():
-        return
-    if _httpd_thread and _httpd_thread.is_alive():
-        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         logger.warning("Sylanne WebUI: no running event loop, using stdlib HTTP server")
         start_webui_thread_server(plugin, host=host, port=port)
         return
+    if _server_task and not _server_task.done():
+        if _server_route_version == _WEBUI_ROUTE_VERSION:
+            return
+        old_task = _server_task
+        logger.warning(
+            "Sylanne WebUI route version changed (%s -> %s); restarting aiohttp listener",
+            _server_route_version or "unknown",
+            _WEBUI_ROUTE_VERSION,
+        )
+        _server_task = None
+        _server_route_version = ""
+        old_task.cancel()
+
+        async def _restart_after_cancel() -> None:
+            try:
+                await old_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            start_webui_background(plugin, host=host, port=port)
+
+        loop.create_task(_restart_after_cancel())
+        return
+    if _httpd_thread and _httpd_thread.is_alive():
+        if _httpd_route_version == _WEBUI_ROUTE_VERSION:
+            return
+        logger.warning(
+            "Sylanne WebUI route version changed (%s -> %s); restarting stdlib listener",
+            _httpd_route_version or "unknown",
+            _WEBUI_ROUTE_VERSION,
+        )
+        if _httpd is not None:
+            try:
+                _httpd.shutdown()
+            except Exception:
+                pass
+            try:
+                _httpd.server_close()
+            except Exception:
+                pass
+        try:
+            _httpd_thread.join(timeout=2.0)
+        except Exception:
+            pass
+        _httpd = None
+        _httpd_thread = None
+        _httpd_route_version = ""
+    _server_route_version = _WEBUI_ROUTE_VERSION
     _server_task = loop.create_task(start_webui_server(plugin, host=host, port=port))
 
 
 async def stop_webui_server() -> None:
     """停止独立监听器（插件卸载/重载时调用）。清理 task、httpd、thread。"""
-    global _server_task, _httpd, _httpd_thread, _active_plugin
+    global _server_task, _server_route_version, _httpd, _httpd_thread, _httpd_route_version, _active_plugin
     task = _server_task
     _server_task = None
+    _server_route_version = ""
     if task and not task.done():
         task.cancel()
         try:
@@ -2327,6 +2376,7 @@ async def stop_webui_server() -> None:
             pass
     _httpd = None
     _httpd_thread = None
+    _httpd_route_version = ""
     _active_plugin = None
 
 
@@ -2338,10 +2388,32 @@ def start_webui_thread_server(
     使用 ThreadingHTTPServer 在守护线程中运行，
     包含速率限制、请求体大小限制、Bearer token 鉴权。
     """
-    global _httpd, _httpd_thread
+    global _httpd, _httpd_thread, _httpd_route_version
     _set_active_plugin(plugin)
     if _httpd_thread and _httpd_thread.is_alive():
-        return
+        if _httpd_route_version == _WEBUI_ROUTE_VERSION:
+            return
+        logger.warning(
+            "Sylanne WebUI route version changed (%s -> %s); restarting stdlib listener",
+            _httpd_route_version or "unknown",
+            _WEBUI_ROUTE_VERSION,
+        )
+        if _httpd is not None:
+            try:
+                _httpd.shutdown()
+            except Exception:
+                pass
+            try:
+                _httpd.server_close()
+            except Exception:
+                pass
+        try:
+            _httpd_thread.join(timeout=2.0)
+        except Exception:
+            pass
+        _httpd = None
+        _httpd_thread = None
+        _httpd_route_version = ""
 
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from pathlib import Path
@@ -2472,6 +2544,7 @@ def start_webui_thread_server(
             return {
                 "schema": "anima.webui_manifest.v1",
                 "version": _get_plugin_version(),
+                "route_version": _WEBUI_ROUTE_VERSION,
                 "server": "stdlib",
                 "module": __name__,
                 "module_file": __file__,
@@ -3504,6 +3577,7 @@ def start_webui_thread_server(
         target=_httpd.serve_forever, name="SylanneWebUI", daemon=True
     )
     _httpd_thread.start()
+    _httpd_route_version = _WEBUI_ROUTE_VERSION
     logger.info(f"Sylanne WebUI stdlib server started at http://{host}:{port}")
     pages_dir = plugin_root / "UI" / "plugin_pages"
     logger.info(
@@ -4504,14 +4578,27 @@ class WebUILifecycle:
             return
         self.publish_active_plugin()
         webui_mod = self._current_webui_module_ref()
-        if (
+        task_active = (
             getattr(webui_mod, "_server_task", None)
             and not webui_mod._server_task.done()
-        ) or (
+        )
+        thread_active = (
             getattr(webui_mod, "_httpd_thread", None)
             and webui_mod._httpd_thread.is_alive()
-        ):
-            return
+        )
+        route_version = (
+            getattr(webui_mod, "_server_route_version", "")
+            or getattr(webui_mod, "_httpd_route_version", "")
+        )
+        current_version = getattr(webui_mod, "_WEBUI_ROUTE_VERSION", _WEBUI_ROUTE_VERSION)
+        if task_active or thread_active:
+            if route_version == current_version:
+                return
+            self._p.logger.warning(
+                "Sylanne WebUI listener route version is stale (%s -> %s); requesting takeover",
+                route_version or "unknown",
+                current_version,
+            )
         webui_host = str(self._p._cfg("sylanne_webui_host", "127.0.0.1") or "127.0.0.1")
         webui_port = self._p._cfg_int("sylanne_webui_port", 2718)
         token = _ensure_token(self._p._config or {})
@@ -4772,7 +4859,14 @@ class WebUILifecycle:
                 pass  # cleanup: failure acceptable
             stopped = True
 
-        for attr in ("_server_task", "_httpd", "_httpd_thread", "_active_plugin"):
+        for attr in (
+            "_server_task",
+            "_server_route_version",
+            "_httpd",
+            "_httpd_thread",
+            "_httpd_route_version",
+            "_active_plugin",
+        ):
             exists = (
                 attr in module if isinstance(module, dict) else hasattr(module, attr)
             )

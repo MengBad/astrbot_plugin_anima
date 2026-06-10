@@ -1,3 +1,25 @@
+## v1.2.9 - 独立 WebUI 旧监听器接管热修复
+
+本版修复 v1.2.8 部署后可能出现的“ AstrBot 插件页已经更新，但独立端口 `2718` 仍由旧 WebUI 监听器提供服务”的半热更新状态。该状态会导致 `/api/state` 可用，但 `/api/webui_manifest`、`/api/state_inspector`、dashboard/capability-tree fallback 等新路由仍然 404。
+
+### WebUI 热重载接管
+- 为独立 WebUI 监听器新增 `route_version` 版本戳，用于识别当前端口上运行的路由表是否来自新版代码。
+- `start_webui_background()` 发现旧 `_server_task` 仍存活但 `route_version` 不一致时，会主动取消旧 aiohttp task，并在清理完成后重启监听器。
+- stdlib fallback listener 同步支持 `route_version` 检查；旧线程版本不一致时会主动 shutdown、server_close 并重新绑定。
+- `WebUILifecycle.start_if_enabled()` 不再仅凭已有 task/thread 就跳过启动，只有监听器版本与当前代码一致时才复用。
+- `/api/webui_manifest` 现在返回 `route_version`，方便确认当前独立端口是否已经完成新代码接管。
+
+### AstrBot 插件页探测修正
+- 修复 AstrBot 默认 404 页面使用 HTTP 200 返回时，入口页可能误判共享 WebAPI 可用的问题。
+- 探测逻辑现在会检查响应正文是否包含 AstrBot 默认 `404 Not found` 文案，并要求接口返回 JSON-like 内容。
+- 浏览器 sandbox 或跨上下文导致 `fetch` 失败时，会显示 `probe unavailable`，并继续引导用户使用 `/anima_dashboard_url` 获取独立 WebUI。
+
+### 测试
+- 新增 WebUI route version 与热重载接管契约测试。
+- 新增 AstrBot 入口页 200/404 文本误判防回归测试。
+
+---
+
 ## v1.2.8 - WebUI 入口自诊断与部署资源缺失降级
 
 本版继续加固 v1.2.7 的 WebUI 发布路径，重点修复 AstrBot 侧插件页面自动跳转共享路由时可能落入默认 404、独立 Sylanne WebUI 部署包缺少 legacy dashboard/capability-tree 资源时直接显示 `index.html not found`、以及 Observatory 子接口缺失时缺少有效诊断线索的问题。核心叙事、记忆、反刍、突变与状态持久化逻辑未改动。

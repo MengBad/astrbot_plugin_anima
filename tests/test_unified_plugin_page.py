@@ -66,6 +66,20 @@ def test_astrbot_static_entry_does_not_auto_redirect_to_shared_route():
     assert "runProbe()" in html
     assert "/anima_dashboard_url" in html
     assert "/astrbot_plugin_anima/health" in html
+    assert "AstrBot default 404 body" in html
+    assert "jsonLike" in html
+    assert "probe unavailable" in html
+
+
+def test_standalone_webui_route_version_guards_hot_reload_takeover():
+    server = (ROOT / "anima" / "sylanne_alpha" / "webui_server.py").read_text(encoding="utf-8")
+    shared_routes = (ROOT / "anima" / "sylanne_alpha" / "webui_routes.py").read_text(encoding="utf-8")
+
+    assert '_WEBUI_ROUTE_VERSION = "1.2.9-webui-route-manifest"' in server
+    assert "_server_route_version" in server
+    assert "_httpd_route_version" in server
+    assert "route version changed" in server
+    assert "route_version" in shared_routes
 
 
 def test_stdlib_standalone_webui_accepts_query_token_and_observatory_routes():

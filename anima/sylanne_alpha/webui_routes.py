@@ -159,6 +159,7 @@ class WebUIRoutes:
             }
         return {
             "schema": "anima.webui_manifest.v1",
+            "route_version": "1.2.9-webui-route-manifest",
             "server": "astrbot_shared",
             "plugin_dir": str(self._plugin_dir),
             "legacy_pages_dir": str(pages_dir),
