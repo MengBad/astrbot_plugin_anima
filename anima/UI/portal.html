@@ -54,12 +54,12 @@
     .btn-sm:hover { background: rgba(255,255,255,0.1); color: var(--text); }
 
     /* ═══ Content ═══ */
-    .content { flex: 1; overflow: hidden; }
-    .view { display: none; height: 100%; }
+    .content { flex: 1; overflow: hidden; width: 100%; }
+    .view { display: none; height: 100%; width: 100%; }
     .view.active { display: flex; }
 
     /* ═══ Split View (2x2) ═══ */
-    .split-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 10px; height: 100%; }
+    .split-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 10px; height: 100%; width: 100%; }
     .split-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
     .panel-head { padding: 8px 12px; background: rgba(15,23,42,0.5); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
     .panel-head .dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -67,7 +67,7 @@
     .panel-body iframe { width: 100%; height: 100%; border: none; }
 
     /* ═══ Observatory View ═══ */
-    .obs { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 10px; }
+    .obs { display: flex; flex-direction: column; height: 100%; width: 100%; padding: 10px; gap: 10px; }
 
     /* §1 Health Bar */
     .health-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
