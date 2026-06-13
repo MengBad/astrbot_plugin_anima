@@ -2381,53 +2381,67 @@ class WebUIRoutes:
         }
 
     async def cross_session_trend_handler(self) -> dict[str, Any]:
-        """GET /api/cross_session_trend — 跨会话趋势对比。
+        """GET /api/cross_session_trend — 跨会话趋势对比。"""
+        try:
+            hosts = getattr(self._p, "_hosts", None)
+            if hosts is None:
+                hosts = {}
+            trends: list[dict[str, Any]] = []
 
-        返回所有会话的人格向量、欲望数量、记忆数量等趋势数据。
-        """
-        hosts = getattr(self._p, "_hosts", {}) or {}
-        trends: list[dict[str, Any]] = []
+            for session_key, host in list(hosts.items()):
+                try:
+                    kernel = getattr(host, "kernel", None)
+                    if kernel is None:
+                        continue
 
-        for session_key, host in hosts.items():
-            try:
-                kernel = getattr(host, "kernel", None)
-                if kernel is None:
+                    comp = getattr(kernel, "computation", None)
+                    emotion = {}
+                    boundary = {"integrity": 1.0, "stability": 1.0}
+                    if comp:
+                        try:
+                            emotion = comp.engine.observe() if hasattr(comp, "engine") else {}
+                        except Exception:
+                            emotion = {}
+                        try:
+                            boundary = comp.boundary.to_dict() if hasattr(comp, "boundary") else {}
+                        except Exception:
+                            boundary = {"integrity": 1.0, "stability": 1.0}
+
+                    personality = {}
+                    try:
+                        if hasattr(kernel, "_personality"):
+                            personality = kernel._personality() or {}
+                    except Exception:
+                        personality = {}
+
+                    trends.append({
+                        "session_key": str(session_key)[:100],
+                        "turns": int(getattr(kernel, "turns", 0) or 0),
+                        "emotion": {
+                            "warmth": round(float(emotion.get("warmth", 0)), 3),
+                            "arousal": round(float(emotion.get("arousal", 0)), 3),
+                            "valence": round(float(emotion.get("valence", 0)), 3),
+                        },
+                        "boundary": {
+                            "integrity": round(float(boundary.get("integrity", 1.0)), 3),
+                            "stability": round(float(boundary.get("stability", 1.0)), 3),
+                        },
+                        "personality_traits": {
+                            k: round(float(v), 3)
+                            for k, v in (personality.get("traits") or {}).items()
+                            if isinstance(v, (int, float))
+                        },
+                    })
+                except Exception:
                     continue
 
-                comp = getattr(kernel, "computation", None)
-                emotion = comp.engine.observe() if comp else {}
-                boundary = comp.boundary.to_dict() if comp else {}
-
-                personality = {}
-                if hasattr(kernel, "_personality"):
-                    personality = kernel._personality() or {}
-
-                trends.append({
-                    "session_key": session_key[:100],
-                    "turns": int(getattr(kernel, "turns", 0) or 0),
-                    "emotion": {
-                        "warmth": round(float(emotion.get("warmth", 0)), 3),
-                        "arousal": round(float(emotion.get("arousal", 0)), 3),
-                        "valence": round(float(emotion.get("valence", 0)), 3),
-                    },
-                    "boundary": {
-                        "integrity": round(float(boundary.get("integrity", 1.0)), 3),
-                        "stability": round(float(boundary.get("stability", 1.0)), 3),
-                    },
-                    "personality_traits": {
-                        k: round(float(v), 3)
-                        for k, v in (personality.get("traits") or {}).items()
-                        if isinstance(v, (int, float))
-                    },
-                })
-            except Exception:
-                continue
-
-        return {
-            "ok": True,
-            "sessions": trends,
-            "session_count": len(trends),
-        }
+            return {
+                "ok": True,
+                "sessions": trends,
+                "session_count": len(trends),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     async def event_compact_handler(self) -> dict[str, Any]:
         """POST /api/event_compact — 压缩旧事件。
