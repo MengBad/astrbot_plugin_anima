@@ -99,6 +99,15 @@ class PluginAPI:
                 ("/api/memory_settings", "memory_settings_get_handler", ["GET"]),
                 ("/api/memory_settings", "memory_settings_post_handler", ["POST"]),
                 ("/api/lineage_observatory", "lineage_observatory_handler", ["GET"]),
+                # Phase 4: Cognitive Observatory 深化
+                ("/api/event_search", "event_search_handler", ["GET"]),
+                ("/api/state_snapshot", "state_snapshot_handler", ["POST"]),
+                ("/api/state_rollback", "state_rollback_handler", ["POST"]),
+                ("/api/state_diff", "state_diff_handler", ["GET"]),
+                ("/api/snapshot_list", "snapshot_list_handler", ["GET"]),
+                ("/api/snapshot_delete", "snapshot_delete_handler", ["DELETE"]),
+                ("/api/cross_session_trend", "cross_session_trend_handler", ["GET"]),
+                ("/api/event_compact", "event_compact_handler", ["POST"]),
             ]
             for route, handler_name, methods in webui_mappings:
                 handler = getattr(webui_routes, handler_name, None)

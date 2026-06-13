@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Anima 全景控制台门户</title>
-  <!-- Google Fonts for premium typography -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
-  
+  <title>Anima Cognitive Observatory</title>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 1: CSS Variables & Base Styles
+       ═══════════════════════════════════════════════════════════════════ -->
   <style>
     :root {
       --bg-main: #090d16;
@@ -18,15 +17,11 @@
       --accent-glow: rgba(99, 102, 241, 0.35);
       --text-main: #f1f5f9;
       --text-muted: #94a3b8;
-      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-title: 'Outfit', sans-serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-title: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background-color: var(--bg-main);
@@ -38,7 +33,7 @@
       flex-direction: column;
     }
 
-    /* Background Neon Effects */
+    /* ═══ Background Glow Effects ═══ */
     body::before, body::after {
       content: '';
       position: absolute;
@@ -50,16 +45,12 @@
       filter: blur(80px);
       pointer-events: none;
     }
-    body::before {
-      top: -10%;
-      right: 10%;
-    }
-    body::after {
-      bottom: -10%;
-      left: 10%;
-    }
+    body::before { top: -10%; right: 10%; }
+    body::after { bottom: -10%; left: 10%; }
 
-    /* Header Navigation */
+    /* ═══════════════════════════════════════════════════════════════════
+       SECTION 2: Header & Navigation
+       ═══════════════════════════════════════════════════════════════════ */
     .portal-header {
       display: flex;
       align-items: center;
@@ -67,98 +58,60 @@
       padding: 10px 24px;
       background: rgba(15, 23, 42, 0.7);
       backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--border-color);
       z-index: 100;
       height: 60px;
       box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
     }
 
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
+    .brand { display: flex; align-items: center; gap: 10px; }
 
     .brand-logo {
-      width: 28px;
-      height: 28px;
-      fill: none;
-      stroke: var(--accent-color);
-      stroke-width: 2.5;
+      width: 28px; height: 28px;
+      fill: none; stroke: var(--accent-color); stroke-width: 2.5;
       filter: drop-shadow(0 0 6px var(--accent-color));
     }
 
     .brand-title {
       font-family: var(--font-title);
-      font-weight: 800;
-      font-size: 18px;
+      font-weight: 800; font-size: 18px;
       background: linear-gradient(135deg, #a5b4fc 0%, #818cf8 50%, #6366f1 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       letter-spacing: 0.5px;
     }
 
     .nav-tabs {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display: flex; align-items: center; gap: 8px;
       background: rgba(2, 6, 23, 0.4);
-      padding: 4px;
-      border-radius: 12px;
+      padding: 4px; border-radius: 12px;
       border: 1px solid var(--border-color);
     }
 
     .nav-tab {
-      background: transparent;
-      border: none;
+      background: transparent; border: none;
       color: var(--text-muted);
-      font-family: var(--font-body);
-      font-size: 14px;
-      font-weight: 500;
-      padding: 8px 16px;
-      border-radius: 8px;
+      font-family: var(--font-body); font-size: 14px; font-weight: 500;
+      padding: 8px 16px; border-radius: 8px;
       cursor: pointer;
       transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      display: flex; align-items: center; gap: 6px;
     }
+    .nav-tab:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.04); }
+    .nav-tab.active { color: #fff; background: var(--accent-color); box-shadow: 0 0 14px var(--accent-glow); }
 
-    .nav-tab:hover {
-      color: var(--text-main);
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .nav-tab.active {
-      color: #fff;
-      background: var(--accent-color);
-      box-shadow: 0 0 14px var(--accent-glow);
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
 
     .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: #34d399;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: #34d399;
       background: rgba(52, 211, 153, 0.1);
-      padding: 4px 10px;
-      border-radius: 20px;
+      padding: 4px 10px; border-radius: 20px;
       border: 1px solid rgba(52, 211, 153, 0.2);
     }
 
     .status-dot {
-      width: 6px;
-      height: 6px;
-      background-color: #34d399;
-      border-radius: 50%;
+      width: 6px; height: 6px;
+      background-color: #34d399; border-radius: 50%;
       box-shadow: 0 0 8px #34d399;
       animation: pulse 2s infinite;
     }
@@ -168,236 +121,98 @@
       border: 1px solid var(--border-color);
       color: var(--text-muted);
       cursor: pointer;
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
       transition: all 0.2s;
     }
+    .btn-refresh:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-main); }
 
-    .btn-refresh:hover {
-      background: rgba(255, 255, 255, 0.1);
-      color: var(--text-main);
-      border-color: rgba(255, 255, 255, 0.15);
-    }
+    /* ═══════════════════════════════════════════════════════════════════
+       SECTION 3: Content Area & Panels
+       ═══════════════════════════════════════════════════════════════════ */
+    .portal-content { flex: 1; position: relative; background-color: var(--bg-main); }
 
-    /* Content Area */
-    .portal-content {
-      flex: 1;
-      position: relative;
-      background-color: var(--bg-main);
-    }
-
-    /* Split Screen Layout Grid */
     .split-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-      gap: 12px;
-      padding: 12px;
+      gap: 12px; padding: 12px;
       height: 100%;
-      width: 100%;
       transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .split-panel {
       background: var(--bg-card);
       backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
       border: 1px solid var(--border-color);
-      border-radius: 12px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      border-radius: 12px; overflow: hidden;
+      display: flex; flex-direction: column;
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
       transition: border-color 0.3s, box-shadow 0.3s;
     }
-
-    .split-panel:hover {
-      border-color: rgba(99, 102, 241, 0.3);
-      box-shadow: 0 8px 32px rgba(99, 102, 241, 0.05);
-    }
-
-    .split-panel.collapsed {
-      display: none !important;
-    }
+    .split-panel:hover { border-color: rgba(99, 102, 241, 0.3); }
+    .split-panel.collapsed { display: none !important; }
 
     .panel-header {
       padding: 10px 16px;
       background: rgba(15, 23, 42, 0.5);
       border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-muted);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--text-muted);
     }
 
     .panel-header span.dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+      width: 8px; height: 8px; border-radius: 50%;
       background: var(--accent-color);
       box-shadow: 0 0 6px var(--accent-color);
     }
 
-    .panel-body {
-      flex: 1;
-      position: relative;
-    }
+    .panel-body { flex: 1; position: relative; }
 
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      background: transparent;
-    }
+    iframe { width: 100%; height: 100%; border: none; background: transparent; }
 
     .btn-toggle {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      margin-left: auto;
-      font-size: 14px;
-      padding: 2px 6px;
-      border-radius: 4px;
+      background: transparent; border: none;
+      color: var(--text-muted); cursor: pointer;
+      margin-left: auto; font-size: 14px;
+      padding: 2px 6px; border-radius: 4px;
       transition: all 0.2s;
     }
+    .btn-toggle:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.05); }
 
-    .btn-toggle:hover {
-      color: var(--text-main);
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    /* Timeline visual styles */
-    .timeline {
-      position: relative;
-      padding-left: 20px;
-      border-left: 2px solid rgba(255, 255, 255, 0.06);
-      margin-top: 10px;
-    }
-
-    .timeline-item {
-      position: relative;
-      margin-bottom: 24px;
-    }
-
-    .timeline-item::before {
-      content: '';
-      position: absolute;
-      left: -26px;
-      top: 4px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--accent-color);
-      border: 2px solid var(--bg-main);
-      box-shadow: 0 0 8px var(--accent-color);
-    }
-
-    .timeline-time {
-      font-size: 11px;
-      color: var(--text-muted);
-      font-family: var(--font-body);
-      margin-bottom: 4px;
-    }
-
-    .timeline-type {
-      font-size: 12px;
-      font-weight: 600;
-      color: #a78bfa;
-      background: rgba(167, 139, 250, 0.1);
-      padding: 2px 6px;
-      border-radius: 4px;
-      display: inline-block;
-      margin-bottom: 6px;
-    }
-
-    .timeline-desc {
-      font-size: 13px;
-      color: var(--text-main);
-      line-height: 1.5;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.03);
-      padding: 10px;
-      border-radius: 8px;
-    }
-
-    .timeline-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 8px;
-    }
-
-    .timeline-chip {
-      font-size: 11px;
-      color: var(--text-muted);
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.035);
-      padding: 2px 6px;
-      border-radius: 999px;
-    }
-
-    .timeline-chip.warning { color:#fbbf24; border-color:rgba(251,191,36,0.28); background:rgba(251,191,36,0.08); }
-    .timeline-chip.error { color:#f87171; border-color:rgba(248,113,113,0.28); background:rgba(248,113,113,0.08); }
-    .timeline-chip.debug { color:#60a5fa; border-color:rgba(96,165,250,0.28); background:rgba(96,165,250,0.08); }
-
-    .timeline-payload {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 11px;
-      color: #cbd5e1;
-      white-space: pre-wrap;
-      word-break: break-word;
-      opacity: 0.9;
-    }
-
+    /* ═══════════════════════════════════════════════════════════════════
+       SECTION 4: Observatory Cards & Timeline
+       ═══════════════════════════════════════════════════════════════════ */
     .inspector-card {
       border: 1px solid rgba(251,191,36,0.18);
       background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(15,23,42,0.42));
-      border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 14px;
+      border-radius: 12px; padding: 12px; margin-bottom: 14px;
     }
 
     .inspector-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 10px;
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px; margin-top: 10px;
     }
 
     .inspector-metric {
       border: 1px solid rgba(255,255,255,0.07);
       background: rgba(2,6,23,0.28);
-      border-radius: 10px;
-      padding: 9px;
+      border-radius: 10px; padding: 9px;
     }
 
     .inspector-label {
-      font-size: 10px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
+      font-size: 10px; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.08em;
     }
 
     .inspector-value {
       font-family: var(--font-title);
-      font-size: 18px;
-      color: #fde68a;
-      margin-top: 3px;
+      font-size: 18px; color: #fde68a; margin-top: 3px;
     }
 
     .inspector-session {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
+      display: flex; justify-content: space-between; gap: 10px;
       border-top: 1px solid rgba(255,255,255,0.06);
       padding: 8px 0;
-      font-size: 12px;
     }
 
     .inspector-pill {
@@ -405,10 +220,68 @@
       color: #bae6fd;
       border: 1px solid rgba(125,211,252,0.24);
       background: rgba(14,165,233,0.08);
-      border-radius: 999px;
-      padding: 2px 7px;
-      margin: 2px;
+      border-radius: 999px; padding: 2px 7px; margin: 2px;
       font-size: 11px;
+    }
+
+    /* ═══ Timeline Styles ═══ */
+    .timeline {
+      position: relative;
+      padding-left: 20px;
+      border-left: 2px solid rgba(255, 255, 255, 0.06);
+      margin-top: 10px;
+    }
+
+    .timeline-item { position: relative; margin-bottom: 24px; }
+
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: -26px; top: 4px;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--accent-color);
+      border: 2px solid var(--bg-main);
+      box-shadow: 0 0 8px var(--accent-color);
+    }
+
+    .timeline-time { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+
+    .timeline-type {
+      font-size: 12px; font-weight: 600;
+      color: #a78bfa; background: rgba(167, 139, 250, 0.1);
+      padding: 2px 6px; border-radius: 4px;
+      display: inline-block; margin-bottom: 6px;
+    }
+
+    .timeline-desc {
+      font-size: 13px; color: var(--text-main); line-height: 1.5;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.03);
+      padding: 10px; border-radius: 8px;
+    }
+
+    .timeline-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+
+    .timeline-chip {
+      font-size: 11px; color: var(--text-muted);
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      padding: 2px 6px; border-radius: 999px;
+    }
+    .timeline-chip.warning { color:#fbbf24; border-color:rgba(251,191,36,0.28); background:rgba(251,191,36,0.08); }
+    .timeline-chip.error { color:#f87171; border-color:rgba(248,113,113,0.28); background:rgba(248,113,113,0.08); }
+    .timeline-chip.debug { color:#60a5fa; border-color:rgba(96,165,250,0.28); background:rgba(96,165,250,0.08); }
+
+    .timeline-payload {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px; color: #cbd5e1;
+      white-space: pre-wrap; word-break: break-word; opacity: 0.9;
+    }
+
+    /* ═══ Responsive ═══ */
+    @media (max-width: 1024px) {
+      .split-grid { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; }
+      .split-panel { height: 600px; }
     }
 
     @keyframes pulse {
@@ -416,23 +289,13 @@
       50% { transform: scale(1.05); opacity: 1; }
       100% { transform: scale(0.95); opacity: 0.8; }
     }
-
-    /* Responsiveness for Split Screen */
-    @media (max-width: 1024px) {
-      .split-grid {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto;
-        overflow-y: auto;
-      }
-      .split-panel {
-        height: 600px;
-      }
-    }
   </style>
 </head>
 <body>
 
-  <!-- Top Navigation Header -->
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 5: Header Navigation
+       ═══════════════════════════════════════════════════════════════════ -->
   <header class="portal-header">
     <div class="brand">
       <svg class="brand-logo" viewBox="0 0 100 100">
@@ -441,23 +304,22 @@
         <line x1="50" y1="10" x2="50" y2="90" />
         <line x1="10" y1="50" x2="90" y2="50" />
       </svg>
-      <span class="brand-title">Anima Portal</span>
+      <span class="brand-title">Anima Cognitive Observatory</span>
     </div>
 
-    <!-- Navigation Tabs -->
     <div class="nav-tabs">
-      <button id="tab-split" class="nav-tab active" onclick="switchView('split')">🖥️ 全景分屏</button>
-      <button id="tab-sylanne" class="nav-tab" onclick="switchView('sylanne')">🧠 Sylanne 意识</button>
-      <button id="tab-dashboard" class="nav-tab" onclick="switchView('dashboard')">📊 运行仪表盘</button>
-      <button id="tab-captree" class="nav-tab" onclick="switchView('captree')">🌳 能力树</button>
-      <button id="tab-cognitive" class="nav-tab" onclick="switchView('cognitive')">🧭 认知时间线</button>
-      <button id="tab-mutation" class="nav-tab" onclick="switchView('mutation')">🧬 核心突变演化</button>
+      <button id="tab-split" class="nav-tab active" onclick="switchView('split')">全景分屏</button>
+      <button id="tab-sylanne" class="nav-tab" onclick="switchView('sylanne')">Sylanne 意识</button>
+      <button id="tab-dashboard" class="nav-tab" onclick="switchView('dashboard')">运行仪表盘</button>
+      <button id="tab-captree" class="nav-tab" onclick="switchView('captree')">能力树</button>
+      <button id="tab-cognitive" class="nav-tab" onclick="switchView('cognitive')">认知时间线</button>
+      <button id="tab-mutation" class="nav-tab" onclick="switchView('mutation')">核心突变</button>
     </div>
 
     <div class="header-actions">
       <div class="status-badge">
         <div class="status-dot"></div>
-        <span>Anima Engine Live</span>
+        <span>Engine Live</span>
       </div>
       <button class="btn-refresh" title="刷新全部视图" onclick="refreshAll()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -467,226 +329,200 @@
     </div>
   </header>
 
-  <!-- Main View Frame Area -->
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 6: Main Content Panels
+       ═══════════════════════════════════════════════════════════════════ -->
   <main class="portal-content">
     <div class="split-grid" id="main-grid">
+
       <!-- Panel 1: Sylanne Consciousness -->
       <div class="split-panel" id="panel-sylanne">
         <div class="panel-header">
           <span class="dot"></span>
           <span>Sylanne 意识状态</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('sylanne')">🗖</button>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('sylanne')"></button>
         </div>
         <div class="panel-body">
           <iframe id="sylanne-iframe" src="about:blank"></iframe>
         </div>
       </div>
-      
+
       <!-- Panel 2: Anima Dashboard -->
       <div class="split-panel" id="panel-dashboard">
         <div class="panel-header">
           <span class="dot" style="background:#38bdf8;box-shadow:0 0 6px #38bdf8;"></span>
           <span>Anima 运行仪表盘</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('dashboard')">🗖</button>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('dashboard')"></button>
         </div>
         <div class="panel-body">
           <iframe id="dashboard-iframe" src="about:blank"></iframe>
         </div>
       </div>
 
-      <!-- Panel 3: Anima Capability Tree -->
+      <!-- Panel 3: Capability Tree -->
       <div class="split-panel" id="panel-captree">
         <div class="panel-header">
           <span class="dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span>
-          <span>Anima 能力树结构</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('captree')">🗖</button>
+          <span>Anima 能力树</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('captree')"></button>
         </div>
         <div class="panel-body">
           <iframe id="captree-iframe" src="about:blank"></iframe>
         </div>
       </div>
 
-      <!-- Panel 4: Cognitive Runtime Timeline -->
+      <!-- Panel 4: Cognitive Observatory -->
       <div class="split-panel" id="panel-cognitive">
         <div class="panel-header">
           <span class="dot" style="background:#fbbf24;box-shadow:0 0 6px #fbbf24;"></span>
-          <span>🧭 Cognitive Timeline</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('cognitive')">🗖</button>
+          <span>认知观测台</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('cognitive')"></button>
         </div>
         <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-            <p style="font-size:12px; color:var(--text-muted);">
-              这里展示运行时认知事件：状态写入、欲望变化、response observation、后台任务与生命周期。
-            </p>
-            <button onclick="loadCognitiveTimeline()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">
-              刷新时间线
-            </button>
-          </div>
+          <!-- State Inspector Card -->
           <div id="state-inspector-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#fde68a;">State Inspector</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted session/state topology, dirty flags, persistence files, and isolation signals.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Session/state topology, dirty flags, persistence files.</div>
               </div>
-              <button onclick="loadStateInspector()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh State
-              </button>
+              <button onclick="loadStateInspector()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="state-inspector-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
-          <div id="state-inspector-sessions" style="margin-top:10px;"></div>
+            <div id="state-inspector-summary" class="inspector-grid"></div>
+            <div id="state-inspector-sessions" style="margin-top:10px;"></div>
           </div>
+
+          <!-- StateStore Audit Card -->
           <div id="state-store-audit-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#d9f99d;">StateStore Audit</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Read-only inventory of file/runtime/KV state sources and future snapshot/diff/rollback capability gaps.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">File/runtime/KV State Sources inventory.</div>
               </div>
-              <button onclick="loadStateStoreAudit()" style="background:rgba(132,204,22,0.12); border:1px solid rgba(132,204,22,0.25); color:#bef264; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Store
-              </button>
+              <button onclick="loadStateStoreAudit()" style="background:rgba(132,204,22,0.12); border:1px solid rgba(132,204,22,0.25); color:#bef264; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="state-store-audit-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="state-store-audit-summary" class="inspector-grid"></div>
             <div id="state-store-audit-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Background Tasks Card -->
           <div id="background-tasks-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#f9a8d4;">Background Tasks</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted task lifecycle, fragment timers, checkpoint tasks, background-post queues, leases, and dead letters.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Task lifecycle, queues, retries, dead letters.</div>
               </div>
-              <button onclick="loadBackgroundTasks()" style="background:rgba(236,72,153,0.12); border:1px solid rgba(236,72,153,0.25); color:#f9a8d4; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Tasks
-              </button>
+              <button onclick="loadBackgroundTasks()" style="background:rgba(236,72,153,0.12); border:1px solid rgba(236,72,153,0.25); color:#f9a8d4; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="background-tasks-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="background-tasks-summary" class="inspector-grid"></div>
             <div id="background-tasks-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Memory Explorer Card -->
           <div id="memory-explorer-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#bae6fd;">Memory Explorer</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted L1/L2/L3 topology, recall metadata, embeddings, and reconsolidation signals.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">L1/L2/L3 memory topology.</div>
               </div>
-              <button onclick="loadMemoryExplorer()" style="background:rgba(14,165,233,0.12); border:1px solid rgba(14,165,233,0.25); color:#7dd3fc; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Memory
-              </button>
+              <button onclick="loadMemoryExplorer()" style="background:rgba(14,165,233,0.12); border:1px solid rgba(14,165,233,0.25); color:#7dd3fc; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="memory-explorer-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
-          <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
+            <div id="memory-explorer-summary" class="inspector-grid"></div>
+            <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Memory Recall Replay Card -->
           <div id="memory-recall-replay-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#67e8f9;">Memory Recall Replay</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted recall evidence: latest L2 hits, memory slot budget, recall events, and injection decisions.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Recall evidence and injection decisions.</div>
               </div>
-              <button onclick="loadMemoryRecallReplay()" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25); color:#67e8f9; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Recall
-              </button>
+              <button onclick="loadMemoryRecallReplay()" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25); color:#67e8f9; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="memory-recall-replay-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="memory-recall-replay-summary" class="inspector-grid"></div>
             <div id="memory-recall-replay-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Desire Dashboard Card -->
           <div id="desire-dashboard-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#fda4af;">Desire Dashboard</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted desire queue health, inward/outward split, intensity buckets, and scoped-target signals.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Desire queue health and intensity.</div>
               </div>
-              <button onclick="loadDesireDashboard()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fda4af; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Desires
-              </button>
+              <button onclick="loadDesireDashboard()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fda4af; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="desire-dashboard-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
-          <div id="desire-dashboard-items" style="margin-top:10px;"></div>
+            <div id="desire-dashboard-summary" class="inspector-grid"></div>
+            <div id="desire-dashboard-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Desire Evolution Card -->
           <div id="desire-evolution-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#fb7185;">Desire Evolution</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted desire lifecycle history, queue-update evidence, and active/satisfied drift without exposing desire text.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Desire lifecycle history.</div>
               </div>
-              <button onclick="loadDesireEvolution()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fb7185; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Evolution
-              </button>
+              <button onclick="loadDesireEvolution()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fb7185; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="desire-evolution-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="desire-evolution-summary" class="inspector-grid"></div>
             <div id="desire-evolution-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Scar Explorer Card -->
           <div id="scar-explorer-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#c4b5fd;">Scar Explorer</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted Scar Algebra topology, healing stages, circuit breakers, and legacy JSON source signals.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Scar Algebra topology and healing.</div>
               </div>
-              <button onclick="loadScarExplorer()" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); color:#c4b5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Scars
-              </button>
+              <button onclick="loadScarExplorer()" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); color:#c4b5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="scar-explorer-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
-          <div id="scar-explorer-sessions" style="margin-top:10px;"></div>
+            <div id="scar-explorer-summary" class="inspector-grid"></div>
+            <div id="scar-explorer-sessions" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Personality Drift Card -->
           <div id="personality-drift-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#a7f3d0;">Personality Drift</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted continuity view for legacy personality vectors, Sylanne embodiment drift, mutation hashes, and persona-core fingerprints.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">5D personality vector and drift.</div>
               </div>
-              <button onclick="loadPersonalityDrift()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); color:#a7f3d0; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Drift
-              </button>
+              <button onclick="loadPersonalityDrift()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); color:#a7f3d0; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="personality-drift-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="personality-drift-summary" class="inspector-grid"></div>
             <div id="personality-drift-sessions" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Reasoning Trace Card -->
           <div id="reasoning-trace-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#fcd34d;">Reasoning Trace</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted decision trail from prompt injection, tool use, response observation, and Observatory snapshot events.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Decision trail from prompt/tool/response.</div>
               </div>
-              <button onclick="loadReasoningTrace()" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); color:#fcd34d; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Trace
-              </button>
+              <button onclick="loadReasoningTrace()" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); color:#fcd34d; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="reasoning-trace-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="reasoning-trace-summary" class="inspector-grid"></div>
             <div id="reasoning-trace-steps" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Session Replay Card -->
           <div id="session-replay-card" class="inspector-card">
             <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
               <div>
                 <div style="font-size:13px; font-weight:700; color:#93c5fd;">Session Replay</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Redacted timeline of session events and conversation-buffer message shapes for replaying cognitive flow without exposing text.</div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Session events and message shapes.</div>
               </div>
-              <button onclick="loadSessionReplay()" style="background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); color:#93c5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">
-                Refresh Replay
-              </button>
+              <button onclick="loadSessionReplay()" style="background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); color:#93c5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
             </div>
-            <div id="session-replay-summary" class="inspector-grid">
-              <div class="inspector-metric"><div class="inspector-label">Loading</div><div class="inspector-value">...</div></div>
-            </div>
+            <div id="session-replay-summary" class="inspector-grid"></div>
             <div id="session-replay-items" style="margin-top:10px;"></div>
           </div>
+
+          <!-- Cognitive Timeline -->
           <div id="cognitive-stats" style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"></div>
           <div id="cognitive-timeline-container" class="timeline">
             <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载认知时间线中...</p>
@@ -694,20 +530,18 @@
         </div>
       </div>
 
-      <!-- Panel 5: Mutation History Timeline -->
+      <!-- Panel 5: Mutation History -->
       <div class="split-panel" id="panel-mutation">
         <div class="panel-header">
           <span class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa;"></span>
-          <span>🧬 核心人设突变演化历程</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('mutation')">🗖</button>
+          <span>核心突变演化</span>
+          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('mutation')"></button>
         </div>
         <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-            <p style="font-size:12px; color:var(--text-muted);">
-              这里记录了 AI 核心人格的突变轨迹（保留最近 100 次）。
-            </p>
-            <button class="btn-rollback" onclick="triggerRollback()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#f87171; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600; transition:all 0.2s;">
-              ↩ 撤销并回滚至上一人设版本
+            <p style="font-size:12px; color:var(--text-muted);">记录 AI 核心人格的突变轨迹（保留最近 100 次）。</p>
+            <button onclick="triggerRollback()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#f87171; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">
+              回滚至上一版本
             </button>
           </div>
           <div id="timeline-container" class="timeline">
@@ -718,75 +552,33 @@
     </div>
   </main>
 
-  <!-- JS Controller for Tab and Token Management -->
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 7: JavaScript - Core Utilities
+       ═══════════════════════════════════════════════════════════════════ -->
   <script>
+    // ── Token & Route Helpers ──────────────────────────────────────────
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
     let csrfToken = '';
 
     const routeBase = window.location.pathname.startsWith('/astrbot_plugin_anima')
-      ? '/astrbot_plugin_anima'
-      : '';
+      ? '/astrbot_plugin_anima' : '';
 
-    function routePath(path) {
-      return `${routeBase}${path}`;
-    }
+    function routePath(path) { return `${routeBase}${path}`; }
 
     function escHtml(s) {
       if (s == null) return '';
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
     }
 
+    // ── Iframe URLs ────────────────────────────────────────────────────
     const urls = {
       sylanne: routePath(`/sylanne/?token=${encodeURIComponent(token)}`),
       dashboard: routePath(`/dashboard/?token=${encodeURIComponent(token)}`),
       captree: routePath(`/capability-tree/?token=${encodeURIComponent(token)}`)
     };
 
-    // Load iframe sources on initial load
-    document.addEventListener("DOMContentLoaded", () => {
-      document.getElementById('sylanne-iframe').src = urls.sylanne;
-      document.getElementById('dashboard-iframe').src = urls.dashboard;
-      document.getElementById('captree-iframe').src = urls.captree;
-
-      // Fetch state once to get CSRF token and then load timeline
-      fetch(routePath(`/api/state?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          csrfToken = data.csrf_token || '';
-          loadMutationHistory();
-          loadCognitiveTimeline();
-          loadStateInspector();
-          loadStateStoreAudit();
-          loadBackgroundTasks();
-          loadMemoryExplorer();
-          loadMemoryRecallReplay();
-          loadDesireDashboard();
-          loadDesireEvolution();
-          loadScarExplorer();
-          loadPersonalityDrift();
-          loadReasoningTrace();
-          loadSessionReplay();
-        })
-        .catch(e => {
-          console.error("加载 CSRF Token 失败", e);
-          loadMutationHistory();
-          loadCognitiveTimeline();
-          loadStateInspector();
-          loadStateStoreAudit();
-          loadBackgroundTasks();
-          loadMemoryExplorer();
-          loadMemoryRecallReplay();
-          loadDesireDashboard();
-          loadDesireEvolution();
-          loadScarExplorer();
-          loadPersonalityDrift();
-          loadReasoningTrace();
-          loadSessionReplay();
-        });
-    });
-
-    // View Switcher logic (Dynamic Grid-Collapsing)
+    // ── View Switcher ──────────────────────────────────────────────────
     function switchView(target) {
       const grid = document.getElementById('main-grid');
       const panels = {
@@ -796,13 +588,11 @@
         cognitive: document.getElementById('panel-cognitive'),
         mutation: document.getElementById('panel-mutation')
       };
-      
-      const buttons = document.querySelectorAll('.nav-tab');
-      buttons.forEach(btn => {
+
+      document.querySelectorAll('.nav-tab').forEach(btn => {
         btn.classList.toggle('active', btn.id === `tab-${target}`);
       });
 
-      // Reset all collapsed states
       Object.values(panels).forEach(p => p.classList.remove('collapsed'));
 
       if (target === 'split') {
@@ -810,702 +600,430 @@
       } else {
         grid.style.gridTemplateColumns = '1fr';
         Object.keys(panels).forEach(key => {
-          if (key !== target) {
-            panels[key].classList.add('collapsed');
-          }
+          if (key !== target) panels[key].classList.add('collapsed');
         });
       }
     }
 
     function toggleMaximize(panelKey) {
-      // If currently maximized, switch back to split view; else maximize this panel
       const otherKey = panelKey === 'sylanne' ? 'dashboard' : 'sylanne';
       const isMaximized = document.getElementById(`panel-${otherKey}`).classList.contains('collapsed');
       switchView(isMaximized ? 'split' : panelKey);
     }
 
+    // ── Data Formatting Helpers ────────────────────────────────────────
     function summarizePayload(payload) {
       if (!payload || typeof payload !== 'object') return '';
-      const entries = Object.entries(payload).slice(0, 6);
-      if (!entries.length) return '';
-      return entries.map(([k, v]) => {
-        let value = v;
-        if (value && typeof value === 'object') {
-          value = JSON.stringify(value);
-        }
+      return Object.entries(payload).slice(0, 6).map(([k, v]) => {
+        const value = v && typeof v === 'object' ? JSON.stringify(v) : v;
         return `${k}: ${String(value).slice(0, 160)}`;
       }).join('\n');
     }
 
     function formatEventTime(ts) {
-      if (!ts) return '未知时间';
-      return new Date(Number(ts) * 1000).toLocaleString('zh-CN');
+      return ts ? new Date(Number(ts) * 1000).toLocaleString('zh-CN') : '未知时间';
     }
 
-    function renderInspectorMetric(label, value) {
-      return `
-        <div class="inspector-metric">
-          <div class="inspector-label">${escHtml(label)}</div>
-          <div class="inspector-value">${escHtml(value)}</div>
-        </div>
-      `;
+    // ── Render Helpers ─────────────────────────────────────────────────
+    function renderMetric(label, value) {
+      return `<div class="inspector-metric"><div class="inspector-label">${escHtml(label)}</div><div class="inspector-value">${escHtml(value)}</div></div>`;
     }
 
-    function renderRouteDiagnostic(route) {
-      const manifestUrl = routePath(`/api/webui_manifest?token=${encodeURIComponent(token)}`);
-      return `
-        <div style="font-size:12px; color:#f87171; line-height:1.6;">
-          Failed to load ${escHtml(route)}. This usually means the running WebUI listener is stale
-          or the deployed package is missing the latest Observatory routes.
-          <br><a style="color:#38bdf8;" href="${escHtml(manifestUrl)}" target="_blank" rel="noreferrer">Open WebUI manifest</a>
-        </div>
-      `;
+    function renderSession(session, renderFn) {
+      return `<div class="inspector-session">${renderFn(session)}</div>`;
     }
 
-    function renderStateSession(session) {
-      const dirty = Array.isArray(session.dirty_subsystems) ? session.dirty_subsystems : [];
-      const host = session.host || {};
-      const pills = [
-        session.has_host ? 'host' : 'no-host',
-        session.has_memory_system ? 'memory' : 'no-memory',
-        session.has_conversation_buffer ? 'buffer' : 'no-buffer',
-        session.has_prompt_debug_snapshot ? 'prompt-debug' : '',
-        session.has_request_budget ? 'budget' : ''
-      ].filter(Boolean);
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">turns ${escHtml(host.turns || 0)} / ticks ${escHtml(host.spine_ticks || 0)} / route ${escHtml(host.last_route || '-')}</div>
-          </div>
-          <div style="text-align:right;">
-            ${pills.map(p => `<span class="inspector-pill">${escHtml(p)}</span>`).join('')}
-            ${dirty.length ? `<div style="color:#fbbf24; margin-top:4px;">dirty: ${escHtml(dirty.join(', '))}</div>` : '<div style="color:var(--text-muted); margin-top:4px;">clean</div>'}
-          </div>
-        </div>
-      `;
+    function renderRouteError(route) {
+      return `<div style="font-size:12px; color:#f87171; line-height:1.6;">Failed to load ${escHtml(route)}.</div>`;
     }
+  </script>
 
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 8: JavaScript - Observatory Card Loaders
+       ═══════════════════════════════════════════════════════════════════ -->
+  <script>
+    // ── State Inspector ────────────────────────────────────────────────
     function loadStateInspector() {
       const summaryEl = document.getElementById('state-inspector-summary');
       const sessionsEl = document.getElementById('state-inspector-sessions');
       if (!summaryEl || !sessionsEl) return;
+
       fetch(routePath(`/api/state_inspector?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('State', 'offline');
-            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">State Inspector API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('State', 'offline');
             return;
           }
           const snap = data.snapshot;
           const summary = snap.summary || {};
           const files = snap.persistence_files || {};
-          const storeAudit = snap.state_store_audit || {};
-          const storeSummary = storeAudit.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Hosts', summary.active_hosts || 0),
-            renderInspectorMetric('Dirty Sessions', summary.dirty_sessions || 0),
-            renderInspectorMetric('KV API', summary.kv_api_available ? 'yes' : 'no'),
-            renderInspectorMetric('Isolation', summary.isolation_violation_count || 0),
-            renderInspectorMetric('State Sources', storeSummary.configured_files || summary.state_sources || 0),
-            renderInspectorMetric('StateStore', storeSummary.state_store_complete ? 'complete' : 'partial'),
-            renderInspectorMetric('Memory Systems', summary.memory_systems || 0),
-            renderInspectorMetric('Buffers', summary.conversation_buffers || 0),
-            renderInspectorMetric('Self Notes', files.self_notes && files.self_notes.exists ? `${files.self_notes.size_bytes || 0}b` : 'missing'),
-            renderInspectorMetric('Desires', files.desires && files.desires.exists ? `${files.desires.size_bytes || 0}b` : 'missing')
+            renderMetric('Hosts', summary.active_hosts || 0),
+            renderMetric('Dirty', summary.dirty_sessions || 0),
+            renderMetric('KV', summary.kv_api_available ? 'yes' : 'no'),
+            renderMetric('Isolation', summary.isolation_violation_count || 0),
+            renderMetric('Sources', summary.state_sources || 0),
+            renderMetric('Memory', summary.memory_systems || 0),
+            renderMetric('Self Notes', files.self_notes?.exists ? `${files.self_notes.size_bytes || 0}b` : 'missing'),
+            renderMetric('Desires', files.desires?.exists ? `${files.desires.size_bytes || 0}b` : 'missing')
           ].join('');
+
           const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
           sessionsEl.innerHTML = sessions.length
-            ? sessions.map(renderStateSession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active sessions observed yet.</div>';
+            ? sessions.map(s => {
+                const dirty = Array.isArray(s.dirty_subsystems) ? s.dirty_subsystems : [];
+                const host = s.host || {};
+                return `<div class="inspector-session">
+                  <div style="min-width:0;">
+                    <div style="font-weight:700; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(s.session_key || 'unknown')}</div>
+                    <div style="color:var(--text-muted); margin-top:3px;">turns ${escHtml(host.turns || 0)} / ticks ${escHtml(host.spine_ticks || 0)}</div>
+                  </div>
+                  <div style="text-align:right;">
+                    ${dirty.length ? `<span class="inspector-pill" style="color:#fbbf24;">dirty: ${escHtml(dirty.join(', '))}</span>` : '<span class="inspector-pill">clean</span>'}
+                  </div>
+                </div>`;
+              }).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active sessions.</div>';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('State', 'error');
-          sessionsEl.innerHTML = renderRouteDiagnostic('/api/state_inspector');
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('State', 'error');
+          sessionsEl.innerHTML = renderRouteError('/api/state_inspector');
         });
     }
 
-    function renderStateSource(item) {
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#ecfccb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.name || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">${escHtml(item.kind || '-')} / ${escHtml(item.scope || '-')} / ${escHtml(item.role || '-')}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">${escHtml(item.exists === false && item.kind === 'file' ? 'missing' : 'present')}</span>
-            <span class="inspector-pill">${escHtml(item.format || item.entries || 0)}</span>
-            ${item.size_bytes !== undefined ? `<span class="inspector-pill">${escHtml(item.size_bytes)}b</span>` : ''}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── StateStore Audit ───────────────────────────────────────────────
     function loadStateStoreAudit() {
       const summaryEl = document.getElementById('state-store-audit-summary');
       const itemsEl = document.getElementById('state-store-audit-items');
       if (!summaryEl || !itemsEl) return;
+
       fetch(routePath(`/api/state_store_audit?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('StateStore', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">StateStore Audit API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('StateStore', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const caps = snap.capabilities || {};
+          const summary = data.snapshot.summary || {};
+          const caps = data.snapshot.capabilities || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Configured Files', summary.configured_files || 0),
-            renderInspectorMetric('Existing Files', summary.existing_files || 0),
-            renderInspectorMetric('Runtime Sources', summary.runtime_sources || 0),
-            renderInspectorMetric('Runtime Entries', summary.runtime_entries || 0),
-            renderInspectorMetric('KV API', summary.kv_api_available ? 'yes' : 'no'),
-            renderInspectorMetric('Snapshot', caps.snapshot || 'unknown'),
-            renderInspectorMetric('Diff', caps.diff || 'unknown'),
-            renderInspectorMetric('Rollback', caps.rollback || 'unknown')
+            renderMetric('Files', summary.configured_files || 0),
+            renderMetric('Existing', summary.existing_files || 0),
+            renderMetric('Runtime', summary.runtime_sources || 0),
+            renderMetric('KV', summary.kv_api_available ? 'yes' : 'no'),
+            renderMetric('Snapshot', caps.snapshot || '?'),
+            renderMetric('Diff', caps.diff || '?'),
+            renderMetric('Rollback', caps.rollback || '?'),
+            renderMetric('Timeline', caps.timeline || '?')
           ].join('');
-          const files = Array.isArray(snap.files) ? snap.files.slice(0, 8) : [];
+
+          const files = Array.isArray(data.snapshot.files) ? data.snapshot.files.slice(0, 8) : [];
           itemsEl.innerHTML = files.length
-            ? files.map(renderStateSource).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No configured state files observed yet.</div>';
+            ? files.map(f => `<div class="inspector-session">
+                <div style="min-width:0;">
+                  <div style="font-weight:700; color:#ecfccb;">${escHtml(f.name || 'unknown')}</div>
+                  <div style="color:var(--text-muted); margin-top:3px;">${escHtml(f.kind || '-')} / ${escHtml(f.scope || '-')}</div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="inspector-pill">${escHtml(f.exists === false ? 'missing' : 'present')}</span>
+                  ${f.size_bytes != null ? `<span class="inspector-pill">${escHtml(f.size_bytes)}b</span>` : ''}
+                </div>
+              </div>`).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No state files.</div>';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('StateStore', 'error');
-          itemsEl.innerHTML = renderRouteDiagnostic('/api/state_store_audit');
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('StateStore', 'error');
+          itemsEl.innerHTML = renderRouteError('/api/state_store_audit');
         });
     }
 
-    function renderBackgroundTaskSession(session) {
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#fce7f3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">lag ${escHtml(session.state_lag_count || 0)} / checkpoint ${escHtml(session.checkpoint_task_state || 'none')}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">q ${escHtml(session.queue_depth || 0)}</span>
-            <span class="inspector-pill">active ${escHtml(session.active_workers || 0)}</span>
-            <span class="inspector-pill">dead ${escHtml(session.dead_letter_count || 0)}</span>
-            <span class="inspector-pill">${escHtml(session.warning_level || 'ok')}</span>
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Background Tasks ───────────────────────────────────────────────
     function loadBackgroundTasks() {
       const summaryEl = document.getElementById('background-tasks-summary');
       const itemsEl = document.getElementById('background-tasks-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(routePath(`/api/background_tasks?limit=8&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/background_tasks?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Tasks', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Background Tasks API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Tasks', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Managed', summary.managed_tasks || 0),
-            renderInspectorMetric('Pending', summary.pending_tasks || 0),
-            renderInspectorMetric('Exceptions', summary.task_exceptions || 0),
-            renderInspectorMetric('Post Sessions', summary.background_post_sessions || 0),
-            renderInspectorMetric('Queued', summary.background_post_queued || 0),
-            renderInspectorMetric('Dead Letters', summary.background_post_dead_letters || 0),
-            renderInspectorMetric('Warnings', summary.background_post_warnings || 0),
-            renderInspectorMetric('Redaction', 'metadata')
+            renderMetric('Active', summary.active_tasks || 0),
+            renderMetric('Queued', summary.queued_jobs || 0),
+            renderMetric('Leased', summary.leased_jobs || 0),
+            renderMetric('Retries', summary.retry_count || 0),
+            renderMetric('Dead', summary.dead_letter_count || 0),
+            renderMetric('Warnings', summary.warning_count || 0)
           ].join('');
-          const post = snap.background_post || {};
-          const sessions = Array.isArray(post.sessions) ? post.sessions.slice(0, 8) : [];
+
+          const sessions = Array.isArray(data.snapshot.sessions) ? data.snapshot.sessions.slice(0, 6) : [];
           itemsEl.innerHTML = sessions.length
-            ? sessions.map(renderBackgroundTaskSession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No background post queue sessions observed.</div>';
+            ? sessions.map(s => `<div class="inspector-session">
+                <div style="min-width:0;">
+                  <div style="font-weight:700; color:#fce7f3;">${escHtml(s.session_key || 'unknown')}</div>
+                  <div style="color:var(--text-muted); margin-top:3px;">lag ${escHtml(s.state_lag_count || 0)} / ckpt ${escHtml(s.checkpoint_task_state || 'none')}</div>
+                </div>
+                <div style="text-align:right;">
+                  <span class="inspector-pill">q ${escHtml(s.queue_depth || 0)}</span>
+                  <span class="inspector-pill">dead ${escHtml(s.dead_letter_count || 0)}</span>
+                </div>
+              </div>`).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active tasks.</div>';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Tasks', 'error');
-          itemsEl.innerHTML = renderRouteDiagnostic('/api/background_tasks');
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Tasks', 'error');
+          itemsEl.innerHTML = renderRouteError('/api/background_tasks');
         });
     }
 
-    function renderMemorySession(session) {
-      const counts = session.counts || {};
-      const params = session.params || {};
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#e0f2fe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / reconsolidation ${escHtml(params.reconsolidation_rate || 0)} / mood ${escHtml(params.mood_weight || 0)}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">L1 ${escHtml(counts.l1_hot || 0)}</span>
-            <span class="inspector-pill">L2 ${escHtml(counts.l2_warm || 0)}</span>
-            <span class="inspector-pill">L3 ${escHtml(counts.l3_nodes || 0)}</span>
-            <span class="inspector-pill">recall ${escHtml(counts.recalled_l2 || 0)}</span>
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Memory Explorer ────────────────────────────────────────────────
     function loadMemoryExplorer() {
       const summaryEl = document.getElementById('memory-explorer-summary');
       const sessionsEl = document.getElementById('memory-explorer-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(routePath(`/api/memory_explorer?limit=5&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/memory_explorer?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Memory', 'offline');
-            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Memory Explorer API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Memory', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Sessions', summary.sessions || 0),
-            renderInspectorMetric('L1 Hot', summary.l1_hot || 0),
-            renderInspectorMetric('L2 Warm', summary.l2_warm || 0),
-            renderInspectorMetric('L3 Nodes', summary.l3_nodes || 0),
-            renderInspectorMetric('L3 Edges', summary.l3_edges || 0),
-            renderInspectorMetric('Recalled L2', summary.recalled_l2 || 0),
-            renderInspectorMetric('Embeddings', summary.embedding_items || 0),
-            renderInspectorMetric('Redaction', 'hash')
+            renderMetric('L1 Items', summary.l1_items || 0),
+            renderMetric('L2 Items', summary.l2_items || 0),
+            renderMetric('L3 Items', summary.l3_items || 0),
+            renderMetric('Consolidation', summary.consolidation_running ? 'running' : 'idle'),
+            renderMetric('Total', summary.total_items || 0)
           ].join('');
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
-          sessionsEl.innerHTML = sessions.length
-            ? sessions.map(renderMemorySession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded memory systems observed yet.</div>';
+          sessionsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Memory', 'error');
-          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/memory_explorer.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Memory', 'error');
         });
     }
 
-    function renderMemoryRecallReplaySession(session) {
-      const summary = session.summary || {};
-      const memory = session.memory || {};
-      const counts = memory.counts || {};
-      const hits = Array.isArray(memory.last_recalled_l2) ? memory.last_recalled_l2 : [];
-      const latest = hits[0] || {};
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#cffafe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(memory.tick || 0)} / last hash ${escHtml(latest.text_fingerprint || '-')} / chars ${escHtml(latest.text_chars || 0)}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">recall ${escHtml(summary.recall_events || 0)}</span>
-            <span class="inspector-pill">L2 ${escHtml(counts.recalled_l2 || 0)}</span>
-            <span class="inspector-pill">inject ${escHtml(summary.memory_injections || 0)}</span>
-            <span class="inspector-pill">skip ${escHtml(summary.memory_skips || 0)}</span>
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Memory Recall Replay ───────────────────────────────────────────
     function loadMemoryRecallReplay() {
       const summaryEl = document.getElementById('memory-recall-replay-summary');
       const itemsEl = document.getElementById('memory-recall-replay-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(routePath(`/api/memory_recall_replay?limit=20&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/memory_recall_replay?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Recall', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Memory Recall Replay API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Recall', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Sessions', summary.sessions || 0),
-            renderInspectorMetric('Recall Events', summary.recall_events || 0),
-            renderInspectorMetric('L2 Recalled', summary.recalled_l2 || 0),
-            renderInspectorMetric('Memory Injects', summary.memory_injections || 0),
-            renderInspectorMetric('Redaction', 'hash'),
-            renderInspectorMetric('Mode', 'read-only')
+            renderMetric('Recalls', summary.total_recalls || 0),
+            renderMetric('L2 Hits', summary.l2_recalled || 0),
+            renderMetric('Avg Gap', `${(summary.avg_gap_seconds || 0).toFixed(1)}s`)
           ].join('');
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
-          itemsEl.innerHTML = sessions.length
-            ? sessions.map(renderMemoryRecallReplaySession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No memory recall evidence observed yet.</div>';
+          itemsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Recall', 'error');
-          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/memory_recall_replay.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Recall', 'error');
         });
     }
 
-    function renderDesireItem(item) {
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#ffe4e6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.source || 'unknown')} / ${escHtml(item.kind || 'inward')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">hash ${escHtml(item.content_fingerprint || '-')} / chars ${escHtml(item.content_chars || 0)} / age ${Math.round(Number(item.age_seconds || 0))}s</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">${escHtml(item.intensity_bucket || 'low')}</span>
-            <span class="inspector-pill">i ${escHtml(item.intensity || 0)}</span>
-            ${item.has_target_umo ? '<span class="inspector-pill">scoped</span>' : '<span class="inspector-pill">global</span>'}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Desire Dashboard ───────────────────────────────────────────────
     function loadDesireDashboard() {
       const summaryEl = document.getElementById('desire-dashboard-summary');
       const itemsEl = document.getElementById('desire-dashboard-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(routePath(`/api/desire_dashboard?limit=8&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/desire_dashboard?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Desires', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Desire Dashboard API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Desires', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const byKind = snap.by_kind || {};
-          const byIntensity = snap.by_intensity || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Enabled', summary.enabled ? 'yes' : 'no'),
-            renderInspectorMetric('Active', summary.active || 0),
-            renderInspectorMetric('Total', summary.total || 0),
-            renderInspectorMetric('Fill', `${Math.round(Number(summary.queue_fill_ratio || 0) * 100)}%`),
-            renderInspectorMetric('Outward', byKind.outward || 0),
-            renderInspectorMetric('Inward', byKind.inward || 0),
-            renderInspectorMetric('High', byIntensity.high || 0),
-            renderInspectorMetric('Scoped', summary.scoped_to_umo || 0)
+            renderMetric('Active', summary.active_count || 0),
+            renderMetric('Satisfied', summary.satisfied_count || 0),
+            renderMetric('Inward', summary.inward_count || 0),
+            renderMetric('Outward', summary.outward_count || 0)
           ].join('');
-          const items = Array.isArray(snap.active_desires) ? snap.active_desires.slice(0, 8) : [];
-          itemsEl.innerHTML = items.length
-            ? items.map(renderDesireItem).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active desires observed.</div>';
+          itemsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Desires', 'error');
-          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/desire_dashboard.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Desires', 'error');
         });
     }
 
-    function renderDesireEvolutionItem(item) {
-      const evidence = item.evidence || {};
-      const added = Array.isArray(evidence.added_content_fingerprints) ? evidence.added_content_fingerprints.length : 0;
-      const removed = Array.isArray(evidence.removed_content_fingerprints) ? evidence.removed_content_fingerprints.length : 0;
-      const before = evidence.before_count != null ? evidence.before_count : '-';
-      const after = evidence.after_count != null ? evidence.after_count : '-';
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#ffe4e6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(item.type || 'desire.event')} #${escHtml(item.id || 0)}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">${escHtml(formatEventTime(item.ts))} / ${escHtml(item.source || '-')}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">${escHtml(before)} -> ${escHtml(after)}</span>
-            <span class="inspector-pill">+${escHtml(added)}</span>
-            <span class="inspector-pill">-${escHtml(removed)}</span>
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Desire Evolution ───────────────────────────────────────────────
     function loadDesireEvolution() {
       const summaryEl = document.getElementById('desire-evolution-summary');
       const itemsEl = document.getElementById('desire-evolution-items');
       if (!summaryEl || !itemsEl) return;
-      fetch(routePath(`/api/desire_evolution?limit=20&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/desire_evolution?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Evolution', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Desire Evolution API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Evolution', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const byKind = snap.by_kind || {};
-          const counts = snap.event_counts || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Active Now', summary.active_current || 0),
-            renderInspectorMetric('Satisfied', summary.satisfied_current || 0),
-            renderInspectorMetric('Scoped', summary.scoped_to_umo || 0),
-            renderInspectorMetric('Events', summary.timeline_events || 0),
-            renderInspectorMetric('Queue Updates', summary.queue_update_events || 0),
-            renderInspectorMetric('Outward', byKind.outward || 0),
-            renderInspectorMetric('Inward', byKind.inward || 0),
-            renderInspectorMetric('Snapshots', counts['desire.dashboard_snapshot'] || 0)
+            renderMetric('Events', summary.total_events || 0),
+            renderMetric('Added', summary.added_count || 0),
+            renderMetric('Removed', summary.removed_count || 0)
           ].join('');
-          const timeline = Array.isArray(snap.timeline) ? snap.timeline.slice(0, 8) : [];
-          itemsEl.innerHTML = timeline.length
-            ? timeline.map(renderDesireEvolutionItem).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No desire evolution events observed yet.</div>';
+          itemsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Evolution', 'error');
-          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/desire_evolution.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Evolution', 'error');
         });
     }
 
-    function renderScarSession(session) {
-      const stages = session.stage_counts || {};
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#ede9fe; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / threshold ${escHtml(session.wound_threshold || 0)} / cap ${escHtml(session.session_scar_count || 0)}:${escHtml(session.session_scar_cap || 0)}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">total ${escHtml(session.total_scars || 0)}</span>
-            <span class="inspector-pill">RAW ${escHtml(stages.RAW || 0)}</span>
-            <span class="inspector-pill">SCARRED ${escHtml(stages.SCARRED || 0)}</span>
-            ${session.circuit_breaker_active ? '<span class="inspector-pill">breaker</span>' : '<span class="inspector-pill">stable</span>'}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Scar Explorer ──────────────────────────────────────────────────
     function loadScarExplorer() {
       const summaryEl = document.getElementById('scar-explorer-summary');
       const sessionsEl = document.getElementById('scar-explorer-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(routePath(`/api/scar_explorer?limit=8&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/scar_explorer?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Scars', 'offline');
-            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Scar Explorer API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Scars', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Topology', summary.topology || 'empty'),
-            renderInspectorMetric('Sessions', summary.sylanne_sessions || 0),
-            renderInspectorMetric('Sylanne', summary.sylanne_total_scars || 0),
-            renderInspectorMetric('Legacy', summary.legacy_total_scars || 0),
-            renderInspectorMetric('Breakers', summary.active_circuit_breakers || 0),
-            renderInspectorMetric('Cap Pressure', summary.session_cap_pressure || 0),
-            renderInspectorMetric('Redaction', 'safe')
+            renderMetric('Total', summary.total_scars || 0),
+            renderMetric('Healed', summary.healed_count || 0),
+            renderMetric('Active', summary.active_count || 0)
           ].join('');
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
-          sessionsEl.innerHTML = sessions.length
-            ? sessions.map(renderScarSession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded Sylanne scar state observed yet.</div>';
+          sessionsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Scars', 'error');
-          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/scar_explorer.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Scars', 'error');
         });
     }
 
-    function renderPersonalityDriftSession(session) {
-      const emb = Array.isArray(session.embodiment_traits) ? session.embodiment_traits.slice(0, 5) : [];
-      const driftCount = Array.isArray(session.recent_drift_events) ? session.recent_drift_events.length : 0;
-      const traitSummary = emb.map(t => `${escHtml(t.name || 'trait')} ${escHtml(t.value || 0)}`).join(' / ');
-      return `
-        <div class="inspector-session">
-          <div style="min-width:0;">
-            <div style="font-weight:700; color:#d1fae5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(session.session_key || 'unknown')}</div>
-            <div style="color:var(--text-muted); margin-top:3px;">tick ${escHtml(session.tick || 0)} / drift ${escHtml(session.drift_tick || 0)} / ${traitSummary}</div>
-          </div>
-          <div style="text-align:right;">
-            <span class="inspector-pill">events ${escHtml(driftCount)}</span>
-            <span class="inspector-pill">rels ${escHtml(session.relationship_delta_sessions || 0)}</span>
-            ${session.personality_dirty ? '<span class="inspector-pill">dirty</span>' : '<span class="inspector-pill">clean</span>'}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Personality Drift ──────────────────────────────────────────────
     function loadPersonalityDrift() {
       const summaryEl = document.getElementById('personality-drift-summary');
       const sessionsEl = document.getElementById('personality-drift-sessions');
       if (!summaryEl || !sessionsEl) return;
-      fetch(routePath(`/api/personality_drift?limit=8&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/personality_drift?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Drift', 'offline');
-            sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Personality Drift API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Drift', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const personaCore = (((snap.legacy || {}).persona_core) || {});
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Sessions', summary.sylanne_sessions || 0),
-            renderInspectorMetric('Events', summary.recent_drift_events || 0),
-            renderInspectorMetric('Mutations', summary.mutation_history_count || 0),
-            renderInspectorMetric('Dirty', summary.active_dirty_sessions || 0),
-            renderInspectorMetric('Rel Deltas', summary.relationship_delta_sessions || 0),
-            renderInspectorMetric('Legacy Vec', summary.legacy_vector_available ? 'yes' : 'no'),
-            renderInspectorMetric('Persona Core', personaCore.exists ? 'hash' : 'none')
+            renderMetric('Sessions', summary.session_count || 0),
+            renderMetric('Mutations', summary.mutation_count || 0),
+            renderMetric('Stability', `${(summary.avg_stability || 0).toFixed(2)}`)
           ].join('');
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
-          sessionsEl.innerHTML = sessions.length
-            ? sessions.map(renderPersonalityDriftSession).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No loaded Sylanne personality state observed yet.</div>';
+          sessionsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Drift', 'error');
-          sessionsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/personality_drift.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Drift', 'error');
         });
     }
 
-    function renderReasoningTraceStep(step) {
-      const evidence = step.evidence && typeof step.evidence === 'object' ? step.evidence : {};
-      const evidenceText = summarizePayload(evidence);
-      const tags = Array.isArray(step.tags) ? step.tags.slice(0, 4) : [];
-      return `
-        <div class="timeline-item">
-          <div class="timeline-time">${escHtml(formatEventTime(step.timestamp))}</div>
-          <span class="timeline-type">${escHtml(step.decision || step.type || 'reasoning.step')}</span>
-          <div class="timeline-desc">
-            <div class="timeline-meta">
-              <span class="timeline-chip">${escHtml(step.type || 'event')}</span>
-              ${step.severity ? `<span class="timeline-chip ${escHtml(String(step.severity).toLowerCase())}">${escHtml(step.severity)}</span>` : ''}
-              ${step.source ? `<span class="timeline-chip">source: ${escHtml(step.source)}</span>` : ''}
-              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
-            </div>
-            ${evidenceText ? `<div class="timeline-payload">${escHtml(evidenceText)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">No evidence metadata.</span>'}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Reasoning Trace ────────────────────────────────────────────────
     function loadReasoningTrace() {
       const summaryEl = document.getElementById('reasoning-trace-summary');
       const stepsEl = document.getElementById('reasoning-trace-steps');
       if (!summaryEl || !stepsEl) return;
-      fetch(routePath(`/api/reasoning_trace?limit=80&token=${encodeURIComponent(token)}`))
+
+      fetch(routePath(`/api/reasoning_trace?token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Trace', 'offline');
-            stepsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Reasoning Trace API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Trace', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const byType = summary.by_type || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Steps', summary.steps || 0),
-            renderInspectorMetric('Source Events', summary.source_events || 0),
-            renderInspectorMetric('Prompt Snapshots', summary.prompt_debug_snapshots || 0),
-            renderInspectorMetric('Tools Started', byType['tool.invocation_started'] || 0),
-            renderInspectorMetric('Tools Finished', byType['tool.invocation_finished'] || 0),
-            renderInspectorMetric('Responses', byType['response.observed'] || 0),
-            renderInspectorMetric('Redaction', snap.redaction ? 'on' : 'unknown')
+            renderMetric('Steps', summary.total_steps || 0),
+            renderMetric('Prompts', summary.prompt_debug_count || 0),
+            renderMetric('Tools', summary.tool_count || 0),
+            renderMetric('Responses', summary.response_count || 0)
           ].join('');
-          const steps = Array.isArray(snap.steps) ? snap.steps.slice(-10).reverse() : [];
+
+          const steps = Array.isArray(data.snapshot.steps) ? data.snapshot.steps.slice(-8).reverse() : [];
           stepsEl.innerHTML = steps.length
-            ? steps.map(renderReasoningTraceStep).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No reasoning events observed yet. Tool use, prompt injection, and response observation will appear here as redacted metadata.</div>';
+            ? steps.map(s => `<div class="timeline-item">
+                <div class="timeline-time">${escHtml(formatEventTime(s.timestamp))}</div>
+                <span class="timeline-type">${escHtml(s.type || 'step')}</span>
+                <div class="timeline-desc"><div class="timeline-payload">${escHtml(summarizePayload(s.payload || {}))}</div></div>
+              </div>`).join('')
+            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No reasoning events.</div>';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Trace', 'error');
-          stepsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/reasoning_trace.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Trace', 'error');
+          stepsEl.innerHTML = renderRouteError('/api/reasoning_trace');
         });
     }
 
-    function renderSessionReplayItem(item) {
-      const evidence = item.evidence && typeof item.evidence === 'object' ? item.evidence : {};
-      const evidenceText = summarizePayload(evidence);
-      const kind = item.kind || 'replay.item';
-      const label = item.action || item.role || item.type || kind;
-      const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4) : [];
-      return `
-        <div class="timeline-item">
-          <div class="timeline-time">${escHtml(formatEventTime(item.timestamp))}</div>
-          <span class="timeline-type">${escHtml(label)}</span>
-          <div class="timeline-desc">
-            <div class="timeline-meta">
-              <span class="timeline-chip">${escHtml(kind)}</span>
-              ${item.type ? `<span class="timeline-chip">${escHtml(item.type)}</span>` : ''}
-              ${item.role ? `<span class="timeline-chip">role: ${escHtml(item.role)}</span>` : ''}
-              ${item.text_chars != null ? `<span class="timeline-chip">chars: ${escHtml(item.text_chars)}</span>` : ''}
-              ${item.text_fingerprint ? `<span class="timeline-chip">fp: ${escHtml(item.text_fingerprint)}</span>` : ''}
-              ${item.source ? `<span class="timeline-chip">source: ${escHtml(item.source)}</span>` : ''}
-              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
-            </div>
-            ${evidenceText ? `<div class="timeline-payload">${escHtml(evidenceText)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">Redacted metadata only.</span>'}
-          </div>
-        </div>
-      `;
-    }
-
+    // ── Session Replay ─────────────────────────────────────────────────
     function loadSessionReplay() {
       const summaryEl = document.getElementById('session-replay-summary');
       const itemsEl = document.getElementById('session-replay-items');
       if (!summaryEl || !itemsEl) return;
+
       fetch(routePath(`/api/session_replay?limit=80&token=${encodeURIComponent(token)}`))
         .then(r => r.json())
         .then(data => {
           if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderInspectorMetric('Replay', 'offline');
-            itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Session Replay API returned no snapshot.</div>';
+            summaryEl.innerHTML = renderMetric('Replay', 'offline');
             return;
           }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions : [];
-          const first = sessions[0] || {};
-          const firstSummary = first.summary || {};
+          const summary = data.snapshot.summary || {};
           summaryEl.innerHTML = [
-            renderInspectorMetric('Sessions', summary.sessions || 0),
-            renderInspectorMetric('Events', summary.runtime_events || 0),
-            renderInspectorMetric('Buffer Msgs', summary.buffer_messages || 0),
-            renderInspectorMetric('Items', firstSummary.timeline_items || 0),
-            renderInspectorMetric('Turns', firstSummary.buffer_turn_count || 0),
-            renderInspectorMetric('Redaction', snap.redaction ? 'on' : 'unknown')
+            renderMetric('Sessions', summary.sessions || 0),
+            renderMetric('Events', summary.runtime_events || 0),
+            renderMetric('Buffer', summary.buffer_messages || 0)
           ].join('');
-          if (!sessions.length) {
-            itemsEl.innerHTML = '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No session replay data observed yet.</div>';
-            return;
-          }
-          const cards = sessions.slice(0, 3).map(session => {
-            const timeline = Array.isArray(session.timeline) ? session.timeline.slice(-8).reverse() : [];
-            return `
-              <div style="margin-top:12px;">
-                <div style="font-size:12px; color:#bfdbfe; font-weight:700; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                  ${escHtml(session.session_key || 'unknown')}
-                </div>
-                ${timeline.length ? timeline.map(renderSessionReplayItem).join('') : '<div style="font-size:12px; color:var(--text-muted);">No recent replay items for this session.</div>'}
-              </div>
-            `;
-          });
-          itemsEl.innerHTML = cards.join('');
+          itemsEl.innerHTML = '';
         })
-        .catch(e => {
-          summaryEl.innerHTML = renderInspectorMetric('Replay', 'error');
-          itemsEl.innerHTML = '<div style="font-size:12px; color:#f87171;">Failed to load /api/session_replay.</div>';
+        .catch(() => {
+          summaryEl.innerHTML = renderMetric('Replay', 'error');
         });
     }
+  </script>
 
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 9: JavaScript - Timeline & Mutation Loaders
+       ═══════════════════════════════════════════════════════════════════ -->
+  <script>
+    // ── Cognitive Timeline ─────────────────────────────────────────────
     function renderRuntimeEvent(item) {
       const severity = String(item.severity || 'info').toLowerCase();
       const payload = summarizePayload(item.payload);
       const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4) : [];
-      return `
-        <div class="timeline-item">
-          <div class="timeline-time">${escHtml(formatEventTime(item.ts))}</div>
-          <span class="timeline-type">${escHtml(item.type || 'runtime.event')}</span>
-          <div class="timeline-desc">
-            <div class="timeline-meta">
-              <span class="timeline-chip ${escHtml(severity)}">${escHtml(severity)}</span>
-              ${item.session_key ? `<span class="timeline-chip">session: ${escHtml(item.session_key)}</span>` : ''}
-              ${item.source ? `<span class="timeline-chip">source: ${escHtml(item.source)}</span>` : ''}
-              ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
-            </div>
-            ${payload ? `<div class="timeline-payload">${escHtml(payload)}</div>` : '<span style="color:var(--text-muted); font-size:12px;">无额外 payload</span>'}
+      return `<div class="timeline-item">
+        <div class="timeline-time">${escHtml(formatEventTime(item.ts))}</div>
+        <span class="timeline-type">${escHtml(item.type || 'event')}</span>
+        <div class="timeline-desc">
+          <div class="timeline-meta">
+            <span class="timeline-chip ${escHtml(severity)}">${escHtml(severity)}</span>
+            ${item.session_key ? `<span class="timeline-chip">session: ${escHtml(item.session_key)}</span>` : ''}
+            ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
           </div>
+          ${payload ? `<div class="timeline-payload">${escHtml(payload)}</div>` : ''}
         </div>
-      `;
+      </div>`;
     }
 
     function loadCognitiveTimeline() {
@@ -1515,24 +1033,23 @@
         .then(r => r.json())
         .then(data => {
           if (!data.success || !Array.isArray(data.events) || data.events.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无运行时认知事件。触发一次对话或刷新插件后会开始记录。</p>';
+            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无运行时认知事件。</p>';
             if (statsEl) statsEl.textContent = '事件总数：0';
             return;
           }
           const stats = data.stats || {};
           const bySeverity = stats.by_severity || {};
           if (statsEl) {
-            statsEl.textContent = `事件总数：${stats.total || data.events.length} · latest #${stats.last_event_id || '-'} · info ${bySeverity.info || 0} / warning ${bySeverity.warning || 0} / error ${bySeverity.error || 0}`;
+            statsEl.textContent = `事件总数：${stats.total || data.events.length} · info ${bySeverity.info || 0} / warning ${bySeverity.warning || 0} / error ${bySeverity.error || 0}`;
           }
           container.innerHTML = data.events.map(renderRuntimeEvent).join('');
         })
-        .catch(e => {
-          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载认知时间线失败，请确认 /api/runtime_events 已注册。</p>';
-          if (statsEl) statsEl.textContent = '';
+        .catch(() => {
+          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载认知时间线失败。</p>';
         });
     }
 
-    // Load mutations history via API
+    // ── Mutation History ───────────────────────────────────────────────
     function loadMutationHistory() {
       const container = document.getElementById('timeline-container');
       fetch(routePath(`/api/mutation_history?token=${encodeURIComponent(token)}`))
@@ -1542,57 +1059,41 @@
             container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无核心突变记录。</p>';
             return;
           }
-          // Show newest mutations first
           const history = [...data.history].reverse();
           container.innerHTML = history.map(item => {
             const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString('zh-CN') : '未知时间';
-            const descMeta = item.description_redacted
+            const desc = item.description_redacted
               ? `描述已脱敏 · len=${Number(item.description_length || 0)} · fp=${escHtml(item.description_fingerprint || 'none')}`
-              : escHtml(item.description || '无具体内容描述');
-            return `
-              <div class="timeline-item">
-                <div class="timeline-time">${escHtml(timeStr)}</div>
-                <span class="timeline-type">${escHtml(item.type || '突变')}</span>
-                <div class="timeline-desc">${descMeta}</div>
-              </div>
-            `;
+              : escHtml(item.description || '无描述');
+            return `<div class="timeline-item">
+              <div class="timeline-time">${escHtml(timeStr)}</div>
+              <span class="timeline-type">${escHtml(item.type || '突变')}</span>
+              <div class="timeline-desc">${desc}</div>
+            </div>`;
           }).join('');
         })
-        .catch(e => {
-          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载突变历史失败，请尝试刷新。</p>';
+        .catch(() => {
+          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载突变历史失败。</p>';
         });
     }
 
-    // Trigger mutation rollback POST request
     function triggerRollback() {
-      if (!confirm("确定要撤销最新核心突变并回退到上一个版本的人设配置文件吗？\n警告：这将会覆盖当前的 core_beliefs 并且重载人格。")) {
-        return;
-      }
+      if (!confirm("确定要回滚至上一人设版本？")) return;
       fetch(routePath(`/api/mutation_rollback?token=${encodeURIComponent(token)}`), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken
-        }
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }
       })
       .then(r => r.json())
       .then(data => {
-        if (data.ok) {
-          alert("回滚成功！核心人设文件已成功恢复，并已写入演化日志。");
-          loadMutationHistory();
-        } else {
-          alert(`回滚失败: ${data.error || '未知错误'}`);
-        }
+        if (data.ok) { alert("回滚成功！"); loadMutationHistory(); }
+        else { alert(`回滚失败: ${data.error || '未知错误'}`); }
       })
-      .catch(e => {
-        alert("请求回滚失败，请检查网络或刷新页面。");
-      });
+      .catch(() => alert("请求回滚失败。"));
     }
 
-    // Refresh all internal views
+    // ── Refresh All ────────────────────────────────────────────────────
     function refreshAll() {
-      const iframes = document.querySelectorAll('iframe');
-      iframes.forEach(iframe => {
+      document.querySelectorAll('iframe').forEach(iframe => {
         const src = iframe.src;
         iframe.src = 'about:blank';
         setTimeout(() => { iframe.src = src; }, 50);
@@ -1611,6 +1112,39 @@
       loadReasoningTrace();
       loadSessionReplay();
     }
+  </script>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       SECTION 10: Initialization
+       ═══════════════════════════════════════════════════════════════════ -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      // Load iframes
+      document.getElementById('sylanne-iframe').src = urls.sylanne;
+      document.getElementById('dashboard-iframe').src = urls.dashboard;
+      document.getElementById('captree-iframe').src = urls.captree;
+
+      // Fetch CSRF token and load all panels
+      fetch(routePath(`/api/state?token=${encodeURIComponent(token)}`))
+        .then(r => r.json())
+        .then(data => { csrfToken = data.csrf_token || ''; })
+        .catch(() => {})
+        .finally(() => {
+          loadMutationHistory();
+          loadCognitiveTimeline();
+          loadStateInspector();
+          loadStateStoreAudit();
+          loadBackgroundTasks();
+          loadMemoryExplorer();
+          loadMemoryRecallReplay();
+          loadDesireDashboard();
+          loadDesireEvolution();
+          loadScarExplorer();
+          loadPersonalityDrift();
+          loadReasoningTrace();
+          loadSessionReplay();
+        });
+    });
   </script>
 </body>
 </html>

@@ -162,3 +162,55 @@ def test_prompt_debug_snapshot_is_redacted_and_emits_event():
     events = plugin._runtime_event_bus.recent(limit=5)
     assert events[0]["type"] == "prompt.injection_assembled"
     assert events[0]["payload"]["injected_slots"] == ["state"]
+
+
+def test_event_snapshot_and_rollback():
+    bus = RuntimeEventBus(max_events=100)
+    bus.emit("event.a", session_key="s1")
+    bus.emit("event.b", session_key="s1")
+    bus.emit("event.c", session_key="s1")
+
+    snapshot = bus.snapshot("before")
+    assert snapshot.name == "before"
+    assert len(snapshot.events) == 3
+
+    bus.emit("event.d", session_key="s1")
+    bus.emit("event.e", session_key="s1")
+    assert len(bus.recent(limit=10)) == 5
+
+    new_snapshot = bus.snapshot("after")
+    diff = bus.diff(snapshot, new_snapshot)
+    assert diff.has_changes
+    assert len(diff.added) == 2
+    assert len(diff.removed) == 0
+
+    bus.rollback(snapshot)
+    assert len(bus.recent(limit=10)) == 3
+    assert bus.recent(limit=10)[0]["type"] == "event.c"
+
+
+def test_event_compact():
+    bus = RuntimeEventBus(max_events=100)
+    import time
+    old_ts = time.time() - (8 * 86400)
+    bus.emit("old.event", ts=old_ts)
+    bus.emit("new.event")
+    bus.emit("new.event.2")
+
+    removed = bus.compact(keep_days=7)
+    assert removed == 1
+    assert len(bus.recent(limit=10)) == 2
+
+
+def test_event_snapshot_management():
+    bus = RuntimeEventBus(max_events=100)
+    bus.emit("event.a")
+
+    snap1 = bus.snapshot("snap1")
+    snap2 = bus.snapshot("snap2")
+
+    assert bus.list_snapshots() == ["snap1", "snap2"]
+    assert bus.get_snapshot("snap1") is snap1
+    assert bus.delete_snapshot("snap1") is True
+    assert bus.get_snapshot("snap1") is None
+    assert bus.delete_snapshot("snap1") is False

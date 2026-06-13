@@ -2217,6 +2217,240 @@ class WebUIRoutes:
         return {"ok": True, "updated_sessions": updated_sessions}
 
     # ------------------------------------------------------------------
+    # Phase 4: Cognitive Observatory 深化
+    # ------------------------------------------------------------------
+
+    async def event_search_handler(self) -> dict[str, Any]:
+        """GET /api/event_search — 事件全文搜索。
+
+        Query params:
+        - query: 搜索关键词
+        - session: 会话过滤
+        - type: 事件类型过滤
+        - severity: 严重级别过滤
+        - limit: 返回数量（默认 50）
+        """
+        from quart import request as quart_request
+
+        query = str(quart_request.args.get("query") or "").strip().lower()
+        session_key = str(quart_request.args.get("session") or "").strip()
+        event_type = str(quart_request.args.get("type") or "").strip()
+        severity = str(quart_request.args.get("severity") or "").strip()
+        limit = min(200, max(1, quart_request.args.get("limit", 50, type=int)))
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        events = bus.recent(limit=1000, session_key=session_key, event_type=event_type, severity=severity)
+
+        if query:
+            matched = []
+            for event in events:
+                searchable = json.dumps(event, ensure_ascii=False).lower()
+                if query in searchable:
+                    matched.append(event)
+            events = matched
+
+        return {
+            "ok": True,
+            "events": events[:limit],
+            "total_matches": len(events),
+            "query": query,
+        }
+
+    async def state_snapshot_handler(self) -> dict[str, Any]:
+        """POST /api/state_snapshot — 创建状态快照。
+
+        Body: {"name": "snapshot_name"}
+        """
+        from quart import request as quart_request
+
+        body = await quart_request.get_json(silent=True) or {}
+        name = str(body.get("name") or f"snap_{int(time.time())}").strip()
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        snapshot = bus.snapshot(name)
+        return {
+            "ok": True,
+            "snapshot": snapshot.to_dict(),
+        }
+
+    async def state_rollback_handler(self) -> dict[str, Any]:
+        """POST /api/state_rollback — 回滚到指定快照。
+
+        Body: {"name": "snapshot_name"}
+        """
+        from quart import request as quart_request
+
+        body = await quart_request.get_json(silent=True) or {}
+        name = str(body.get("name") or "").strip()
+
+        if not name:
+            return {"ok": False, "error": "missing snapshot name"}
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        snapshot = bus.get_snapshot(name)
+        if snapshot is None:
+            return {"ok": False, "error": "snapshot not found"}
+
+        bus.rollback(snapshot)
+        return {
+            "ok": True,
+            "message": f"Rolled back to snapshot '{name}'",
+            "event_count": len(snapshot.events),
+        }
+
+    async def state_diff_handler(self) -> dict[str, Any]:
+        """GET /api/state_diff — 计算两个快照之间的差异。
+
+        Query params:
+        - old: 旧快照名称
+        - new: 新快照名称
+        """
+        from quart import request as quart_request
+
+        old_name = str(quart_request.args.get("old") or "").strip()
+        new_name = str(quart_request.args.get("new") or "").strip()
+
+        if not old_name or not new_name:
+            return {"ok": False, "error": "missing old or new snapshot name"}
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        old_snapshot = bus.get_snapshot(old_name)
+        new_snapshot = bus.get_snapshot(new_name)
+
+        if old_snapshot is None:
+            return {"ok": False, "error": f"snapshot '{old_name}' not found"}
+        if new_snapshot is None:
+            return {"ok": False, "error": f"snapshot '{new_name}' not found"}
+
+        diff = bus.diff(old_snapshot, new_snapshot)
+        return {
+            "ok": True,
+            "diff": diff.to_dict(),
+        }
+
+    async def snapshot_list_handler(self) -> dict[str, Any]:
+        """GET /api/snapshot_list — 列出所有快照。"""
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        snapshots = bus.list_snapshots()
+        snapshot_details = []
+        for name in snapshots:
+            snap = bus.get_snapshot(name)
+            if snap:
+                snapshot_details.append(snap.to_dict())
+
+        return {
+            "ok": True,
+            "snapshots": snapshot_details,
+        }
+
+    async def snapshot_delete_handler(self) -> dict[str, Any]:
+        """DELETE /api/snapshot_delete — 删除指定快照。
+
+        Query params:
+        - name: 快照名称
+        """
+        from quart import request as quart_request
+
+        name = str(quart_request.args.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "missing snapshot name"}
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        deleted = bus.delete_snapshot(name)
+        return {
+            "ok": deleted,
+            "message": f"Snapshot '{name}' deleted" if deleted else f"Snapshot '{name}' not found",
+        }
+
+    async def cross_session_trend_handler(self) -> dict[str, Any]:
+        """GET /api/cross_session_trend — 跨会话趋势对比。
+
+        返回所有会话的人格向量、欲望数量、记忆数量等趋势数据。
+        """
+        hosts = getattr(self._p, "_hosts", {}) or {}
+        trends: list[dict[str, Any]] = []
+
+        for session_key, host in hosts.items():
+            try:
+                kernel = getattr(host, "kernel", None)
+                if kernel is None:
+                    continue
+
+                comp = getattr(kernel, "computation", None)
+                emotion = comp.engine.observe() if comp else {}
+                boundary = comp.boundary.to_dict() if comp else {}
+
+                personality = {}
+                if hasattr(kernel, "_personality"):
+                    personality = kernel._personality() or {}
+
+                trends.append({
+                    "session_key": session_key[:100],
+                    "turns": int(getattr(kernel, "turns", 0) or 0),
+                    "emotion": {
+                        "warmth": round(float(emotion.get("warmth", 0)), 3),
+                        "arousal": round(float(emotion.get("arousal", 0)), 3),
+                        "valence": round(float(emotion.get("valence", 0)), 3),
+                    },
+                    "boundary": {
+                        "integrity": round(float(boundary.get("integrity", 1.0)), 3),
+                        "stability": round(float(boundary.get("stability", 1.0)), 3),
+                    },
+                    "personality_traits": {
+                        k: round(float(v), 3)
+                        for k, v in (personality.get("traits") or {}).items()
+                        if isinstance(v, (int, float))
+                    },
+                })
+            except Exception:
+                continue
+
+        return {
+            "ok": True,
+            "sessions": trends,
+            "session_count": len(trends),
+        }
+
+    async def event_compact_handler(self) -> dict[str, Any]:
+        """POST /api/event_compact — 压缩旧事件。
+
+        Body: {"keep_days": 7}
+        """
+        from quart import request as quart_request
+
+        body = await quart_request.get_json(silent=True) or {}
+        keep_days = max(1, body.get("keep_days", 7))
+
+        bus = getattr(self._p, "_runtime_event_bus", None)
+        if bus is None:
+            return {"ok": False, "error": "runtime_event_bus_unavailable"}
+
+        removed = bus.compact(keep_days=keep_days)
+        return {
+            "ok": True,
+            "removed_count": removed,
+            "remaining_count": len(bus.recent(limit=10000)),
+        }
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

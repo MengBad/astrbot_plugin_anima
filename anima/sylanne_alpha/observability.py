@@ -14,6 +14,7 @@ import os
 import threading
 import time
 from collections import Counter, deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -23,6 +24,45 @@ except ImportError:
     import logging as _logging
 
     logger = _logging.getLogger("astrbot_plugin_anima")  # type: ignore
+
+
+@dataclass
+class EventSnapshot:
+    """事件快照。"""
+
+    name: str
+    timestamp: float
+    events: list[dict[str, Any]]
+    stats: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "timestamp": self.timestamp,
+            "event_count": len(self.events),
+            "stats": self.stats,
+        }
+
+
+@dataclass
+class EventDiff:
+    """事件差异。"""
+
+    added: list[dict[str, Any]]
+    removed: list[dict[str, Any]]
+    timestamp: float
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.added or self.removed)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "added_count": len(self.added),
+            "removed_count": len(self.removed),
+            "timestamp": self.timestamp,
+            "has_changes": self.has_changes,
+        }
 
 
 class RuntimeEventBus:
@@ -35,6 +75,8 @@ class RuntimeEventBus:
         max_loaded_id = self._load_recent_timeline()
         self._sequence = itertools.count(max_loaded_id + 1)
         self._subscribers: list[Any] = []
+        self._snapshots: dict[str, EventSnapshot] = {}
+        self._max_snapshots: int = 10
 
     def emit(
         self,
@@ -113,6 +155,90 @@ class RuntimeEventBus:
             "last_event_id": events[-1]["id"] if events else 0,
             "persistent": self._timeline_path is not None,
         }
+
+    def snapshot(self, name: str = "default") -> EventSnapshot:
+        """创建事件快照。"""
+        snapshot = EventSnapshot(
+            name=name,
+            timestamp=time.time(),
+            events=[dict(e) for e in self._events],
+            stats=self.stats(),
+        )
+        self._snapshots[name] = snapshot
+        self._trim_snapshots()
+        return snapshot
+
+    def diff(self, old: EventSnapshot, new: EventSnapshot) -> EventDiff:
+        """计算两个快照之间的差异。"""
+        old_ids = {e["id"] for e in old.events}
+        new_ids = {e["id"] for e in new.events}
+
+        added = [e for e in new.events if e["id"] not in old_ids]
+        removed = [e for e in old.events if e["id"] not in new_ids]
+
+        return EventDiff(
+            added=added,
+            removed=removed,
+            timestamp=time.time(),
+        )
+
+    def rollback(self, snapshot: EventSnapshot) -> None:
+        """回滚到指定快照。"""
+        self._events.clear()
+        for event in snapshot.events:
+            self._events.append(event)
+
+    def compact(self, keep_days: int = 7) -> int:
+        """压缩旧事件，返回删除的事件数。"""
+        cutoff = time.time() - (keep_days * 86400)
+        original_count = len(self._events)
+        self._events = deque(
+            (e for e in self._events if e.get("ts", 0) > cutoff),
+            maxlen=self._events.maxlen,
+        )
+        removed_count = original_count - len(self._events)
+        if removed_count > 0:
+            self._rewrite_timeline()
+        return removed_count
+
+    def get_snapshot(self, name: str) -> EventSnapshot | None:
+        """获取指定名称的快照。"""
+        return self._snapshots.get(name)
+
+    def list_snapshots(self) -> list[str]:
+        """列出所有快照名称。"""
+        return list(self._snapshots.keys())
+
+    def delete_snapshot(self, name: str) -> bool:
+        """删除指定快照。"""
+        if name in self._snapshots:
+            del self._snapshots[name]
+            return True
+        return False
+
+    def _trim_snapshots(self) -> None:
+        """修剪快照数量。"""
+        while len(self._snapshots) > self._max_snapshots:
+            oldest = min(self._snapshots.keys(), key=lambda k: self._snapshots[k].timestamp)
+            del self._snapshots[oldest]
+
+    def _rewrite_timeline(self) -> None:
+        """重写时间线文件（压缩后）。"""
+        if self._timeline_path is None:
+            return
+        try:
+            parent = self._timeline_path.parent
+            if parent:
+                parent.mkdir(parents=True, exist_ok=True)
+            with self._write_lock:
+                with open(self._timeline_path, "w", encoding="utf-8") as f:
+                    for event in self._events:
+                        line = json.dumps(event, ensure_ascii=False, sort_keys=True)
+                        f.write(line + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+        except OSError as exc:
+            logger.debug(f"Sylanne runtime timeline rewrite failed: {exc}")
 
     def _load_recent_timeline(self) -> int:
         """Load the newest persisted events into the memory ring buffer."""
