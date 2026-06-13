@@ -1,4 +1,4 @@
-# Migration Guide - v1.2.7
+# Migration Guide - v1.3.0
 
 ## Who Needs Action?
 
@@ -8,97 +8,30 @@ This release is designed to be backward compatible with existing Anima and Sylan
 
 ## What Changed Operationally?
 
-### Atomic persistence
+### Version Number Unification
 
-State writes now use safer temporary-file replacement for key JSON/text files.
+The version number has been unified across all files:
+- `main.py` @register decorator: "1.3.0"
+- `metadata.yaml` version: "1.3.0"
+- `README.md` badge: 1.3.0
 
-If a state file is found to be corrupt during an atomic update, Anima will:
+### No Functional Changes
 
-1. skip the destructive write
-2. move the corrupt file to a timestamped `.bak`
-3. continue running with safe defaults where possible
-
-### Runtime Event Bus
-
-A new Runtime Event Bus records structured observability events in memory and appends them to a JSONL timeline.
-Events are also appended to:
-
-```text
-data/plugin_data/astrbot_plugin_anima/runtime_events.jsonl
-```
-
-New API:
-
-```text
-/astrbot_plugin_anima/api/runtime_events
-```
-
-Additional redacted Observatory APIs are also available in this release line:
-
-```text
-/astrbot_plugin_anima/api/prompt_debug
-/astrbot_plugin_anima/api/state_inspector
-/astrbot_plugin_anima/api/state_store_audit
-/astrbot_plugin_anima/api/background_tasks
-/astrbot_plugin_anima/api/memory_explorer
-/astrbot_plugin_anima/api/memory_recall_replay
-/astrbot_plugin_anima/api/desire_dashboard
-/astrbot_plugin_anima/api/desire_evolution
-/astrbot_plugin_anima/api/scar_explorer
-/astrbot_plugin_anima/api/personality_drift
-/astrbot_plugin_anima/api/reasoning_trace
-/astrbot_plugin_anima/api/session_replay
-/astrbot_plugin_anima/api/mutation_history
-```
-
-Optional query parameters:
-
-```text
-limit=100
-session=<session_key>
-type=<event_type>
-severity=<severity>
-```
-
-This is an observability feature only. It does not change prompt assembly, memory retrieval, personality drift, scar algebra, or desire formation.
-Reasoning Trace is also observability-only: it assembles prompt/tool/response decision metadata without storing prompt text, memory bodies, tool argument values, tool results, or response text.
-Session Replay is observability-only as well: it merges event metadata and conversation-buffer message shapes without exposing message text.
-Memory Recall Replay is observability-only too: it reads existing recall evidence and prompt-debug metadata without triggering memory recall or changing memory weights.
-Background Task Observatory is observability-only too: it reads task and queue metadata without cancelling, scheduling, retrying, or mutating background work.
-Desire Evolution History is observability-only too: it connects current desire queue metadata with recent queue update events without exposing desire text, target UMO values, target users, or arbitrary runtime-event payload values.
-Mutation History is observability-only too: it exposes schema-versioned, redacted mutation metadata with length/fingerprint evidence instead of raw mutation descriptions.
-
-StateStore Audit is observability-only too: it is available as `/api/state_store_audit`, also embedded inside `/api/state_inspector` as `anima.state_store_audit.v1`, and reports only state-source metadata, runtime container counts, session-file aggregate counts, KV availability, future StateStore capability gaps, and metadata-only fingerprints for diff readiness.
-Those fingerprints are based on source metadata such as basename, configured/existing state, size, and mtime. They are not content hashes and do not read state bodies.
-Declared but unconfigured state sources also receive metadata fingerprints, so topology gaps and future StateStore migration differences are observable without creating files.
-Runtime containers and session-file aggregate counts also receive metadata fingerprints, so cache/session topology changes are observable without exposing keys, message text, or session directory names.
-
-### Background task lifecycle registry
-
-Anima now normalizes legacy list-style and newer set-style `_background_tasks` containers into one compatible registry at runtime.
-This is an internal lifecycle consistency fix only. It does not change user-facing configuration, memory data, prompt assembly, Sylanne state files, or WebUI API schemas.
+This release contains no functional changes to the core narrative engine, observability panels, or dual-engine architecture. All existing behavior is preserved.
 
 ## Recommended Operator Checks
 
 After upgrading:
 
 1. Restart or reload the plugin.
-2. Confirm `/astrbot_plugin_anima/health` responds if WebUI routes are enabled.
-3. Open `/astrbot_plugin_anima/anima` from AstrBot's Plugin Page route and confirm it no longer falls through to the AstrBot 404 helper page.
-4. Open `/astrbot_plugin_anima/api/runtime_events?limit=20`.
-5. If using the independent WebUI, open `/api/runtime_events?limit=20&token=<token>`.
-6. If the independent WebUI is running on the stdlib fallback server, confirm dashboard/capability-tree iframes and Observatory cards load instead of showing `index.html not found` or failed `/api/...` messages.
-7. Open Anima Portal and check the `Cognitive Timeline` panel.
-8. Check that `Reasoning Trace`, `Session Replay`, `State Inspector`, `Background Tasks`, `Memory Explorer`, `Memory Recall Replay`, `Desire Dashboard`, `Desire Evolution`, `Scar Explorer`, and `Personality Drift` cards render in the same panel.
-9. If opening from AstrBot's Plugin Page list, confirm network requests use `/astrbot_plugin_anima/api/...`; if opening the independent Sylanne WebUI, confirm requests still use `/api/...`.
-10. In the unified Portal, open the Dashboard and Capability Tree iframe tabs and confirm their internal API calls resolve under `/astrbot_plugin_anima/...` on the shared WebUI path.
-11. Run one normal conversation turn.
-12. Confirm a `response.observed` event appears.
-13. If a tool is used, confirm `tool.invocation_started` / `tool.invocation_finished` metadata appears without raw arguments or results.
-14. Check logs for any `corrupt-json` backup notices.
+2. Confirm the version number shows as v1.3.0 in logs.
+3. Run `/anima_help` to verify commands are available.
+4. Open the WebUI portal and confirm all Observatory panels load.
+5. Run one normal conversation turn to verify the core pipeline works.
+6. Check logs for any unexpected errors.
 
 ## Rollback
 
 Rollback to the previous plugin version is safe.
 
-If `.bak` files were created for corrupt JSON, keep them for manual inspection. They are not required by v1.2.7 at runtime.
+No data migration was performed, so rolling back will not lose any data.

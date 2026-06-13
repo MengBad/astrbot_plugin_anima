@@ -285,7 +285,7 @@ class EmbeddingProviderWrapper:
     "astrbot_plugin_anima",
     "MengBad",
     "Anima - 自主叙事记忆引擎：让任何 AstrBot 角色拥有自主叙事记忆、立场演化和自我认知能力。",
-    "1.2.7",
+    "1.3.0",
     "https://github.com/MengBad/astrbot_plugin_anima",
 )
 class AnimaPlugin(

@@ -1,4 +1,4 @@
-# Known Issues - v1.2.5 Release Candidate
+# Known Issues - v1.3.0
 
 ## Remaining Risks
 
@@ -59,3 +59,17 @@ State Inspector now embeds a read-only `anima.state_store_audit.v1` inventory so
 Next step:
 
 - introduce `StateStore` as an abstraction layer supporting snapshot, diff, rollback, audit, and timeline
+
+### 50 DeprecationWarning during test execution
+
+The test suite emits 50 `DeprecationWarning: __package__ != __spec__.parent` warnings when importing `main.py` in the test environment.
+
+Impact:
+
+- does not affect runtime behavior
+- does not fail the test suite
+- caused by Python 3.14 import system changes
+
+Next step:
+
+- will resolve when AstrBot core updates its import mechanism or when Python stabilizes the import system

@@ -1,3 +1,24 @@
+## v1.3.0 - 完全体发布：文档同步与版本统一
+
+本版是 Anima「完全体」发布版本，将版本号统一到 v1.3.0，更新全部发布文档，确认 409 个测试全绿通过。核心叙事引擎、可观测性面板和双引擎架构保持稳定，无功能性变更。
+
+### 版本号统一
+- 将 `main.py` @register 装饰器版本号从 "1.2.7" 更新到 "1.3.0"。
+- 将 `metadata.yaml` version 从 "1.2.9" 更新到 "1.3.0"。
+- 将 `README.md` 版本徽章更新到 1.3.0。
+
+### 文档更新
+- 重写 `RELEASE_NOTES.md` 为 v1.3.0 发布说明。
+- 更新 `MIGRATION_GUIDE.md` 到 v1.3.0。
+- 更新 `KNOWN_ISSUES.md` 到 v1.3.0。
+- 更新 `TEST_REPORT.md` 到 v1.3.0。
+
+### 测试
+- 确认 409 个测试全部通过（50 个 DeprecationWarning 不影响功能）。
+- 测试覆盖：Phase 2 稳定性、WebUI 路由、Cognitive Observatory、安全脱敏、高风险回滚、能力系统闭环、会话隔离、人格注入等。
+
+---
+
 ## v1.2.9 - 独立 WebUI 旧监听器接管热修复
 
 本版修复 v1.2.8 部署后可能出现的“ AstrBot 插件页已经更新，但独立端口 `2718` 仍由旧 WebUI 监听器提供服务”的半热更新状态。该状态会导致 `/api/state` 可用，但 `/api/webui_manifest`、`/api/state_inspector`、dashboard/capability-tree fallback 等新路由仍然 404。
