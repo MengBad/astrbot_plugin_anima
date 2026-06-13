@@ -108,6 +108,8 @@ class PluginAPI:
                 ("/api/snapshot_delete", "snapshot_delete_handler", ["DELETE"]),
                 ("/api/cross_session_trend", "cross_session_trend_handler", ["GET"]),
                 ("/api/event_compact", "event_compact_handler", ["POST"]),
+                ("/api/events/stream", "sse_handler", ["GET"]),
+                ("/api/state_store_summary", "state_store_summary_handler", ["GET"]),
             ]
             for route, handler_name, methods in webui_mappings:
                 handler = getattr(webui_routes, handler_name, None)

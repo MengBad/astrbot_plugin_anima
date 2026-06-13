@@ -10,6 +10,7 @@ from .markdown_source import MarkdownStateSource
 from .jsonl_source import JsonlStateSource
 from .snapshot import Snapshot, Diff, Change
 from .store import StateStore
+from .write_mixin import StateStoreWriteMixin
 
 __all__ = [
     "StateSource",
@@ -20,4 +21,5 @@ __all__ = [
     "Diff",
     "Change",
     "StateStore",
+    "StateStoreWriteMixin",
 ]

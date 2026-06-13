@@ -2451,6 +2451,63 @@ class WebUIRoutes:
         }
 
     # ------------------------------------------------------------------
+    # SSE: Server-Sent Events for real-time updates
+    # ------------------------------------------------------------------
+
+    async def sse_handler(self) -> Any:
+        """GET /api/events/stream — Server-Sent Events for real-time updates.
+
+        Streams new runtime events as they occur. Client can disconnect and
+        reconnect; the stream includes only events since the last known ID.
+        """
+        from quart import Response, request as quart_request
+
+        last_id = int(quart_request.args.get("last_id", 0) or 0)
+
+        async def event_stream():
+            bus = getattr(self._p, "_runtime_event_bus", None)
+            if bus is None:
+                yield f"data: {json.dumps({'error': 'runtime_event_bus_unavailable'})}\n\n"
+                return
+
+            current_id = last_id
+            yield f"data: {json.dumps({'type': 'connected', 'last_id': current_id})}\n\n"
+
+            while True:
+                await asyncio.sleep(1)
+                events = bus.recent(limit=50)
+                new_events = [e for e in events if e.get("id", 0) > current_id]
+                if new_events:
+                    for ev in new_events:
+                        current_id = max(current_id, ev.get("id", 0))
+                        yield f"data: {json.dumps({'type': 'event', 'event': ev})}\n\n"
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'last_id': current_id, 'count': len(new_events)})}\n\n"
+
+        return Response(
+            event_stream(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # StateStore API
+    # ------------------------------------------------------------------
+
+    async def state_store_summary_handler(self) -> dict[str, Any]:
+        """GET /api/state_store_summary — StateStore 摘要信息。"""
+        store = getattr(self._p, "_state_store", None)
+        if store is None:
+            return {"ok": False, "error": "state_store_unavailable"}
+
+        from state_store.migration import get_store_summary
+        summary = get_store_summary(store)
+        return {"ok": True, "summary": summary}
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

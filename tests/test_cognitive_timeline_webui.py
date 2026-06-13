@@ -13,70 +13,68 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_portal_exposes_cognitive_timeline_panel():
     html = (ROOT / "anima" / "UI" / "portal.html").read_text(encoding="utf-8")
 
-    assert "tab-cognitive" in html
-    assert "panel-cognitive" in html
-    assert "loadCognitiveTimeline" in html
+    assert "view-observatory" in html
+    assert "loadTimeline" in html
     assert "/api/runtime_events" in html
-    assert "Cognitive Timeline" in html
-    assert "state-inspector-card" in html
-    assert "loadStateInspector" in html
+    assert "认知观测台" in html
+    assert "loadInspector" in html
     assert "/api/state_inspector" in html
-    assert "State Inspector" in html
+    assert "状态检查" in html
     assert "state_store_audit" in html
-    assert "State Sources" in html
+    assert "存储源" in html
     assert "StateStore" in html
-    assert "state-store-audit-card" in html
-    assert "loadStateStoreAudit" in html
+    assert "loadStore" in html
     assert "/api/state_store_audit" in html
-    assert "background-tasks-card" in html
-    assert "loadBackgroundTasks" in html
+    assert "loadTasks" in html
     assert "/api/background_tasks" in html
-    assert "Background Tasks" in html
-    assert "memory-explorer-card" in html
-    assert "loadMemoryExplorer" in html
+    assert "后台任务" in html
+    assert "loadMemory" in html
     assert "/api/memory_explorer" in html
-    assert "Memory Explorer" in html
-    assert "memory-recall-replay-card" in html
-    assert "loadMemoryRecallReplay" in html
+    assert "记忆探索" in html
     assert "/api/memory_recall_replay" in html
-    assert "Memory Recall Replay" in html
-    assert "desire-dashboard-card" in html
-    assert "loadDesireDashboard" in html
+    assert "记忆召回回放" in html
+    assert "loadDesire" in html
     assert "/api/desire_dashboard" in html
-    assert "Desire Dashboard" in html
-    assert "desire-evolution-card" in html
-    assert "loadDesireEvolution" in html
+    assert "欲望系统" in html
     assert "/api/desire_evolution" in html
-    assert "Desire Evolution" in html
-    assert "scar-explorer-card" in html
-    assert "loadScarExplorer" in html
+    assert "loadScar" in html
     assert "/api/scar_explorer" in html
-    assert "Scar Explorer" in html
-    assert "personality-drift-card" in html
-    assert "loadPersonalityDrift" in html
+    assert "创伤浏览器" in html
+    assert "loadDrift" in html
     assert "/api/personality_drift" in html
-    assert "Personality Drift" in html
-    assert "reasoning-trace-card" in html
-    assert "loadReasoningTrace" in html
+    assert "人格漂移" in html
+    assert "loadTrace" in html
     assert "/api/reasoning_trace" in html
-    assert "Reasoning Trace" in html
-    assert "session-replay-card" in html
-    assert "loadSessionReplay" in html
+    assert "推理轨迹" in html
+    assert "loadReplay" in html
     assert "/api/session_replay" in html
-    assert "Session Replay" in html
+    assert "会话回放" in html
+    assert "loadTrend" in html
+    assert "/api/cross_session_trend" in html
+    assert "跨会话趋势" in html
+    assert "searchEvents" in html
+    assert "/api/event_search" in html
+    assert "createSnapshot" in html
+    assert "/api/state_snapshot" in html
+    assert "loadSnapshots" in html
+    assert "/api/snapshot_list" in html
+    assert "rollbackSnapshot" in html
+    assert "/api/state_rollback" in html
+    assert "deleteSnapshot" in html
+    assert "/api/snapshot_delete" in html
 
 
 def test_portal_uses_route_base_for_shared_astrbot_webui_fetches():
     html = (ROOT / "anima" / "UI" / "portal.html").read_text(encoding="utf-8")
 
     assert "window.location.pathname.startsWith('/astrbot_plugin_anima')" in html
-    assert "function routePath(path)" in html
-    assert "routePath(`/sylanne/" in html
-    assert "routePath(`/dashboard/" in html
-    assert "routePath(`/capability-tree/" in html
-    assert "fetch(routePath(`/api/state" in html
-    assert "fetch(routePath(`/api/runtime_events" in html
-    assert "fetch(routePath(`/api/session_replay" in html
+    assert "function rp(p)" in html
+    assert "rp('/sylanne/" in html
+    assert "rp('/dashboard/" in html
+    assert "rp('/capability-tree/" in html
+    assert "rp('/api/state" in html
+    assert "rp('/api/runtime_events" in html
+    assert "rp('/api/session_replay" in html
     assert "fetch(`/api/" not in html
     assert "fetch('/api/" not in html
 

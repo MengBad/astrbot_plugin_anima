@@ -649,6 +649,12 @@ class AnimaPlugin(
             max_events=2000,
             timeline_path=os.path.join(self.data_dir, "runtime_events.jsonl"),
         )
+
+        # StateStore 统一状态存储
+        from state_store import StateStore
+        from state_store.migration import register_legacy_sources
+        self._state_store = StateStore(data_dir=self.data_dir)
+        register_legacy_sources(self._state_store, self.data_dir)
         # WebUI 运行时标识（用于探针验证实例一致性）
         self._webui_runtime_id = f"{int(time.time() * 1000)}-{id(self):x}"
         # 节律学习器：学习用户的节奏

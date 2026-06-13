@@ -3,1147 +3,907 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Anima Cognitive Observatory</title>
-
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 1: CSS Variables & Base Styles
-       ═══════════════════════════════════════════════════════════════════ -->
+  <title>Anima 认知观测台</title>
   <style>
     :root {
       --bg-main: #090d16;
       --bg-card: rgba(15, 23, 42, 0.65);
+      --bg-panel: rgba(15, 23, 42, 0.4);
       --border-color: rgba(255, 255, 255, 0.08);
-      --accent-color: #6366f1;
+      --accent: #6366f1;
       --accent-glow: rgba(99, 102, 241, 0.35);
-      --text-main: #f1f5f9;
+      --text: #f1f5f9;
       --text-muted: #94a3b8;
-      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      --font-title: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --blue: #38bdf8;
+      --purple: #a78bfa;
+      --pink: #f9a8d4;
+      --cyan: #22d3ee;
     }
-
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
-      background-color: var(--bg-main);
-      color: var(--text-main);
-      font-family: var(--font-body);
-      overflow: hidden;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
+      background: var(--bg-main); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      overflow: hidden; height: 100vh; display: flex; flex-direction: column;
     }
 
-    /* ═══ Background Glow Effects ═══ */
-    body::before, body::after {
-      content: '';
-      position: absolute;
-      width: 400px;
-      height: 400px;
-      border-radius: 50%;
-      background: radial-gradient(circle, var(--accent-glow) 0%, rgba(99, 102, 241, 0) 70%);
-      z-index: -1;
-      filter: blur(80px);
-      pointer-events: none;
+    /* ═══ Header ═══ */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 20px; background: rgba(15,23,42,0.85);
+      backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color);
+      z-index: 100; height: 52px;
     }
-    body::before { top: -10%; right: 10%; }
-    body::after { bottom: -10%; left: 10%; }
-
-    /* ═══════════════════════════════════════════════════════════════════
-       SECTION 2: Header & Navigation
-       ═══════════════════════════════════════════════════════════════════ */
-    .portal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 24px;
-      background: rgba(15, 23, 42, 0.7);
-      backdrop-filter: blur(16px);
-      border-bottom: 1px solid var(--border-color);
-      z-index: 100;
-      height: 60px;
-      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4);
-    }
-
     .brand { display: flex; align-items: center; gap: 10px; }
-
-    .brand-logo {
-      width: 28px; height: 28px;
-      fill: none; stroke: var(--accent-color); stroke-width: 2.5;
-      filter: drop-shadow(0 0 6px var(--accent-color));
+    .brand svg { width: 24px; height: 24px; fill: none; stroke: var(--accent); stroke-width: 2.5; }
+    .brand-text { font-weight: 700; font-size: 16px; letter-spacing: 0.3px; }
+    .tabs { display: flex; gap: 4px; background: rgba(2,6,23,0.5); padding: 3px; border-radius: 10px; }
+    .tab {
+      background: transparent; border: none; color: var(--text-muted);
+      font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 8px;
+      cursor: pointer; transition: all 0.2s;
     }
+    .tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .tab.active { color: #fff; background: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+    .header-right { display: flex; align-items: center; gap: 10px; }
+    .status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green); }
+    .status-dot { width: 6px; height: 6px; background: var(--green); border-radius: 50%; box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+    .btn-sm { background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; transition: all 0.2s; }
+    .btn-sm:hover { background: rgba(255,255,255,0.1); color: var(--text); }
 
-    .brand-title {
-      font-family: var(--font-title);
-      font-weight: 800; font-size: 18px;
-      background: linear-gradient(135deg, #a5b4fc 0%, #818cf8 50%, #6366f1 100%);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-      letter-spacing: 0.5px;
+    /* ═══ Content ═══ */
+    .content { flex: 1; overflow: hidden; }
+    .view { display: none; height: 100%; }
+    .view.active { display: flex; }
+
+    /* ═══ Split View (2x2) ═══ */
+    .split-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 10px; height: 100%; }
+    .split-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+    .panel-head { padding: 8px 12px; background: rgba(15,23,42,0.5); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+    .panel-head .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .panel-body { flex: 1; }
+    .panel-body iframe { width: 100%; height: 100%; border: none; }
+
+    /* ═══ Observatory View ═══ */
+    .obs { display: flex; flex-direction: column; height: 100%; padding: 10px; gap: 10px; }
+
+    /* §1 Health Bar */
+    .health-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+    .health-item {
+      background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px;
+      padding: 10px 12px; text-align: center;
     }
+    .health-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .health-value { font-size: 20px; font-weight: 700; margin: 4px 0 2px; }
+    .health-status { font-size: 10px; }
+    .health-status.ok { color: var(--green); }
+    .health-status.warn { color: var(--yellow); }
+    .health-status.bad { color: var(--red); }
 
-    .nav-tabs {
-      display: flex; align-items: center; gap: 8px;
-      background: rgba(2, 6, 23, 0.4);
-      padding: 4px; border-radius: 12px;
-      border: 1px solid var(--border-color);
+    /* §2 Sub-panels */
+    .sub-tabs { display: flex; gap: 3px; flex-wrap: wrap; }
+    .sub-tab {
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);
+      color: var(--text-muted); font-size: 11px; padding: 5px 10px; border-radius: 6px;
+      cursor: pointer; transition: all 0.15s; white-space: nowrap;
     }
-
-    .nav-tab {
-      background: transparent; border: none;
-      color: var(--text-muted);
-      font-family: var(--font-body); font-size: 14px; font-weight: 500;
-      padding: 8px 16px; border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex; align-items: center; gap: 6px;
+    .sub-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+    .sub-tab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .sub-content {
+      flex: 1; overflow-y: auto; background: var(--bg-card);
+      border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;
     }
-    .nav-tab:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.04); }
-    .nav-tab.active { color: #fff; background: var(--accent-color); box-shadow: 0 0 14px var(--accent-glow); }
+    .sub-content::-webkit-scrollbar { width: 4px; }
+    .sub-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
 
-    .header-actions { display: flex; align-items: center; gap: 12px; }
-
-    .status-badge {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 12px; color: #34d399;
-      background: rgba(52, 211, 153, 0.1);
-      padding: 4px 10px; border-radius: 20px;
-      border: 1px solid rgba(52, 211, 153, 0.2);
+    /* §3 Timeline */
+    .timeline-section { flex-shrink: 0; }
+    .timeline-bar {
+      display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;
     }
-
-    .status-dot {
-      width: 6px; height: 6px;
-      background-color: #34d399; border-radius: 50%;
-      box-shadow: 0 0 8px #34d399;
-      animation: pulse 2s infinite;
+    .timeline-bar input, .timeline-bar select {
+      background: rgba(255,255,255,0.05); border: 1px solid var(--border-color);
+      color: var(--text); padding: 5px 10px; border-radius: 6px; font-size: 12px; outline: none;
     }
-
-    .btn-refresh {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-      cursor: pointer;
-      width: 32px; height: 32px; border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      transition: all 0.2s;
+    .timeline-bar input:focus, .timeline-bar select:focus { border-color: var(--accent); }
+    .timeline-bar input { flex: 1; min-width: 150px; }
+    .btn-action {
+      background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3);
+      color: var(--accent); padding: 5px 12px; border-radius: 6px; font-size: 11px;
+      cursor: pointer; font-weight: 600; transition: all 0.15s;
     }
-    .btn-refresh:hover { background: rgba(255, 255, 255, 0.1); color: var(--text-main); }
-
-    /* ═══════════════════════════════════════════════════════════════════
-       SECTION 3: Content Area & Panels
-       ═══════════════════════════════════════════════════════════════════ */
-    .portal-content { flex: 1; position: relative; background-color: var(--bg-main); }
-
-    .split-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
-      gap: 12px; padding: 12px;
-      height: 100%;
-      transition: grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    .btn-action:hover { background: rgba(99,102,241,0.25); }
+    .btn-danger {
+      background: rgba(248,113,113,0.12); border: 1px solid rgba(248,113,113,0.25);
+      color: var(--red); padding: 5px 12px; border-radius: 6px; font-size: 11px;
+      cursor: pointer; font-weight: 600;
     }
-
-    .split-panel {
-      background: var(--bg-card);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--border-color);
-      border-radius: 12px; overflow: hidden;
-      display: flex; flex-direction: column;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-      transition: border-color 0.3s, box-shadow 0.3s;
+    .btn-danger:hover { background: rgba(248,113,113,0.2); }
+    .timeline-events {
+      max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color);
+      border-radius: 8px; background: var(--bg-card);
     }
-    .split-panel:hover { border-color: rgba(99, 102, 241, 0.3); }
-    .split-panel.collapsed { display: none !important; }
+    .timeline-events::-webkit-scrollbar { width: 4px; }
+    .timeline-events::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .ev { padding: 8px 12px; border-bottom: 1px solid var(--border-color); font-size: 12px; display: flex; gap: 10px; align-items: flex-start; }
+    .ev:last-child { border-bottom: none; }
+    .ev-time { color: var(--text-muted); white-space: nowrap; min-width: 60px; }
+    .ev-type { color: var(--purple); font-weight: 600; white-space: nowrap; min-width: 100px; }
+    .ev-detail { color: var(--text-muted); flex: 1; word-break: break-all; }
+    .ev-tag { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+    .ev-tag.info { background: rgba(99,102,241,0.15); color: var(--accent); }
+    .ev-tag.warn { background: rgba(251,191,36,0.15); color: var(--yellow); }
+    .ev-tag.error { background: rgba(248,113,113,0.15); color: var(--red); }
 
-    .panel-header {
-      padding: 10px 16px;
-      background: rgba(15, 23, 42, 0.5);
-      border-bottom: 1px solid var(--border-color);
-      display: flex; align-items: center; gap: 8px;
-      font-size: 13px; font-weight: 600; color: var(--text-muted);
+    /* Empty state */
+    .empty { text-align: center; padding: 24px 16px; color: var(--text-muted); }
+    .empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.5; }
+    .empty-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .empty-desc { font-size: 11px; line-height: 1.6; max-width: 400px; margin: 0 auto; }
+    .empty-hint { font-size: 10px; color: var(--yellow); margin-top: 8px; }
+
+    /* Data rows */
+    .data-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 12px;
     }
+    .data-row:last-child { border-bottom: none; }
+    .data-name { font-weight: 600; color: var(--text); }
+    .data-meta { color: var(--text-muted); }
+    .data-tags { display: flex; gap: 4px; }
+    .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+    .tag-present { background: rgba(52,211,153,0.12); color: var(--green); }
+    .tag-missing { background: rgba(248,113,113,0.12); color: var(--red); }
+    .tag-size { background: rgba(255,255,255,0.05); color: var(--text-muted); }
+    .tag-action { background: rgba(99,102,241,0.12); color: var(--accent); cursor: pointer; }
+    .tag-action:hover { background: rgba(99,102,241,0.25); }
 
-    .panel-header span.dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--accent-color);
-      box-shadow: 0 0 6px var(--accent-color);
+    /* Snapshot rows */
+    .snap-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 12px;
     }
+    .snap-row:last-child { border-bottom: none; }
 
-    .panel-body { flex: 1; position: relative; }
+    @keyframes pulse { 0%,100% { opacity: 0.8; } 50% { opacity: 1; } }
+    @media (max-width: 1024px) { .split-grid { grid-template-columns: 1fr; grid-template-rows: repeat(4, 1fr); } .health-bar { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 768px) { .header { flex-wrap: wrap; height: auto; padding: 8px 12px; } .tabs { flex-wrap: wrap; } .health-bar { grid-template-columns: repeat(2, 1fr); } .sub-tabs { gap: 2px; } .sub-tab { font-size: 10px; padding: 4px 6px; } }
 
-    iframe { width: 100%; height: 100%; border: none; background: transparent; }
-
-    .btn-toggle {
-      background: transparent; border: none;
-      color: var(--text-muted); cursor: pointer;
-      margin-left: auto; font-size: 14px;
-      padding: 2px 6px; border-radius: 4px;
-      transition: all 0.2s;
-    }
-    .btn-toggle:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.05); }
-
-    /* ═══════════════════════════════════════════════════════════════════
-       SECTION 4: Observatory Cards & Timeline
-       ═══════════════════════════════════════════════════════════════════ */
-    .inspector-card {
-      border: 1px solid rgba(251,191,36,0.18);
-      background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(15,23,42,0.42));
-      border-radius: 12px; padding: 12px; margin-bottom: 14px;
-    }
-
-    .inspector-grid {
-      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px; margin-top: 10px;
-    }
-
-    .inspector-metric {
-      border: 1px solid rgba(255,255,255,0.07);
-      background: rgba(2,6,23,0.28);
-      border-radius: 10px; padding: 9px;
-    }
-
-    .inspector-label {
-      font-size: 10px; color: var(--text-muted);
-      text-transform: uppercase; letter-spacing: 0.08em;
-    }
-
-    .inspector-value {
-      font-family: var(--font-title);
-      font-size: 18px; color: #fde68a; margin-top: 3px;
-    }
-
-    .inspector-session {
-      display: flex; justify-content: space-between; gap: 10px;
-      border-top: 1px solid rgba(255,255,255,0.06);
-      padding: 8px 0;
-    }
-
-    .inspector-pill {
-      display: inline-block;
-      color: #bae6fd;
-      border: 1px solid rgba(125,211,252,0.24);
-      background: rgba(14,165,233,0.08);
-      border-radius: 999px; padding: 2px 7px; margin: 2px;
-      font-size: 11px;
-    }
-
-    /* ═══ Timeline Styles ═══ */
-    .timeline {
-      position: relative;
-      padding-left: 20px;
-      border-left: 2px solid rgba(255, 255, 255, 0.06);
-      margin-top: 10px;
-    }
-
-    .timeline-item { position: relative; margin-bottom: 24px; }
-
-    .timeline-item::before {
-      content: '';
-      position: absolute;
-      left: -26px; top: 4px;
-      width: 10px; height: 10px; border-radius: 50%;
-      background: var(--accent-color);
-      border: 2px solid var(--bg-main);
-      box-shadow: 0 0 8px var(--accent-color);
-    }
-
-    .timeline-time { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
-
-    .timeline-type {
-      font-size: 12px; font-weight: 600;
-      color: #a78bfa; background: rgba(167, 139, 250, 0.1);
-      padding: 2px 6px; border-radius: 4px;
-      display: inline-block; margin-bottom: 6px;
-    }
-
-    .timeline-desc {
-      font-size: 13px; color: var(--text-main); line-height: 1.5;
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.03);
-      padding: 10px; border-radius: 8px;
-    }
-
-    .timeline-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-
-    .timeline-chip {
-      font-size: 11px; color: var(--text-muted);
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(255,255,255,0.035);
-      padding: 2px 6px; border-radius: 999px;
-    }
-    .timeline-chip.warning { color:#fbbf24; border-color:rgba(251,191,36,0.28); background:rgba(251,191,36,0.08); }
-    .timeline-chip.error { color:#f87171; border-color:rgba(248,113,113,0.28); background:rgba(248,113,113,0.08); }
-    .timeline-chip.debug { color:#60a5fa; border-color:rgba(96,165,250,0.28); background:rgba(96,165,250,0.08); }
-
-    .timeline-payload {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 11px; color: #cbd5e1;
-      white-space: pre-wrap; word-break: break-word; opacity: 0.9;
-    }
-
-    /* ═══ Responsive ═══ */
-    @media (max-width: 1024px) {
-      .split-grid { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; }
-      .split-panel { height: 600px; }
-    }
-
-    @keyframes pulse {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.05); opacity: 1; }
-      100% { transform: scale(0.95); opacity: 0.8; }
-    }
+    /* Help tooltips */
+    .help-tip { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,0.08); color: var(--text-muted); font-size: 9px; text-align: center; line-height: 14px; cursor: help; margin-left: 4px; position: relative; }
+    .help-tip:hover { background: rgba(99,102,241,0.2); color: var(--accent); }
+    .help-tip::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: rgba(15,23,42,0.95); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: var(--text); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 10; }
+    .help-tip:hover::after { opacity: 1; }
   </style>
 </head>
 <body>
 
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 5: Header Navigation
-       ═══════════════════════════════════════════════════════════════════ -->
-  <header class="portal-header">
+  <!-- ═══ Header ═══ -->
+  <header class="header">
     <div class="brand">
-      <svg class="brand-logo" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="40" stroke-dasharray="180 80"/>
-        <circle cx="50" cy="50" r="22" stroke-dasharray="90 30"/>
-        <line x1="50" y1="10" x2="50" y2="90" />
-        <line x1="10" y1="50" x2="90" y2="50" />
-      </svg>
-      <span class="brand-title">Anima Cognitive Observatory</span>
+      <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" stroke-dasharray="180 80"/><circle cx="50" cy="50" r="22" stroke-dasharray="90 30"/><line x1="50" y1="10" x2="50" y2="90"/><line x1="10" y1="50" x2="90" y2="50"/></svg>
+      <span class="brand-text">Anima 认知观测台</span>
     </div>
-
-    <div class="nav-tabs">
-      <button id="tab-split" class="nav-tab active" onclick="switchView('split')">全景分屏</button>
-      <button id="tab-sylanne" class="nav-tab" onclick="switchView('sylanne')">Sylanne 意识</button>
-      <button id="tab-dashboard" class="nav-tab" onclick="switchView('dashboard')">运行仪表盘</button>
-      <button id="tab-captree" class="nav-tab" onclick="switchView('captree')">能力树</button>
-      <button id="tab-cognitive" class="nav-tab" onclick="switchView('cognitive')">认知时间线</button>
-      <button id="tab-mutation" class="nav-tab" onclick="switchView('mutation')">核心突变</button>
+    <div class="tabs">
+      <button class="tab active" onclick="switchView('split')">全景</button>
+      <button class="tab" onclick="switchView('sylanne')">Sylanne</button>
+      <button class="tab" onclick="switchView('dashboard')">仪表盘</button>
+      <button class="tab" onclick="switchView('captree')">能力树</button>
+      <button class="tab" onclick="switchView('observatory')">观测台</button>
+      <button class="tab" onclick="switchView('mutation')">突变</button>
     </div>
-
-    <div class="header-actions">
-      <div class="status-badge">
-        <div class="status-dot"></div>
-        <span>Engine Live</span>
-      </div>
-      <button class="btn-refresh" title="刷新全部视图" onclick="refreshAll()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l.73-.73" />
-        </svg>
-      </button>
+    <div class="header-right">
+      <button class="btn-action" id="demo-btn" onclick="toggleDemoMode()" style="font-size:11px;">演示模式: 关</button>
+      <div class="status"><div class="status-dot"></div><span>运行中</span></div>
+      <button class="btn-sm" onclick="refreshAll()" title="刷新">⟳</button>
     </div>
   </header>
 
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 6: Main Content Panels
-       ═══════════════════════════════════════════════════════════════════ -->
-  <main class="portal-content">
-    <div class="split-grid" id="main-grid">
+  <!-- ═══ Content ═══ -->
+  <div class="content">
 
-      <!-- Panel 1: Sylanne Consciousness -->
-      <div class="split-panel" id="panel-sylanne">
-        <div class="panel-header">
-          <span class="dot"></span>
-          <span>Sylanne 意识状态</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('sylanne')"></button>
-        </div>
-        <div class="panel-body">
-          <iframe id="sylanne-iframe" src="about:blank"></iframe>
-        </div>
+    <!-- View: Split (2x2) -->
+    <div class="view active" id="view-split">
+      <div class="split-grid">
+        <div class="split-panel"><div class="panel-head"><div class="dot" style="background:var(--accent)"></div>Sylanne 意识</div><div class="panel-body"><iframe id="frame-sylanne" src="about:blank"></iframe></div></div>
+        <div class="split-panel"><div class="panel-head"><div class="dot" style="background:var(--blue)"></div>运行仪表盘</div><div class="panel-body"><iframe id="frame-dashboard" src="about:blank"></iframe></div></div>
+        <div class="split-panel"><div class="panel-head"><div class="dot" style="background:var(--green)"></div>能力树</div><div class="panel-body"><iframe id="frame-captree" src="about:blank"></iframe></div></div>
+        <div class="split-panel"><div class="panel-head"><div class="dot" style="background:var(--purple)"></div>核心突变</div><div class="panel-body" style="padding:12px; overflow-y:auto;" id="split-mutation"></div></div>
       </div>
+    </div>
 
-      <!-- Panel 2: Anima Dashboard -->
-      <div class="split-panel" id="panel-dashboard">
-        <div class="panel-header">
-          <span class="dot" style="background:#38bdf8;box-shadow:0 0 6px #38bdf8;"></span>
-          <span>Anima 运行仪表盘</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('dashboard')"></button>
+    <!-- View: Sylanne -->
+    <div class="view" id="view-sylanne"><div style="flex:1"><iframe id="frame-sylanne2" src="about:blank" style="width:100%;height:100%;border:none"></iframe></div></div>
+
+    <!-- View: Dashboard -->
+    <div class="view" id="view-dashboard"><div style="flex:1"><iframe id="frame-dashboard2" src="about:blank" style="width:100%;height:100%;border:none"></iframe></div></div>
+
+    <!-- View: Capability Tree -->
+    <div class="view" id="view-captree"><div style="flex:1"><iframe id="frame-captree2" src="about:blank" style="width:100%;height:100%;border:none"></iframe></div></div>
+
+    <!-- View: Observatory -->
+    <div class="view" id="view-observatory">
+      <div class="obs">
+        <!-- §1 Health Bar -->
+        <div class="health-bar" id="health-bar">
+          <div class="health-item"><div class="health-label">主机 <span class="help-tip" data-tip="活跃的 Sylanne 会话主机数">?</span></div><div class="health-value" id="h-hosts">-</div><div class="health-status" id="h-hosts-s"></div></div>
+          <div class="health-item"><div class="health-label">记忆系统 <span class="help-tip" data-tip="向量记忆系统的活跃实例数">?</span></div><div class="health-value" id="h-memory">-</div><div class="health-status" id="h-memory-s"></div></div>
+          <div class="health-item"><div class="health-label">后台任务 <span class="help-tip" data-tip="沉淀、反刍、持久化等后台任务">?</span></div><div class="health-value" id="h-tasks">-</div><div class="health-status" id="h-tasks-s"></div></div>
+          <div class="health-item"><div class="health-label">运行事件 <span class="help-tip" data-tip="运行时认知事件总数">?</span></div><div class="health-value" id="h-events">-</div><div class="health-status" id="h-events-s"></div></div>
+          <div class="health-item"><div class="health-label">存储源 <span class="help-tip" data-tip="已注册的持久化文件数量">?</span></div><div class="health-value" id="h-sources">-</div><div class="health-status" id="h-sources-s"></div></div>
+          <div class="health-item"><div class="health-label">KV 存储 <span class="help-tip" data-tip="AstrBot KV API 是否可用">?</span></div><div class="health-value" id="h-kv">-</div><div class="health-status" id="h-kv-s"></div></div>
         </div>
-        <div class="panel-body">
-          <iframe id="dashboard-iframe" src="about:blank"></iframe>
+
+        <!-- §2 Sub-panels -->
+        <div style="flex:1; display:flex; flex-direction:column; min-height:0;">
+          <div class="sub-tabs" id="sub-tabs">
+            <button class="sub-tab active" onclick="switchSub('inspector')" title="会话拓扑、脏标记、持久化文件状态">状态检查 <span class="help-tip" onclick="event.stopPropagation();showHelp('inspector')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('store')" title="文件/运行时/KV 状态源清单和快照管理">存储审计 <span class="help-tip" onclick="event.stopPropagation();showHelp('store')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('tasks')" title="沉淀、反刍、持久化等后台任务状态">后台任务 <span class="help-tip" onclick="event.stopPropagation();showHelp('tasks')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('memory')" title="L1/L2/L3 向量记忆拓扑和召回证据">记忆探索 <span class="help-tip" onclick="event.stopPropagation();showHelp('memory')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('desire')" title="欲望队列健康度和生命周期事件">欲望系统 <span class="help-tip" onclick="event.stopPropagation();showHelp('desire')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('scar')" title="伤痕代数、愈合阶段和边界状态">创伤浏览器 <span class="help-tip" onclick="event.stopPropagation();showHelp('scar')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('drift')" title="5D 人格向量和漂移趋势">人格漂移 <span class="help-tip" onclick="event.stopPropagation();showHelp('drift')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('trace')" title="提示注入、工具调用和响应观察的决策路径">推理轨迹 <span class="help-tip" onclick="event.stopPropagation();showHelp('trace')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('replay')" title="会话事件和消息形状回放">会话回放 <span class="help-tip" onclick="event.stopPropagation();showHelp('replay')" data-tip="点击查看帮助">?</span></button>
+            <button class="sub-tab" onclick="switchSub('trend')" title="多会话情绪、边界和人格对比">跨会话趋势 <span class="help-tip" onclick="event.stopPropagation();showHelp('trend')" data-tip="点击查看帮助">?</span></button>
+          </div>
+          <div class="sub-content" id="sub-content"></div>
         </div>
-      </div>
 
-      <!-- Panel 3: Capability Tree -->
-      <div class="split-panel" id="panel-captree">
-        <div class="panel-header">
-          <span class="dot" style="background:#34d399;box-shadow:0 0 6px #34d399;"></span>
-          <span>Anima 能力树</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('captree')"></button>
-        </div>
-        <div class="panel-body">
-          <iframe id="captree-iframe" src="about:blank"></iframe>
-        </div>
-      </div>
-
-      <!-- Panel 4: Cognitive Observatory -->
-      <div class="split-panel" id="panel-cognitive">
-        <div class="panel-header">
-          <span class="dot" style="background:#fbbf24;box-shadow:0 0 6px #fbbf24;"></span>
-          <span>认知观测台</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('cognitive')"></button>
-        </div>
-        <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
-          <!-- State Inspector Card -->
-          <div id="state-inspector-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#fde68a;">State Inspector</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Session/state topology, dirty flags, persistence files.</div>
-              </div>
-              <button onclick="loadStateInspector()" style="background:rgba(251,191,36,0.12); border:1px solid rgba(251,191,36,0.25); color:#fbbf24; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="state-inspector-summary" class="inspector-grid"></div>
-            <div id="state-inspector-sessions" style="margin-top:10px;"></div>
+        <!-- §3 Timeline -->
+        <div class="timeline-section">
+          <div class="timeline-bar">
+            <input type="text" id="tl-search" placeholder="搜索事件关键词..." onkeydown="if(event.key==='Enter')searchEvents()">
+            <select id="tl-severity"><option value="">全部级别</option><option value="info">信息</option><option value="warning">警告</option><option value="error">错误</option></select>
+            <button class="btn-action" onclick="searchEvents()">搜索</button>
+            <button class="btn-action" onclick="loadTimeline()">刷新</button>
+            <button class="btn-action" id="auto-refresh-btn" onclick="toggleAutoRefresh()">实时推送: 开</button>
+            <button class="btn-danger" onclick="compactEvents()">压缩旧事件</button>
           </div>
-
-          <!-- StateStore Audit Card -->
-          <div id="state-store-audit-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#d9f99d;">StateStore Audit</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">File/runtime/KV State Sources inventory.</div>
-              </div>
-              <button onclick="loadStateStoreAudit()" style="background:rgba(132,204,22,0.12); border:1px solid rgba(132,204,22,0.25); color:#bef264; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="state-store-audit-summary" class="inspector-grid"></div>
-            <div id="state-store-audit-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Background Tasks Card -->
-          <div id="background-tasks-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#f9a8d4;">Background Tasks</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Task lifecycle, queues, retries, dead letters.</div>
-              </div>
-              <button onclick="loadBackgroundTasks()" style="background:rgba(236,72,153,0.12); border:1px solid rgba(236,72,153,0.25); color:#f9a8d4; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="background-tasks-summary" class="inspector-grid"></div>
-            <div id="background-tasks-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Memory Explorer Card -->
-          <div id="memory-explorer-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#bae6fd;">Memory Explorer</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">L1/L2/L3 memory topology.</div>
-              </div>
-              <button onclick="loadMemoryExplorer()" style="background:rgba(14,165,233,0.12); border:1px solid rgba(14,165,233,0.25); color:#7dd3fc; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="memory-explorer-summary" class="inspector-grid"></div>
-            <div id="memory-explorer-sessions" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Memory Recall Replay Card -->
-          <div id="memory-recall-replay-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#67e8f9;">Memory Recall Replay</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Recall evidence and injection decisions.</div>
-              </div>
-              <button onclick="loadMemoryRecallReplay()" style="background:rgba(6,182,212,0.12); border:1px solid rgba(6,182,212,0.25); color:#67e8f9; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="memory-recall-replay-summary" class="inspector-grid"></div>
-            <div id="memory-recall-replay-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Desire Dashboard Card -->
-          <div id="desire-dashboard-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#fda4af;">Desire Dashboard</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Desire queue health and intensity.</div>
-              </div>
-              <button onclick="loadDesireDashboard()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fda4af; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="desire-dashboard-summary" class="inspector-grid"></div>
-            <div id="desire-dashboard-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Desire Evolution Card -->
-          <div id="desire-evolution-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#fb7185;">Desire Evolution</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Desire lifecycle history.</div>
-              </div>
-              <button onclick="loadDesireEvolution()" style="background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.25); color:#fb7185; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="desire-evolution-summary" class="inspector-grid"></div>
-            <div id="desire-evolution-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Scar Explorer Card -->
-          <div id="scar-explorer-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#c4b5fd;">Scar Explorer</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Scar Algebra topology and healing.</div>
-              </div>
-              <button onclick="loadScarExplorer()" style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.25); color:#c4b5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="scar-explorer-summary" class="inspector-grid"></div>
-            <div id="scar-explorer-sessions" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Personality Drift Card -->
-          <div id="personality-drift-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#a7f3d0;">Personality Drift</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">5D personality vector and drift.</div>
-              </div>
-              <button onclick="loadPersonalityDrift()" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.25); color:#a7f3d0; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="personality-drift-summary" class="inspector-grid"></div>
-            <div id="personality-drift-sessions" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Reasoning Trace Card -->
-          <div id="reasoning-trace-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#fcd34d;">Reasoning Trace</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Decision trail from prompt/tool/response.</div>
-              </div>
-              <button onclick="loadReasoningTrace()" style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); color:#fcd34d; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="reasoning-trace-summary" class="inspector-grid"></div>
-            <div id="reasoning-trace-steps" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Session Replay Card -->
-          <div id="session-replay-card" class="inspector-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
-              <div>
-                <div style="font-size:13px; font-weight:700; color:#93c5fd;">Session Replay</div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Session events and message shapes.</div>
-              </div>
-              <button onclick="loadSessionReplay()" style="background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25); color:#93c5fd; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600;">Refresh</button>
-            </div>
-            <div id="session-replay-summary" class="inspector-grid"></div>
-            <div id="session-replay-items" style="margin-top:10px;"></div>
-          </div>
-
-          <!-- Cognitive Timeline -->
-          <div id="cognitive-stats" style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"></div>
-          <div id="cognitive-timeline-container" class="timeline">
-            <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载认知时间线中...</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 5: Mutation History -->
-      <div class="split-panel" id="panel-mutation">
-        <div class="panel-header">
-          <span class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa;"></span>
-          <span>核心突变演化</span>
-          <button class="btn-toggle" title="最大化" onclick="toggleMaximize('mutation')"></button>
-        </div>
-        <div class="panel-body" style="padding:16px; overflow-y:auto; background:rgba(15,23,42,0.4);">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-            <p style="font-size:12px; color:var(--text-muted);">记录 AI 核心人格的突变轨迹（保留最近 100 次）。</p>
-            <button onclick="triggerRollback()" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.25); color:#f87171; padding:6px 12px; border-radius:6px; font-size:12px; cursor:pointer; font-weight:600;">
-              回滚至上一版本
-            </button>
-          </div>
-          <div id="timeline-container" class="timeline">
-            <p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">加载突变历史中...</p>
+          <div class="timeline-events" id="timeline-events">
+            <div class="empty"><div class="empty-icon">⏳</div><div class="empty-title">加载中...</div></div>
           </div>
         </div>
       </div>
     </div>
-  </main>
 
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 7: JavaScript - Core Utilities
-       ═══════════════════════════════════════════════════════════════════ -->
+    <!-- View: Mutation -->
+    <div class="view" id="view-mutation">
+      <div style="flex:1; padding:16px; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="font-size:15px;">核心突变演化</h3>
+          <button class="btn-danger" onclick="triggerRollback()">回滚至上一版本</button>
+        </div>
+        <div id="mutation-timeline"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ JavaScript ═══ -->
   <script>
-    // ── Token & Route Helpers ──────────────────────────────────────────
+    // ── Token & Route ─────────────────────────────────────────────────
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token') || '';
     let csrfToken = '';
-
-    const routeBase = window.location.pathname.startsWith('/astrbot_plugin_anima')
-      ? '/astrbot_plugin_anima' : '';
-
-    function routePath(path) { return `${routeBase}${path}`; }
-
-    function escHtml(s) {
-      if (s == null) return '';
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const routeBase = window.location.pathname.startsWith('/astrbot_plugin_anima') ? '/astrbot_plugin_anima' : '';
+    function rp(p) { return routeBase + p; }
+    function esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function fmtTime(ts) { return ts ? new Date(Number(ts)*1000).toLocaleString('zh-CN') : '-'; }
+    function summarizePayload(p) {
+      if (!p || typeof p !== 'object') return '';
+      return Object.entries(p).slice(0,5).map(([k,v]) => `${k}: ${String(v&&typeof v==='object'?JSON.stringify(v):v).slice(0,100)}`).join(' ');
     }
 
-    // ── Iframe URLs ────────────────────────────────────────────────────
+    // ── Translation maps ──────────────────────────────────────────────
+    const CAP_MAP = { partial:'部分可用', metadata_ready:'元数据就绪', partial_persona_core_only:'仅核心人设可回滚', runtime_events_jsonl:'事件时间线' };
+    const LABEL_MAP = {
+      'State Inspector':'状态检查器', 'StateStore Audit':'存储审计', 'Background Tasks':'后台任务',
+      'Memory Explorer':'记忆探索', 'Memory Recall Replay':'记忆召回回放',
+      'Desire Dashboard':'欲望仪表盘', 'Desire Evolution':'欲望演化',
+      'Scar Explorer':'创伤浏览器', 'Personality Drift':'人格漂移',
+      'Reasoning Trace':'推理轨迹', 'Session Replay':'会话回放',
+      'Cognitive Timeline':'认知时间线',
+    };
+    function capText(v) { return CAP_MAP[v] || v; }
+
+    // ── View Switcher ─────────────────────────────────────────────────
+    function switchView(name) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById('view-' + name).classList.add('active');
+      document.querySelectorAll('.tab').forEach((t,i) => {
+        const views = ['split','sylanne','dashboard','captree','observatory','mutation'];
+        t.classList.toggle('active', views[i] === name);
+      });
+      if (name === 'split') loadIframes();
+      if (name === 'sylanne') loadIframe('frame-sylanne2', urls.sylanne);
+      if (name === 'dashboard') loadIframe('frame-dashboard2', urls.dashboard);
+      if (name === 'captree') loadIframe('frame-captree2', urls.captree);
+      if (name === 'observatory') loadObservatory();
+      if (name === 'mutation') loadMutationHistory();
+    }
+
     const urls = {
-      sylanne: routePath(`/sylanne/?token=${encodeURIComponent(token)}`),
-      dashboard: routePath(`/dashboard/?token=${encodeURIComponent(token)}`),
-      captree: routePath(`/capability-tree/?token=${encodeURIComponent(token)}`)
+      sylanne: rp('/sylanne/?token=' + encodeURIComponent(token)),
+      dashboard: rp('/dashboard/?token=' + encodeURIComponent(token)),
+      captree: rp('/capability-tree/?token=' + encodeURIComponent(token)),
+    };
+    function loadIframe(id, url) { const el = document.getElementById(id); if (el) el.src = url; }
+    function loadIframes() { loadIframe('frame-sylanne', urls.sylanne); loadIframe('frame-dashboard', urls.dashboard); loadIframe('frame-captree', urls.captree); }
+
+    // ── Sub-panel Switcher ────────────────────────────────────────────
+    let currentSub = 'inspector';
+    function switchSub(name) {
+      currentSub = name;
+      document.querySelectorAll('.sub-tab').forEach(t => t.classList.toggle('active', t.textContent === {inspector:'状态检查',store:'存储审计',tasks:'后台任务',memory:'记忆探索',desire:'欲望系统',scar:'创伤浏览器',drift:'人格漂移',trace:'推理轨迹',replay:'会话回放',trend:'跨会话趋势'}[name]));
+      loadSubPanel(name);
+    }
+
+    // ── Health Bar ────────────────────────────────────────────────────
+    function loadHealth() {
+      fetch(rp('/api/state_inspector?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot) return;
+        const s=d.snapshot.summary||{};
+        setH('h-hosts',s.active_hosts||0,'h-hosts-s',s.active_hosts>0);
+        setH('h-memory',s.memory_systems||0,'h-memory-s',s.memory_systems>0);
+        setH('h-sources',s.state_sources||0,'h-sources-s',s.state_sources>0);
+        setH('h-kv',s.kv_api_available?'是':'否','h-kv-s',s.kv_api_available);
+        setH('h-tasks',s.background_tasks||0,'h-tasks-s',true);
+      }).catch(()=>{});
+      fetch(rp('/api/runtime_events?limit=1&token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        const t=d.stats?.total||0;
+        setH('h-events',t,'h-events-s',t>0);
+      }).catch(()=>{});
+    }
+    function setH(vid,val,sid,ok) {
+      const v=document.getElementById(vid), s=document.getElementById(sid);
+      if(v) v.textContent=typeof val==='number'?val:val;
+      if(s){s.textContent=ok?'正常':'待触发';s.className='health-status '+(ok?'ok':'warn');}
+    }
+
+    // ── Sub-panel Loaders ─────────────────────────────────────────────
+    function loadSubPanel(name) {
+      const el = document.getElementById('sub-content');
+      el.innerHTML = '<div class="empty"><div class="empty-icon">⏳</div><div class="empty-title">加载中...</div></div>';
+      const loaders = {
+        inspector: loadInspector, store: loadStore, tasks: loadTasks,
+        memory: loadMemory, desire: loadDesire, scar: loadScar,
+        drift: loadDrift, trace: loadTrace, replay: loadReplay, trend: loadTrend,
+      };
+      (loaders[name] || (()=>{}))(el);
+    }
+
+    function loadInspector(el) {
+      fetch(rp('/api/state_inspector?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('状态检查器','offline');return;}
+        const s=d.snapshot.summary||{};
+        const files=d.snapshot.persistence_files||{};
+        let html=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('主机',s.active_hosts||0)}${metric('脏会话',s.dirty_sessions||0)}
+          ${metric('记忆系统',s.memory_systems||0)}${metric('缓冲区',s.conversation_buffers||0)}
+        </div>`;
+        const sessions=Array.isArray(d.snapshot.sessions)?d.snapshot.sessions.slice(0,8):[];
+        if(sessions.length){
+          html+='<div style="font-size:12px;font-weight:600;margin-bottom:8px;">会话列表</div>';
+          sessions.forEach(sess=>{
+            const dirty=Array.isArray(sess.dirty_subsystems)?sess.dirty_subsystems:[];
+            html+=`<div class="data-row"><div><div class="data-name">${esc(sess.session_key||'default')}</div><div class="data-meta">轮次 ${sess.host?.turns||0} · 节拍 ${sess.host?.spine_ticks||0}</div></div><div class="data-tags"><span class="tag ${dirty.length?'tag-missing':'tag-present'}">${dirty.length?'脏: '+dirty.join(', '):'干净'}</span></div></div>`;
+          });
+        } else {
+          html+=emptyHTML('暂无活跃会话','首次对话后将自动创建会话');
+        }
+        el.innerHTML=html;
+      }).catch(()=>{el.innerHTML=emptyHTML('状态检查器','加载失败');});
+    }
+
+    function loadStore(el) {
+      fetch(rp('/api/state_store_audit?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('存储审计','offline');return;}
+        const s=d.snapshot.summary||{};
+        const caps=d.snapshot.capabilities||{};
+        let html=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><span style="font-size:13px;font-weight:700;">存储审计</span><button class="btn-action" onclick="createSnapshot()">创建快照</button></div>`;
+        html+=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('文件',s.configured_files||0)}${metric('已存在',s.existing_files||0)}
+          ${metric('运行时',s.runtime_sources||0)}${metric('KV',s.kv_api_available?'可用':'不可用')}
+        </div>`;
+        html+=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('快照',capText(caps.snapshot||'?'))}${metric('差异',capText(caps.diff||'?'))}
+          ${metric('回滚',capText(caps.rollback||'?'))}${metric('时间线',capText(caps.timeline||'?'))}
+        </div>`;
+        const files=Array.isArray(d.snapshot.files)?d.snapshot.files.slice(0,10):[];
+        if(files.length){
+          html+='<div style="font-size:12px;font-weight:600;margin-bottom:6px;">状态源清单</div>';
+          files.forEach(f=>{
+            const canRollback=f.name==='anima_state'||f.name==='persona_core';
+            html+=`<div class="data-row"><div><div class="data-name">${esc(f.name||'unknown')}</div><div class="data-meta">${esc(f.kind||'-')} / ${esc(f.scope||'-')}</div></div><div class="data-tags"><span class="tag ${f.exists===false?'tag-missing':'tag-present'}">${f.exists===false?'缺失':'存在'}</span>${f.size_bytes!=null?`<span class="tag tag-size">${f.size_bytes}B</span>`:''}${canRollback?'<span class="tag tag-action" onclick="rollbackSource(\''+esc(f.name)+'\')">回滚</span>':''}</div></div>`;
+          });
+        }
+        html+='<div style="font-size:12px;font-weight:600;margin:12px 0 6px;">快照管理</div>';
+        html+='<div id="snapshot-list"><div class="empty"><div class="empty-icon">📷</div><div class="empty-title">加载快照列表...</div></div></div>';
+        el.innerHTML=html;
+        loadSnapshots();
+      }).catch(()=>{el.innerHTML=emptyHTML('存储审计','加载失败');});
+    }
+
+    function loadSnapshots() {
+      const el=document.getElementById('snapshot-list'); if(!el) return;
+      fetch(rp('/api/snapshot_list?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.ok||!d.snapshots||!d.snapshots.length){el.innerHTML='<div style="font-size:11px;color:var(--text-muted);padding:8px;">暂无快照。点击上方"创建快照"按钮保存当前状态。</div>';return;}
+        el.innerHTML=d.snapshots.map(s=>`<div class="snap-row"><div><div class="data-name">${esc(s.name)}</div><div class="data-meta">${fmtTime(s.timestamp)} · ${s.event_count||0} 条事件</div></div><div class="data-tags"><span class="tag tag-action" onclick="rollbackSnapshot('${esc(s.name)}')">回滚</span><span class="tag tag-missing" onclick="deleteSnapshot('${esc(s.name)}')">删除</span></div></div>`).join('');
+      }).catch(()=>{el.innerHTML='<div style="font-size:11px;color:var(--red);padding:8px;">加载快照列表失败</div>';});
+    }
+
+    function loadTasks(el) {
+      fetch(rp('/api/background_tasks?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('后台任务','暂无活跃的后台任务。任务会在沉淀、反刍、持久化等操作时自动创建。');return;}
+        const s=d.snapshot.summary||{};
+        el.innerHTML=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('活跃任务',s.active_tasks||0)}${metric('队列深度',s.queued_jobs||0)}
+          ${metric('重试次数',s.retry_count||0)}${metric('死信',s.dead_letter_count||0)}
+        </div>`+(s.active_tasks===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">后台任务空闲中。沉淀、反刍、持久化等操作会在此显示。</div>':'');
+      }).catch(()=>{el.innerHTML=emptyHTML('后台任务','加载失败');});
+    }
+
+    function loadMemory(el) {
+      Promise.all([
+        fetch(rp('/api/memory_explorer?token='+encodeURIComponent(token))).then(r=>r.json()).catch(()=>({success:false})),
+        fetch(rp('/api/memory_recall_replay?token='+encodeURIComponent(token))).then(r=>r.json()).catch(()=>({success:false}))
+      ]).then(([mem,recall])=>{
+        if(!mem.success||!mem.snapshot){el.innerHTML=emptyHTML('记忆探索','向量记忆未配置或不可用。配置 embedding_provider_id 后可启用 L1/L2/L3 三层记忆系统。');return;}
+        const s=mem.snapshot.summary||{};
+        let html=`<div class="health-bar" style="grid-template-columns:repeat(5,1fr);margin-bottom:12px;">
+          ${metric('L1 条目',s.l1_items||0)}${metric('L2 条目',s.l2_items||0)}
+          ${metric('L3 条目',s.l3_items||0)}${metric('总计',s.total_items||0)}
+          ${metric('合并状态',s.consolidation_running?'运行中':'空闲')}
+        </div>`;
+        if(recall.success&&recall.snapshot){
+          const rs=recall.snapshot.summary||{};
+          html+=`<div style="font-size:12px;font-weight:600;margin:8px 0 6px;">记忆召回</div>
+          <div class="data-row"><div class="data-meta">最近召回 ${rs.total_recalls||0} 次 · L2 命中 ${rs.l2_recalled||0} 次 · 平均间隔 ${(rs.avg_gap_seconds||0).toFixed(1)}秒</div></div>`;
+        }
+        html+=(s.total_items===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">记忆池为空。对话中的高情绪事件会自动沉淀为记忆。</div>':'');
+        el.innerHTML=html;
+      }).catch(()=>{el.innerHTML=emptyHTML('记忆探索','加载失败');});
+    }
+
+    function loadDesire(el) {
+      Promise.all([
+        fetch(rp('/api/desire_dashboard?token='+encodeURIComponent(token))).then(r=>r.json()).catch(()=>({success:false})),
+        fetch(rp('/api/desire_evolution?token='+encodeURIComponent(token))).then(r=>r.json()).catch(()=>({success:false}))
+      ]).then(([dash,evo])=>{
+        if(!dash.success||!dash.snapshot){el.innerHTML=emptyHTML('欲望系统','欲望系统未启用。在配置中开启 desire_enabled 后，角色会在对话中产生主动意图。');return;}
+        const s=dash.snapshot.summary||{};
+        let html=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('活跃欲望',s.active_count||0)}${metric('已满足',s.satisfied_count||0)}
+          ${metric('内省型',s.inward_count||0)}${metric('外向型',s.outward_count||0)}
+        </div>`;
+        if(evo.success&&evo.snapshot){
+          const es=evo.snapshot.summary||{};
+          html+=`<div style="font-size:12px;font-weight:600;margin:8px 0 6px;">欲望演化</div>
+          <div class="data-row"><div class="data-meta">总事件 ${es.total_events||0} · 新增 ${es.added_count||0} · 移除 ${es.removed_count||0}</div></div>`;
+        }
+        html+=(s.active_count===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">暂无活跃欲望。高情绪对话和伤痕加深会产生欲望。</div>':'');
+        el.innerHTML=html;
+      }).catch(()=>{el.innerHTML=emptyHTML('欲望系统','加载失败');});
+    }
+
+    function loadScar(el) {
+      fetch(rp('/api/scar_explorer?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('创伤浏览器','暂无创伤数据。伤痕会在角色经历负面事件时自动积累。');return;}
+        const s=d.snapshot.summary||{};
+        el.innerHTML=`<div class="health-bar" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px;">
+          ${metric('总伤痕',s.total_scars||0)}${metric('已愈合',s.healed_count||0)}
+          ${metric('活跃',s.active_count||0)}
+        </div>`+(s.total_scars===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">暂无伤痕记录。角色经历负面事件时会自动积累伤痕。</div>':'');
+      }).catch(()=>{el.innerHTML=emptyHTML('创伤浏览器','加载失败');});
+    }
+
+    function loadDrift(el) {
+      fetch(rp('/api/personality_drift?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('人格漂移','暂无人格漂移数据。人格向量会随对话经历缓慢变化。');return;}
+        const s=d.snapshot.summary||{};
+        el.innerHTML=`<div class="health-bar" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px;">
+          ${metric('会话数',s.session_count||0)}${metric('突变次数',s.mutation_count||0)}
+          ${metric('平均稳定度',s.avg_stability!=null?(s.avg_stability).toFixed(2):'-')}
+        </div>`+(s.session_count===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">暂无人格漂移数据。人格向量会在对话中缓慢演化。</div>':'');
+      }).catch(()=>{el.innerHTML=emptyHTML('人格漂移','加载失败');});
+    }
+
+    function loadTrace(el) {
+      fetch(rp('/api/reasoning_trace?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('推理轨迹','暂无推理轨迹。首次对话后会开始记录决策路径。');return;}
+        const s=d.snapshot.summary||{};
+        el.innerHTML=`<div class="health-bar" style="grid-template-columns:repeat(4,1fr);margin-bottom:12px;">
+          ${metric('总步骤',s.total_steps||0)}${metric('提示注入',s.prompt_debug_count||0)}
+          ${metric('工具调用',s.tool_count||0)}${metric('响应观察',s.response_count||0)}
+        </div>`;
+        const steps=Array.isArray(d.snapshot.steps)?d.snapshot.steps.slice(-8).reverse():[];
+        if(steps.length){steps.forEach(st=>{
+          el.innerHTML+=`<div class="data-row"><div><div class="data-name">${esc(st.type||'步骤')}</div><div class="data-meta">${fmtTime(st.timestamp)}</div></div><div class="data-tags"><span class="tag tag-size">${esc(summarizePayload(st.payload||{}).slice(0,80))}</span></div></div>`;
+        });} else { el.innerHTML+='<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">暂无推理事件。</div>'; }
+      }).catch(()=>{el.innerHTML=emptyHTML('推理轨迹','加载失败');});
+    }
+
+    function loadReplay(el) {
+      fetch(rp('/api/session_replay?limit=80&token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.snapshot){el.innerHTML=emptyHTML('会话回放','暂无会话回放数据。首次对话后会开始记录会话事件。');return;}
+        const s=d.snapshot.summary||{};
+        el.innerHTML=`<div class="health-bar" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px;">
+          ${metric('会话数',s.sessions||0)}${metric('事件数',s.runtime_events||0)}
+          ${metric('缓冲消息',s.buffer_messages||0)}
+        </div>`+(s.sessions===0?'<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:16px;">暂无会话数据。</div>':'');
+      }).catch(()=>{el.innerHTML=emptyHTML('会话回放','加载失败');});
+    }
+
+    function loadTrend(el) {
+      fetch(rp('/api/cross_session_trend?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.ok||!d.sessions||!d.sessions.length){el.innerHTML=emptyHTML('跨会话趋势','暂无会话数据。多会话运行后会在此显示各会话的对比趋势。');return;}
+        let html=`<div style="font-size:12px;font-weight:600;margin-bottom:8px;">活跃会话：${d.session_count}</div>`;
+        // Chart container
+        html+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">`;
+        // Warmth chart
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">温暖度对比</div>`;
+        d.sessions.forEach(sess=>{
+          const w=(sess.emotion?.warmth||0);
+          html+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:10px;color:var(--text-muted);min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sess.session_key)}</span>
+            <div style="flex:1;height:12px;background:rgba(255,255,255,0.05);border-radius:6px;overflow:hidden;">
+              <div style="width:${w*100}%;height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:6px;transition:width 0.3s;"></div>
+            </div>
+            <span style="font-size:10px;color:var(--text);min-width:30px;text-align:right;">${w.toFixed(2)}</span>
+          </div>`;
+        });
+        html+=`</div>`;
+        // Stability chart
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;padding:10px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">稳定度对比</div>`;
+        d.sessions.forEach(sess=>{
+          const s=(sess.boundary?.stability||0);
+          html+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span style="font-size:10px;color:var(--text-muted);min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sess.session_key)}</span>
+            <div style="flex:1;height:12px;background:rgba(255,255,255,0.05);border-radius:6px;overflow:hidden;">
+              <div style="width:${s*100}%;height:100%;background:linear-gradient(90deg,var(--green),var(--cyan));border-radius:6px;transition:width 0.3s;"></div>
+            </div>
+            <span style="font-size:10px;color:var(--text);min-width:30px;text-align:right;">${s.toFixed(2)}</span>
+          </div>`;
+        });
+        html+=`</div></div>`;
+        // Session details
+        d.sessions.forEach(sess=>{
+          const e=sess.emotion||{};
+          const b=sess.boundary||{};
+          html+=`<div class="data-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+            <div style="display:flex;justify-content:space-between;"><div class="data-name">${esc(sess.session_key)}</div><div class="data-meta">轮次 ${sess.turns}</div></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <span class="tag tag-size">温暖 ${(e.warmth||0).toFixed(2)}</span>
+              <span class="tag tag-size">唤醒 ${(e.arousal||0).toFixed(2)}</span>
+              <span class="tag tag-size">效价 ${(e.valence||0).toFixed(2)}</span>
+              <span class="tag tag-size">完整度 ${(b.integrity||0).toFixed(2)}</span>
+              <span class="tag tag-size">稳定度 ${(b.stability||0).toFixed(2)}</span>
+            </div>
+          </div>`;
+        });
+        el.innerHTML=html;
+      }).catch(()=>{el.innerHTML=emptyHTML('跨会话趋势','加载失败');});
+    }
+
+    // ── Timeline ──────────────────────────────────────────────────────
+    function loadTimeline() {
+      if (demoMode) { loadTimelineDemo(); return; }
+      const el=document.getElementById('timeline-events');
+      fetch(rp('/api/runtime_events?limit=50&token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        if(!d.success||!d.events||!d.events.length){el.innerHTML='<div class="empty"><div class="empty-icon">📭</div><div class="empty-title">暂无运行事件</div><div class="empty-desc">首次对话后会开始记录认知事件。</div></div>';return;}
+        el.innerHTML=d.events.map(ev=>{
+          const sev=String(ev.severity||'info').toLowerCase();
+          const sevLabel={info:'信息',warning:'警告',error:'错误'}[sev]||sev;
+          return `<div class="ev"><span class="ev-time">${fmtTime(ev.ts)}</span><span class="ev-type">${esc(ev.type||'event')}</span><span class="ev-detail">${esc(summarizePayload(ev.payload||{})).slice(0,120)}<span class="ev-tag ${sev}">${sevLabel}</span>${ev.session_key?`<span class="ev-tag info">${esc(ev.session_key)}</span>`:''}</span></div>`;
+        }).join('');
+      }).catch(()=>{el.innerHTML='<div class="empty"><div class="empty-icon">❌</div><div class="empty-title">加载失败</div></div>';});
+    }
+
+    function searchEvents() {
+      const q=document.getElementById('tl-search').value.trim();
+      const sev=document.getElementById('tl-severity').value;
+      const el=document.getElementById('timeline-events');
+      if(!q&&!sev){loadTimeline();return;}
+      let url=rp('/api/event_search?limit=50&token='+encodeURIComponent(token));
+      if(q) url+='&query='+encodeURIComponent(q);
+      if(sev) url+='&severity='+encodeURIComponent(sev);
+      fetch(url).then(r=>r.json()).then(d=>{
+        if(!d.ok||!d.events||!d.events.length){el.innerHTML='<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">未找到匹配事件</div><div class="empty-desc">尝试调整搜索关键词或筛选条件。</div></div>';return;}
+        el.innerHTML=d.events.map(ev=>{
+          const sev2=String(ev.severity||'info').toLowerCase();
+          return `<div class="ev"><span class="ev-time">${fmtTime(ev.ts)}</span><span class="ev-type">${esc(ev.type||'event')}</span><span class="ev-detail">${esc(summarizePayload(ev.payload||{})).slice(0,120)}<span class="ev-tag ${sev2}">${sev2}</span></span></div>`;
+        }).join('');
+      }).catch(()=>{el.innerHTML='<div class="empty"><div class="empty-icon">❌</div><div class="empty-title">搜索失败</div></div>';});
+    }
+
+    function compactEvents() {
+      if(!confirm('确定要压缩 7 天前的旧事件？此操作不可撤销。')) return;
+      fetch(rp('/api/event_compact?token='+encodeURIComponent(token)),{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{
+        if(d.ok){alert('压缩完成，已删除 '+d.removed_count+' 条旧事件。');loadTimeline();}
+        else{alert('压缩失败: '+(d.error||'未知错误'));}
+      }).catch(()=>alert('请求失败'));
+    }
+
+    // ── Snapshot Management ───────────────────────────────────────────
+    function createSnapshot() {
+      const name=prompt('输入快照名称（留空自动生成）：');
+      if(name===null) return;
+      fetch(rp('/api/state_snapshot?token='+encodeURIComponent(token)),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name||undefined})}).then(r=>r.json()).then(d=>{
+        if(d.ok){alert('快照创建成功！');loadSnapshots();}
+        else{alert('创建失败: '+(d.error||'未知错误'));}
+      }).catch(()=>alert('请求失败'));
+    }
+    function rollbackSnapshot(name) {
+      if(!confirm('确定要回滚到快照 "'+name+'"？当前事件将被替换。')) return;
+      fetch(rp('/api/state_rollback?token='+encodeURIComponent(token)),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}).then(r=>r.json()).then(d=>{
+        if(d.ok){alert('回滚成功！');loadTimeline();loadSnapshots();}
+        else{alert('回滚失败: '+(d.error||'未知错误'));}
+      }).catch(()=>alert('请求失败'));
+    }
+    function deleteSnapshot(name) {
+      if(!confirm('确定要删除快照 "'+name+'"？')) return;
+      fetch(rp('/api/snapshot_delete?name='+encodeURIComponent(name)+'&token='+encodeURIComponent(token)),{method:'DELETE'}).then(r=>r.json()).then(d=>{
+        if(d.ok){loadSnapshots();}
+        else{alert('删除失败: '+(d.error||'未知错误'));}
+      }).catch(()=>alert('请求失败'));
+    }
+    function rollbackSource(name) {
+      if(name==='persona_core'){triggerRollback();return;}
+      alert('暂不支持回滚 '+name+'。仅支持核心人设回滚。');
+    }
+
+    // ── Mutation History ──────────────────────────────────────────────
+    function loadMutationHistory() {
+      const el=document.getElementById('mutation-timeline');
+      const splitEl=document.getElementById('split-mutation');
+      fetch(rp('/api/mutation_history?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{
+        const html=(!d.ok||!d.history||!d.history.length)
+          ?'<div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">暂无突变记录</div><div class="empty-desc">核心突变会在以下条件下产生：<br>· 开启 danger_core_mutation<br>· 开启 danger_core_mutation_confirm<br>· 经过多轮深度对话后自动触发</div><div class="empty-hint">当前配置：未启用（需在插件配置中开启高危模块）</div></div>'
+          :d.history.reverse().map(item=>{
+            const t=item.timestamp?new Date(item.timestamp).toLocaleString('zh-CN'):'未知时间';
+            const desc=item.description_redacted?`描述已脱敏 · 长度=${Number(item.description_length||0)} · 指纹=${esc(item.description_fingerprint||'无')}`:esc(item.description||'无描述');
+            return `<div class="data-row"><div><div class="data-name">${esc(item.type||'突变')}</div><div class="data-meta">${t} · ${desc}</div></div></div>`;
+          }).join('');
+        if(el) el.innerHTML=html;
+        if(splitEl) splitEl.innerHTML=html||'<div class="empty" style="padding:20px;"><div class="empty-icon">🧬</div><div class="empty-title">暂无突变记录</div></div>';
+      }).catch(()=>{
+        const msg='<div class="empty"><div class="empty-icon">❌</div><div class="empty-title">加载失败</div></div>';
+        if(el) el.innerHTML=msg;
+        if(splitEl) splitEl.innerHTML=msg;
+      });
+    }
+    function triggerRollback() {
+      if(!confirm('确定要回滚至上一人设版本？')) return;
+      fetch(rp('/api/mutation_rollback?token='+encodeURIComponent(token)),{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken}}).then(r=>r.json()).then(d=>{
+        if(d.ok){alert('回滚成功！');loadMutationHistory();}
+        else{alert('回滚失败: '+(d.error||'未知错误'));}
+      }).catch(()=>alert('请求失败'));
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+    function metric(label,value) {
+      return `<div class="health-item"><div class="health-label">${esc(label)}</div><div class="health-value" style="font-size:16px;">${esc(value)}</div></div>`;
+    }
+    function emptyHTML(title,desc) {
+      return `<div class="empty"><div class="empty-icon">📭</div><div class="empty-title">${esc(title)}</div><div class="empty-desc">${esc(desc)}</div></div>`;
+    }
+
+    // ── Help Documentation ────────────────────────────────────────────
+    const HELP_DOCS = {
+      inspector: {
+        title: '状态检查器',
+        desc: '展示会话拓扑、脏标记、持久化文件状态和 KV 可用性。用于诊断会话隔离和状态一致性。',
+        tips: [
+          '脏会话：表示该会话有未持久化的状态变更',
+          '主机数：活跃的 Sylanne 会话主机数',
+          '记忆系统：向量记忆系统的活跃实例数',
+          '缓冲区：对话缓冲区的数量',
+        ],
+      },
+      store: {
+        title: '存储审计',
+        desc: '盘点所有持久化文件、运行时状态源和 KV 存储的可达性。支持快照管理和状态回滚。',
+        tips: [
+          '文件/已存在：已配置和实际存在的持久化文件数量',
+          '运行时：内存中的运行时状态源数量',
+          'KV：AstrBot KV API 是否可用',
+          '快照能力：当前支持的部分/完整快照能力',
+          '状态源清单：每个文件的名称、类型、作用域和大小',
+          '快照管理：创建、查看、回滚和删除状态快照',
+        ],
+      },
+      tasks: {
+        title: '后台任务',
+        desc: '监控沉淀、反刍、持久化等后台任务的生命周期、队列深度和异常状态。',
+        tips: [
+          '活跃任务：当前正在执行的后台任务数',
+          '队列深度：等待执行的任务数',
+          '重试次数：因异常而重试的任务数',
+          '死信：重试次数超过上限的任务数',
+        ],
+      },
+      memory: {
+        title: '记忆探索',
+        desc: '展示 L1/L2/L3 三层向量记忆系统的拓扑、条目数和合并状态。需要配置 embedding_provider_id。',
+        tips: [
+          'L1 条目：短期记忆（当前对话上下文）',
+          'L2 条目：中期记忆（最近对话摘要）',
+          'L3 条目：长期记忆（重要事件和核心认知）',
+          '合并状态：记忆合并任务是否正在运行',
+          '记忆召回：最近的记忆召回次数和 L2 命中率',
+        ],
+      },
+      desire: {
+        title: '欲望系统',
+        desc: '展示角色的欲望队列健康度、内外向分布和生命周期事件。需要开启 desire_enabled。',
+        tips: [
+          '活跃欲望：当前未满足的欲望数量',
+          '已满足：已被满足的欲望数量',
+          '内省型：只在上下文中暗示、不主动发言的欲望',
+          '外向型：可能触发主动发言的欲望',
+          '欲望演化：欲望的新增、移除和满足历史',
+        ],
+      },
+      scar: {
+        title: '创伤浏览器',
+        desc: '展示角色的伤痕代数、愈合阶段和边界状态。伤痕会在角色经历负面事件时自动积累。',
+        tips: [
+          '总伤痕：角色经历的所有负面事件留下的伤痕数',
+          '已愈合：已经愈合的伤痕数',
+          '活跃：当前仍在影响角色的伤痕数',
+        ],
+      },
+      drift: {
+        title: '人格漂移',
+        desc: '展示 5D 人格向量、Sylanne 表面特质和漂移趋势。人格会随对话经历缓慢变化。',
+        tips: [
+          '会话数：有人格数据的会话数',
+          '突变次数：核心人格被修改的次数',
+          '平均稳定度：人格向量的平均稳定度（0-1）',
+        ],
+      },
+      trace: {
+        title: '推理轨迹',
+        desc: '展示提示注入、工具调用和响应观察的决策路径。帮助理解角色的内部决策过程。',
+        tips: [
+          '总步骤：记录的推理步骤数',
+          '提示注入：上下文注入的次数和槽位',
+          '工具调用：LLM 工具调用的次数',
+          '响应观察：响应被观察和分析的次数',
+        ],
+      },
+      replay: {
+        title: '会话回放',
+        desc: '展示会话事件和消息形状的时间线回放。帮助理解会话的完整流程。',
+        tips: [
+          '会话数：有回放数据的会话数',
+          '事件数：记录的运行时事件数',
+          '缓冲消息：对话缓冲区中的消息数',
+        ],
+      },
+      trend: {
+        title: '跨会话趋势',
+        desc: '对比多个会话的情绪、边界和人格数据。帮助观察角色在不同会话中的表现差异。',
+        tips: [
+          '温暖度：角色对用户的温暖程度（0-1）',
+          '唤醒度：角色的情绪唤醒程度（0-1）',
+          '效价：角色情绪的正负倾向（-1到1）',
+          '完整度：角色边界的完整程度（0-1）',
+          '稳定度：角色身份的稳定程度（0-1）',
+        ],
+      },
     };
 
-    // ── View Switcher ──────────────────────────────────────────────────
-    function switchView(target) {
-      const grid = document.getElementById('main-grid');
-      const panels = {
-        sylanne: document.getElementById('panel-sylanne'),
-        dashboard: document.getElementById('panel-dashboard'),
-        captree: document.getElementById('panel-captree'),
-        cognitive: document.getElementById('panel-cognitive'),
-        mutation: document.getElementById('panel-mutation')
-      };
-
-      document.querySelectorAll('.nav-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.id === `tab-${target}`);
-      });
-
-      Object.values(panels).forEach(p => p.classList.remove('collapsed'));
-
-      if (target === 'split') {
-        grid.style.gridTemplateColumns = '1fr 1fr 1fr 1fr 1fr';
-      } else {
-        grid.style.gridTemplateColumns = '1fr';
-        Object.keys(panels).forEach(key => {
-          if (key !== target) panels[key].classList.add('collapsed');
-        });
-      }
+    function showHelp(panel) {
+      const doc = HELP_DOCS[panel];
+      if (!doc) return;
+      const tips = doc.tips.map(t => `· ${t}`).join('<br>');
+      alert(`【${doc.title}】\n\n${doc.desc}\n\n要点：\n${tips}`);
     }
 
-    function toggleMaximize(panelKey) {
-      const otherKey = panelKey === 'sylanne' ? 'dashboard' : 'sylanne';
-      const isMaximized = document.getElementById(`panel-${otherKey}`).classList.contains('collapsed');
-      switchView(isMaximized ? 'split' : panelKey);
+    // ── Demo Data ─────────────────────────────────────────────────────
+    let demoMode = false;
+    function toggleDemoMode() {
+      demoMode = !demoMode;
+      const btn = document.getElementById('demo-btn');
+      if (btn) btn.textContent = demoMode ? '演示模式: 开' : '演示模式: 关';
+      loadObservatory();
     }
 
-    // ── Data Formatting Helpers ────────────────────────────────────────
-    function summarizePayload(payload) {
-      if (!payload || typeof payload !== 'object') return '';
-      return Object.entries(payload).slice(0, 6).map(([k, v]) => {
-        const value = v && typeof v === 'object' ? JSON.stringify(v) : v;
-        return `${k}: ${String(value).slice(0, 160)}`;
-      }).join('\n');
+    function demoTimeline() {
+      return [
+        { ts: Date.now()/1000-10, type: 'plugin.initialized', severity: 'info', payload: { sylanne_ready: true, version: '1.4.0' } },
+        { ts: Date.now()/1000-8, type: 'state.atomic_update_committed', severity: 'info', payload: { key: 'anima_state', size: 2990 } },
+        { ts: Date.now()/1000-5, type: 'response.observed', severity: 'info', payload: { text_chars: 245, emotion_score: 0.42 } },
+        { ts: Date.now()/1000-3, type: 'desire.queue_updated', severity: 'info', payload: { active: 2, satisfied: 1 } },
+        { ts: Date.now()/1000-1, type: 'prompt.injection_assembled', severity: 'info', payload: { injected_slots: ['state', 'desire'] } },
+      ];
     }
 
-    function formatEventTime(ts) {
-      return ts ? new Date(Number(ts) * 1000).toLocaleString('zh-CN') : '未知时间';
+    function loadTimelineDemo() {
+      const el = document.getElementById('timeline-events');
+      const events = demoTimeline();
+      el.innerHTML = events.map(ev => {
+        const sev = String(ev.severity || 'info').toLowerCase();
+        const sevLabel = {info:'信息',warning:'警告',error:'错误'}[sev] || sev;
+        return `<div class="ev"><span class="ev-time">${fmtTime(ev.ts)}</span><span class="ev-type">${esc(ev.type)}</span><span class="ev-detail">${esc(summarizePayload(ev.payload))}<span class="ev-tag ${sev}">${sevLabel}</span></span></div>`;
+      }).join('');
     }
 
-    // ── Render Helpers ─────────────────────────────────────────────────
-    function renderMetric(label, value) {
-      return `<div class="inspector-metric"><div class="inspector-label">${escHtml(label)}</div><div class="inspector-value">${escHtml(value)}</div></div>`;
-    }
-
-    function renderSession(session, renderFn) {
-      return `<div class="inspector-session">${renderFn(session)}</div>`;
-    }
-
-    function renderRouteError(route) {
-      return `<div style="font-size:12px; color:#f87171; line-height:1.6;">Failed to load ${escHtml(route)}.</div>`;
-    }
-  </script>
-
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 8: JavaScript - Observatory Card Loaders
-       ═══════════════════════════════════════════════════════════════════ -->
-  <script>
-    // ── State Inspector ────────────────────────────────────────────────
-    function loadStateInspector() {
-      const summaryEl = document.getElementById('state-inspector-summary');
-      const sessionsEl = document.getElementById('state-inspector-sessions');
-      if (!summaryEl || !sessionsEl) return;
-
-      fetch(routePath(`/api/state_inspector?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('State', 'offline');
-            return;
-          }
-          const snap = data.snapshot;
-          const summary = snap.summary || {};
-          const files = snap.persistence_files || {};
-          summaryEl.innerHTML = [
-            renderMetric('Hosts', summary.active_hosts || 0),
-            renderMetric('Dirty', summary.dirty_sessions || 0),
-            renderMetric('KV', summary.kv_api_available ? 'yes' : 'no'),
-            renderMetric('Isolation', summary.isolation_violation_count || 0),
-            renderMetric('Sources', summary.state_sources || 0),
-            renderMetric('Memory', summary.memory_systems || 0),
-            renderMetric('Self Notes', files.self_notes?.exists ? `${files.self_notes.size_bytes || 0}b` : 'missing'),
-            renderMetric('Desires', files.desires?.exists ? `${files.desires.size_bytes || 0}b` : 'missing')
-          ].join('');
-
-          const sessions = Array.isArray(snap.sessions) ? snap.sessions.slice(0, 8) : [];
-          sessionsEl.innerHTML = sessions.length
-            ? sessions.map(s => {
-                const dirty = Array.isArray(s.dirty_subsystems) ? s.dirty_subsystems : [];
-                const host = s.host || {};
-                return `<div class="inspector-session">
-                  <div style="min-width:0;">
-                    <div style="font-weight:700; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escHtml(s.session_key || 'unknown')}</div>
-                    <div style="color:var(--text-muted); margin-top:3px;">turns ${escHtml(host.turns || 0)} / ticks ${escHtml(host.spine_ticks || 0)}</div>
-                  </div>
-                  <div style="text-align:right;">
-                    ${dirty.length ? `<span class="inspector-pill" style="color:#fbbf24;">dirty: ${escHtml(dirty.join(', '))}</span>` : '<span class="inspector-pill">clean</span>'}
-                  </div>
-                </div>`;
-              }).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active sessions.</div>';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('State', 'error');
-          sessionsEl.innerHTML = renderRouteError('/api/state_inspector');
-        });
-    }
-
-    // ── StateStore Audit ───────────────────────────────────────────────
-    function loadStateStoreAudit() {
-      const summaryEl = document.getElementById('state-store-audit-summary');
-      const itemsEl = document.getElementById('state-store-audit-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/state_store_audit?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('StateStore', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          const caps = data.snapshot.capabilities || {};
-          summaryEl.innerHTML = [
-            renderMetric('Files', summary.configured_files || 0),
-            renderMetric('Existing', summary.existing_files || 0),
-            renderMetric('Runtime', summary.runtime_sources || 0),
-            renderMetric('KV', summary.kv_api_available ? 'yes' : 'no'),
-            renderMetric('Snapshot', caps.snapshot || '?'),
-            renderMetric('Diff', caps.diff || '?'),
-            renderMetric('Rollback', caps.rollback || '?'),
-            renderMetric('Timeline', caps.timeline || '?')
-          ].join('');
-
-          const files = Array.isArray(data.snapshot.files) ? data.snapshot.files.slice(0, 8) : [];
-          itemsEl.innerHTML = files.length
-            ? files.map(f => `<div class="inspector-session">
-                <div style="min-width:0;">
-                  <div style="font-weight:700; color:#ecfccb;">${escHtml(f.name || 'unknown')}</div>
-                  <div style="color:var(--text-muted); margin-top:3px;">${escHtml(f.kind || '-')} / ${escHtml(f.scope || '-')}</div>
-                </div>
-                <div style="text-align:right;">
-                  <span class="inspector-pill">${escHtml(f.exists === false ? 'missing' : 'present')}</span>
-                  ${f.size_bytes != null ? `<span class="inspector-pill">${escHtml(f.size_bytes)}b</span>` : ''}
-                </div>
-              </div>`).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No state files.</div>';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('StateStore', 'error');
-          itemsEl.innerHTML = renderRouteError('/api/state_store_audit');
-        });
-    }
-
-    // ── Background Tasks ───────────────────────────────────────────────
-    function loadBackgroundTasks() {
-      const summaryEl = document.getElementById('background-tasks-summary');
-      const itemsEl = document.getElementById('background-tasks-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/background_tasks?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Tasks', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Active', summary.active_tasks || 0),
-            renderMetric('Queued', summary.queued_jobs || 0),
-            renderMetric('Leased', summary.leased_jobs || 0),
-            renderMetric('Retries', summary.retry_count || 0),
-            renderMetric('Dead', summary.dead_letter_count || 0),
-            renderMetric('Warnings', summary.warning_count || 0)
-          ].join('');
-
-          const sessions = Array.isArray(data.snapshot.sessions) ? data.snapshot.sessions.slice(0, 6) : [];
-          itemsEl.innerHTML = sessions.length
-            ? sessions.map(s => `<div class="inspector-session">
-                <div style="min-width:0;">
-                  <div style="font-weight:700; color:#fce7f3;">${escHtml(s.session_key || 'unknown')}</div>
-                  <div style="color:var(--text-muted); margin-top:3px;">lag ${escHtml(s.state_lag_count || 0)} / ckpt ${escHtml(s.checkpoint_task_state || 'none')}</div>
-                </div>
-                <div style="text-align:right;">
-                  <span class="inspector-pill">q ${escHtml(s.queue_depth || 0)}</span>
-                  <span class="inspector-pill">dead ${escHtml(s.dead_letter_count || 0)}</span>
-                </div>
-              </div>`).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No active tasks.</div>';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Tasks', 'error');
-          itemsEl.innerHTML = renderRouteError('/api/background_tasks');
-        });
-    }
-
-    // ── Memory Explorer ────────────────────────────────────────────────
-    function loadMemoryExplorer() {
-      const summaryEl = document.getElementById('memory-explorer-summary');
-      const sessionsEl = document.getElementById('memory-explorer-sessions');
-      if (!summaryEl || !sessionsEl) return;
-
-      fetch(routePath(`/api/memory_explorer?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Memory', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('L1 Items', summary.l1_items || 0),
-            renderMetric('L2 Items', summary.l2_items || 0),
-            renderMetric('L3 Items', summary.l3_items || 0),
-            renderMetric('Consolidation', summary.consolidation_running ? 'running' : 'idle'),
-            renderMetric('Total', summary.total_items || 0)
-          ].join('');
-          sessionsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Memory', 'error');
-        });
-    }
-
-    // ── Memory Recall Replay ───────────────────────────────────────────
-    function loadMemoryRecallReplay() {
-      const summaryEl = document.getElementById('memory-recall-replay-summary');
-      const itemsEl = document.getElementById('memory-recall-replay-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/memory_recall_replay?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Recall', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Recalls', summary.total_recalls || 0),
-            renderMetric('L2 Hits', summary.l2_recalled || 0),
-            renderMetric('Avg Gap', `${(summary.avg_gap_seconds || 0).toFixed(1)}s`)
-          ].join('');
-          itemsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Recall', 'error');
-        });
-    }
-
-    // ── Desire Dashboard ───────────────────────────────────────────────
-    function loadDesireDashboard() {
-      const summaryEl = document.getElementById('desire-dashboard-summary');
-      const itemsEl = document.getElementById('desire-dashboard-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/desire_dashboard?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Desires', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Active', summary.active_count || 0),
-            renderMetric('Satisfied', summary.satisfied_count || 0),
-            renderMetric('Inward', summary.inward_count || 0),
-            renderMetric('Outward', summary.outward_count || 0)
-          ].join('');
-          itemsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Desires', 'error');
-        });
-    }
-
-    // ── Desire Evolution ───────────────────────────────────────────────
-    function loadDesireEvolution() {
-      const summaryEl = document.getElementById('desire-evolution-summary');
-      const itemsEl = document.getElementById('desire-evolution-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/desire_evolution?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Evolution', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Events', summary.total_events || 0),
-            renderMetric('Added', summary.added_count || 0),
-            renderMetric('Removed', summary.removed_count || 0)
-          ].join('');
-          itemsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Evolution', 'error');
-        });
-    }
-
-    // ── Scar Explorer ──────────────────────────────────────────────────
-    function loadScarExplorer() {
-      const summaryEl = document.getElementById('scar-explorer-summary');
-      const sessionsEl = document.getElementById('scar-explorer-sessions');
-      if (!summaryEl || !sessionsEl) return;
-
-      fetch(routePath(`/api/scar_explorer?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Scars', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Total', summary.total_scars || 0),
-            renderMetric('Healed', summary.healed_count || 0),
-            renderMetric('Active', summary.active_count || 0)
-          ].join('');
-          sessionsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Scars', 'error');
-        });
-    }
-
-    // ── Personality Drift ──────────────────────────────────────────────
-    function loadPersonalityDrift() {
-      const summaryEl = document.getElementById('personality-drift-summary');
-      const sessionsEl = document.getElementById('personality-drift-sessions');
-      if (!summaryEl || !sessionsEl) return;
-
-      fetch(routePath(`/api/personality_drift?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Drift', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Sessions', summary.session_count || 0),
-            renderMetric('Mutations', summary.mutation_count || 0),
-            renderMetric('Stability', `${(summary.avg_stability || 0).toFixed(2)}`)
-          ].join('');
-          sessionsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Drift', 'error');
-        });
-    }
-
-    // ── Reasoning Trace ────────────────────────────────────────────────
-    function loadReasoningTrace() {
-      const summaryEl = document.getElementById('reasoning-trace-summary');
-      const stepsEl = document.getElementById('reasoning-trace-steps');
-      if (!summaryEl || !stepsEl) return;
-
-      fetch(routePath(`/api/reasoning_trace?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Trace', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Steps', summary.total_steps || 0),
-            renderMetric('Prompts', summary.prompt_debug_count || 0),
-            renderMetric('Tools', summary.tool_count || 0),
-            renderMetric('Responses', summary.response_count || 0)
-          ].join('');
-
-          const steps = Array.isArray(data.snapshot.steps) ? data.snapshot.steps.slice(-8).reverse() : [];
-          stepsEl.innerHTML = steps.length
-            ? steps.map(s => `<div class="timeline-item">
-                <div class="timeline-time">${escHtml(formatEventTime(s.timestamp))}</div>
-                <span class="timeline-type">${escHtml(s.type || 'step')}</span>
-                <div class="timeline-desc"><div class="timeline-payload">${escHtml(summarizePayload(s.payload || {}))}</div></div>
-              </div>`).join('')
-            : '<div style="font-size:12px; color:var(--text-muted); margin-top:8px;">No reasoning events.</div>';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Trace', 'error');
-          stepsEl.innerHTML = renderRouteError('/api/reasoning_trace');
-        });
-    }
-
-    // ── Session Replay ─────────────────────────────────────────────────
-    function loadSessionReplay() {
-      const summaryEl = document.getElementById('session-replay-summary');
-      const itemsEl = document.getElementById('session-replay-items');
-      if (!summaryEl || !itemsEl) return;
-
-      fetch(routePath(`/api/session_replay?limit=80&token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !data.snapshot) {
-            summaryEl.innerHTML = renderMetric('Replay', 'offline');
-            return;
-          }
-          const summary = data.snapshot.summary || {};
-          summaryEl.innerHTML = [
-            renderMetric('Sessions', summary.sessions || 0),
-            renderMetric('Events', summary.runtime_events || 0),
-            renderMetric('Buffer', summary.buffer_messages || 0)
-          ].join('');
-          itemsEl.innerHTML = '';
-        })
-        .catch(() => {
-          summaryEl.innerHTML = renderMetric('Replay', 'error');
-        });
-    }
-  </script>
-
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 9: JavaScript - Timeline & Mutation Loaders
-       ═══════════════════════════════════════════════════════════════════ -->
-  <script>
-    // ── Cognitive Timeline ─────────────────────────────────────────────
-    function renderRuntimeEvent(item) {
-      const severity = String(item.severity || 'info').toLowerCase();
-      const payload = summarizePayload(item.payload);
-      const tags = Array.isArray(item.tags) ? item.tags.slice(0, 4) : [];
-      return `<div class="timeline-item">
-        <div class="timeline-time">${escHtml(formatEventTime(item.ts))}</div>
-        <span class="timeline-type">${escHtml(item.type || 'event')}</span>
-        <div class="timeline-desc">
-          <div class="timeline-meta">
-            <span class="timeline-chip ${escHtml(severity)}">${escHtml(severity)}</span>
-            ${item.session_key ? `<span class="timeline-chip">session: ${escHtml(item.session_key)}</span>` : ''}
-            ${tags.map(t => `<span class="timeline-chip">#${escHtml(t)}</span>`).join('')}
-          </div>
-          ${payload ? `<div class="timeline-payload">${escHtml(payload)}</div>` : ''}
-        </div>
-      </div>`;
-    }
-
-    function loadCognitiveTimeline() {
-      const container = document.getElementById('cognitive-timeline-container');
-      const statsEl = document.getElementById('cognitive-stats');
-      fetch(routePath(`/api/runtime_events?limit=80&token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.success || !Array.isArray(data.events) || data.events.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无运行时认知事件。</p>';
-            if (statsEl) statsEl.textContent = '事件总数：0';
-            return;
-          }
-          const stats = data.stats || {};
-          const bySeverity = stats.by_severity || {};
-          if (statsEl) {
-            statsEl.textContent = `事件总数：${stats.total || data.events.length} · info ${bySeverity.info || 0} / warning ${bySeverity.warning || 0} / error ${bySeverity.error || 0}`;
-          }
-          container.innerHTML = data.events.map(renderRuntimeEvent).join('');
-        })
-        .catch(() => {
-          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载认知时间线失败。</p>';
-        });
-    }
-
-    // ── Mutation History ───────────────────────────────────────────────
-    function loadMutationHistory() {
-      const container = document.getElementById('timeline-container');
-      fetch(routePath(`/api/mutation_history?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => {
-          if (!data.ok || !data.history || data.history.length === 0) {
-            container.innerHTML = '<p style="color:var(--text-muted); font-size:13px; text-align:center; padding:20px;">尚无核心突变记录。</p>';
-            return;
-          }
-          const history = [...data.history].reverse();
-          container.innerHTML = history.map(item => {
-            const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString('zh-CN') : '未知时间';
-            const desc = item.description_redacted
-              ? `描述已脱敏 · len=${Number(item.description_length || 0)} · fp=${escHtml(item.description_fingerprint || 'none')}`
-              : escHtml(item.description || '无描述');
-            return `<div class="timeline-item">
-              <div class="timeline-time">${escHtml(timeStr)}</div>
-              <span class="timeline-type">${escHtml(item.type || '突变')}</span>
-              <div class="timeline-desc">${desc}</div>
-            </div>`;
-          }).join('');
-        })
-        .catch(() => {
-          container.innerHTML = '<p style="color:#ef4444; font-size:13px; text-align:center; padding:20px;">加载突变历史失败。</p>';
-        });
-    }
-
-    function triggerRollback() {
-      if (!confirm("确定要回滚至上一人设版本？")) return;
-      fetch(routePath(`/api/mutation_rollback?token=${encodeURIComponent(token)}`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }
-      })
-      .then(r => r.json())
-      .then(data => {
-        if (data.ok) { alert("回滚成功！"); loadMutationHistory(); }
-        else { alert(`回滚失败: ${data.error || '未知错误'}`); }
-      })
-      .catch(() => alert("请求回滚失败。"));
-    }
-
-    // ── Refresh All ────────────────────────────────────────────────────
+    // ── Refresh All ───────────────────────────────────────────────────
+    function loadObservatory() { loadHealth(); loadSubPanel(currentSub); loadTimeline(); }
     function refreshAll() {
-      document.querySelectorAll('iframe').forEach(iframe => {
-        const src = iframe.src;
-        iframe.src = 'about:blank';
-        setTimeout(() => { iframe.src = src; }, 50);
-      });
+      loadIframes();
+      loadObservatory();
       loadMutationHistory();
-      loadCognitiveTimeline();
-      loadStateInspector();
-      loadStateStoreAudit();
-      loadBackgroundTasks();
-      loadMemoryExplorer();
-      loadMemoryRecallReplay();
-      loadDesireDashboard();
-      loadDesireEvolution();
-      loadScarExplorer();
-      loadPersonalityDrift();
-      loadReasoningTrace();
-      loadSessionReplay();
     }
-  </script>
 
-  <!-- ═══════════════════════════════════════════════════════════════════
-       SECTION 10: Initialization
-       ═══════════════════════════════════════════════════════════════════ -->
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      // Load iframes
-      document.getElementById('sylanne-iframe').src = urls.sylanne;
-      document.getElementById('dashboard-iframe').src = urls.dashboard;
-      document.getElementById('captree-iframe').src = urls.captree;
+    // ── Auto-refresh Timeline ─────────────────────────────────────────
+    let autoRefreshTimer = null;
+    let autoRefreshEnabled = true;
+    let eventSource = null;
+    let lastEventId = 0;
 
-      // Fetch CSRF token and load all panels
-      fetch(routePath(`/api/state?token=${encodeURIComponent(token)}`))
-        .then(r => r.json())
-        .then(data => { csrfToken = data.csrf_token || ''; })
-        .catch(() => {})
-        .finally(() => {
-          loadMutationHistory();
-          loadCognitiveTimeline();
-          loadStateInspector();
-          loadStateStoreAudit();
-          loadBackgroundTasks();
-          loadMemoryExplorer();
-          loadMemoryRecallReplay();
-          loadDesireDashboard();
-          loadDesireEvolution();
-          loadScarExplorer();
-          loadPersonalityDrift();
-          loadReasoningTrace();
-          loadSessionReplay();
-        });
+    function startSSE() {
+      if (eventSource) eventSource.close();
+      eventSource = new EventSource(rp('/api/events/stream?last_id=' + lastEventId + '&token=' + encodeURIComponent(token)));
+      eventSource.onmessage = function(e) {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.type === 'event' && data.event) {
+            lastEventId = Math.max(lastEventId, data.event.id || 0);
+            appendTimelineEvent(data.event);
+          } else if (data.type === 'connected') {
+            lastEventId = data.last_id || 0;
+          } else if (data.type === 'heartbeat') {
+            lastEventId = data.last_id || lastEventId;
+          }
+        } catch(err) {}
+      };
+      eventSource.onerror = function() {
+        setTimeout(startSSE, 3000);
+      };
+    }
+
+    function appendTimelineEvent(ev) {
+      const el = document.getElementById('timeline-events');
+      if (!el) return;
+      const emptyEl = el.querySelector('.empty');
+      if (emptyEl) el.innerHTML = '';
+      const sev = String(ev.severity || 'info').toLowerCase();
+      const sevLabel = {info:'信息',warning:'警告',error:'错误'}[sev] || sev;
+      const html = `<div class="ev" style="background:rgba(99,102,241,0.05);border-left:2px solid var(--accent);"><span class="ev-time">${fmtTime(ev.ts)}</span><span class="ev-type">${esc(ev.type||'event')}</span><span class="ev-detail">${esc(summarizePayload(ev.payload||{})).slice(0,120)}<span class="ev-tag ${sev}">${sevLabel}</span>${ev.session_key?`<span class="ev-tag info">${esc(ev.session_key)}</span>`:''}</span></div>`;
+      el.insertAdjacentHTML('afterbegin', html);
+      while (el.children.length > 50) el.removeChild(el.lastChild);
+    }
+
+    function startAutoRefresh() {
+      startSSE();
+    }
+    function stopAutoRefresh() {
+      if (eventSource) { eventSource.close(); eventSource = null; }
+    }
+    function toggleAutoRefresh() {
+      autoRefreshEnabled = !autoRefreshEnabled;
+      const btn = document.getElementById('auto-refresh-btn');
+      if (autoRefreshEnabled) { startSSE(); if (btn) btn.textContent = '实时推送: 开'; }
+      else { stopAutoRefresh(); if (btn) btn.textContent = '实时推送: 关'; }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      loadIframes();
+      fetch(rp('/api/state?token='+encodeURIComponent(token))).then(r=>r.json()).then(d=>{csrfToken=d.csrfToken||'';}).catch(()=>{}).finally(()=>{
+        loadObservatory();
+        loadMutationHistory();
+        startAutoRefresh();
+      });
     });
   </script>
 </body>
